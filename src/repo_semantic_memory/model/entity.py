@@ -39,6 +39,7 @@ ENTITY_KINDS: tuple[EntityKind, ...] = (
 )
 
 
+# Guard recursion to avoid pathological deeply nested metadata causing stack overflow.
 _MAX_JSON_NESTING_DEPTH = 50
 
 
@@ -56,7 +57,7 @@ def _is_json_value(value: object, depth: int = 0) -> bool:
     return False
 
 
-def validate_json_metadata(metadata: dict[str, object], owner: str) -> None:
+def validate_json_metadata(metadata: dict[str, JsonValue], owner: str) -> None:
     """Validate metadata shape for deterministic JSON-safe serialization."""
     if not _is_json_value(metadata):
         raise ValueError(f"{owner} metadata must be JSON-serializable")
@@ -78,7 +79,7 @@ class Entity:
             raise ValueError("Entity name must not be empty")
         if not self.qualified_name:
             raise ValueError("Entity qualified_name must not be empty")
-        validate_json_metadata(cast(dict[str, object], self.metadata), owner="Entity")
+        validate_json_metadata(self.metadata, owner="Entity")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to a JSON-friendly dictionary."""

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 from repo_semantic_memory.model.entity import JsonValue, validate_json_metadata
 from repo_semantic_memory.model.evidence import Evidence
@@ -46,7 +46,7 @@ class Relation:
     metadata: dict[str, JsonValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        validate_json_metadata(cast(dict[str, object], self.metadata), owner="Relation")
+        validate_json_metadata(self.metadata, owner="Relation")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to a JSON-friendly dictionary."""
@@ -86,5 +86,5 @@ class Relation:
             target_entity_id=StableId.from_dict(target_entity_id),
             kind=kind,
             evidence=evidence,
-            metadata=dict(sorted(cast(dict[str, JsonValue], metadata_payload).items())),
+            metadata=dict(sorted(metadata_payload.items())),
         )
