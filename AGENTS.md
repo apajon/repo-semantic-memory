@@ -24,3 +24,9 @@ This repository hosts the `rsm` semantic compiler foundation.
 - `feat:` triggers a minor release.
 - `feat!:` or a `BREAKING CHANGE:` footer triggers a major release.
 - `docs:`, `test:`, `chore:`, and `ci:` should not normally trigger a release.
+
+## Pre-1.0 versioning policy
+
+- The project is in initial development and must remain in the `0.x` range.
+- Do not release `1.0.0` until the public API, schema versioning contract, and context-pack format are explicitly declared stable.
+- Keep `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` manually managed; release automation must not bump them automatically.
