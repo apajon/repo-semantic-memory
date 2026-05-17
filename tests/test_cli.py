@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from repo_semantic_memory.cli import main
@@ -24,3 +27,15 @@ def test_version_command_prints_all_versions(capsys: pytest.CaptureFixture[str])
     assert "package_version:" in out
     assert "schema_version:" in out
     assert "context_pack_version:" in out
+
+
+def test_scan_command_json_output(capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    exit_code = main(["scan", str(fixture_root), "--json"])
+    assert exit_code == 0
+
+    out = capsys.readouterr().out
+    payload = json.loads(out)
+    assert isinstance(payload, list)
+    assert payload
+    assert payload[0]["path"] == "config/data.json"
