@@ -58,6 +58,12 @@ class Relation:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> Relation:
         """Deserialize from a dictionary payload."""
+        source_entity_id = payload.get("source_entity_id")
+        if not isinstance(source_entity_id, str):
+            raise ValueError("Relation source_entity_id must be a string")
+        target_entity_id = payload.get("target_entity_id")
+        if not isinstance(target_entity_id, str):
+            raise ValueError("Relation target_entity_id must be a string")
         metadata_payload = payload.get("metadata", {})
         if not isinstance(metadata_payload, dict):
             raise ValueError("Relation metadata must be a dictionary")
@@ -73,8 +79,8 @@ class Relation:
             evidence = Evidence.from_dict(evidence_payload)
 
         return cls(
-            source_entity_id=StableId.from_dict(str(payload["source_entity_id"])),
-            target_entity_id=StableId.from_dict(str(payload["target_entity_id"])),
+            source_entity_id=StableId.from_dict(source_entity_id),
+            target_entity_id=StableId.from_dict(target_entity_id),
             kind=kind,
             evidence=evidence,
             metadata=dict(sorted(cast(dict[str, JsonValue], metadata_payload).items())),

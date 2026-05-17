@@ -70,6 +70,9 @@ class Entity:
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> Entity:
         """Deserialize from a dictionary payload."""
+        id_value = payload.get("id")
+        if not isinstance(id_value, str):
+            raise ValueError("Entity id must be a string")
         source_payload = payload.get("source_range")
         if not isinstance(source_payload, dict):
             raise ValueError("Entity source_range must be a dictionary")
@@ -80,7 +83,7 @@ class Entity:
         if kind not in ENTITY_KINDS:
             raise ValueError(f"Unsupported entity kind: {kind}")
         return cls(
-            id=StableId.from_dict(str(payload["id"])),
+            id=StableId.from_dict(id_value),
             kind=kind,
             name=str(payload["name"]),
             qualified_name=str(payload["qualified_name"]),
