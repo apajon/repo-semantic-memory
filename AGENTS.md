@@ -17,3 +17,10 @@ This repository hosts the `rsm` semantic compiler foundation.
 - Do not add repository scanning, AST extraction, SQLite, vector DB, Neo4j, MCP server, or web UI in this phase.
 - Keep APIs explicit and scriptable.
 - Keep CLI output stable for automation.
+
+## Commit conventions for releases
+
+- `fix:` triggers a patch release.
+- `feat:` triggers a minor release.
+- `feat!:` or a `BREAKING CHANGE:` footer triggers a major release.
+- `docs:`, `test:`, `chore:`, and `ci:` should not normally trigger a release.

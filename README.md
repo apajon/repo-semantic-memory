@@ -22,3 +22,7 @@ uv run ruff check .
 uv run mypy src
 uv run pytest
 ```
+
+## Release automation
+
+Releases are automated with `python-semantic-release` on pushes to `main`. The release job runs the same quality checks as CI and then executes `uv run semantic-release version` with tag format `v{version}`. Only `project.version` and `PACKAGE_VERSION` are updated automatically; schema and context-pack versions are managed independently.

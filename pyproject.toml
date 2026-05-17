@@ -18,6 +18,7 @@ rsm = "repo_semantic_memory.cli:main"
 [dependency-groups]
 dev = [
   "mypy>=1.11.0",
+  "python-semantic-release>=9.15.0",
   "pytest>=8.2.0",
   "ruff>=0.6.0",
 ]
@@ -46,3 +47,10 @@ strict_equality = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/repo_semantic_memory"]
+
+[tool.semantic_release]
+branch = "main"
+tag_format = "v{version}"
+version_toml = ["pyproject.toml:project.version"]
+version_variables = ["src/repo_semantic_memory/version.py:PACKAGE_VERSION"]
+upload_to_pypi = false
