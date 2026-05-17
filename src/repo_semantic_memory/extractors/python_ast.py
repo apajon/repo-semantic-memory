@@ -254,10 +254,15 @@ def _external_symbol_id(relation_kind: str, name: str) -> StableId:
 
 
 def _unresolved_python_symbol_id(name: str) -> StableId:
-    return StableId.from_parts(["unresolved", "python", name])
+    return StableId.from_parts(["unresolved", "python", name.lower()])
 
 
 def _module_qualified_name(relative_path: str) -> str:
+    """Derive logical module names from repository-relative paths.
+
+    For common ``src/`` layouts, the leading ``src/`` prefix is stripped when present.
+    Other layouts keep their repository-relative module path.
+    """
     logical_path = relative_path.removeprefix("src/")
     module_path = logical_path.removesuffix(".py")
     parts = [part for part in module_path.split("/") if part]

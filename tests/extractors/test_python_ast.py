@@ -128,3 +128,24 @@ def test_index_python_path_directory_ignores_ignored_directories(tmp_path: Path)
     paths = {entity.source_range.path for entity in entities}
     assert "keep.py" in paths
     assert all(not path.startswith(".venv/") for path in paths)
+
+
+def test_extract_python_file_module_qualified_name_variants(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    src_pkg_init = repo_root / "src" / "pkg" / "__init__.py"
+    src_nested = repo_root / "src" / "pkg" / "sub" / "mod.py"
+    lib_module = repo_root / "lib" / "tool.py"
+    src_pkg_init.parent.mkdir(parents=True)
+    src_nested.parent.mkdir(parents=True)
+    lib_module.parent.mkdir(parents=True)
+    src_pkg_init.write_text("", encoding="utf-8")
+    src_nested.write_text("def x() -> None:\n    pass\n", encoding="utf-8")
+    lib_module.write_text("def y() -> None:\n    pass\n", encoding="utf-8")
+
+    init_entities, _ = extract_python_file(repo_root, src_pkg_init)
+    nested_entities, _ = extract_python_file(repo_root, src_nested)
+    lib_entities, _ = extract_python_file(repo_root, lib_module)
+
+    assert init_entities[0].qualified_name == "pkg"
+    assert nested_entities[0].qualified_name == "pkg.sub.mod"
+    assert lib_entities[0].qualified_name == "lib.tool"
