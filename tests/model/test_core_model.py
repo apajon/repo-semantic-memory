@@ -92,6 +92,19 @@ def test_entity_metadata_is_json_serializable() -> None:
         )
 
 
+def test_entity_accepts_json_serializable_metadata() -> None:
+    source = SourceRange(path="src/pkg/module.py", start_line=10, end_line=20)
+    entity = Entity(
+        id=StableId.from_parts(["module", "pkg.module", "ClassName"]),
+        kind="class",
+        name="ClassName",
+        qualified_name="pkg.module.ClassName",
+        source_range=source,
+        metadata={"tags": ["core", "typed"], "score": 1.0, "nested": {"ok": True}},
+    )
+    assert entity.metadata["nested"] == {"ok": True}
+
+
 def test_entity_to_dict_metadata_has_deterministic_ordering() -> None:
     source = SourceRange(path="src/pkg/module.py", start_line=10, end_line=20)
     entity = Entity(
@@ -130,3 +143,13 @@ def test_relation_metadata_is_json_serializable() -> None:
             kind="calls",
             metadata={"bad": object()},
         )
+
+
+def test_relation_accepts_json_serializable_metadata() -> None:
+    relation = Relation(
+        source_entity_id=StableId.from_parts(["function", "pkg.module.a"]),
+        target_entity_id=StableId.from_parts(["function", "pkg.module.b"]),
+        kind="calls",
+        metadata={"weight": 2, "details": {"dynamic": False}, "paths": ["a", "b"]},
+    )
+    assert relation.metadata["weight"] == 2
