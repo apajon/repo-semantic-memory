@@ -1,4 +1,8 @@
-"""Version constants for package and semantic artifacts."""
+"""Version constants for package and semantic artifacts.
+
+Only ``PACKAGE_VERSION`` is managed by semantic-release automation.
+``SCHEMA_VERSION`` and ``CONTEXT_PACK_VERSION`` remain independently managed.
+"""
 
 from __future__ import annotations
 
