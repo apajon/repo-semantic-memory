@@ -39,6 +39,27 @@ ENTITY_KINDS: tuple[EntityKind, ...] = (
 )
 
 
+def _is_json_value(value: object) -> bool:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return True
+    if isinstance(value, list):
+        return all(_is_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            isinstance(key, str) and _is_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def validate_json_metadata(metadata: dict[str, object], owner: str) -> None:
+    """Validate metadata shape for deterministic JSON-safe serialization."""
+    if not all(isinstance(key, str) for key in metadata):
+        raise ValueError(f"{owner} metadata keys must be strings")
+    if not _is_json_value(metadata):
+        raise ValueError(f"{owner} metadata must be JSON-serializable")
+
+
 @dataclass(frozen=True)
 class Entity:
     """Typed semantic entity extracted from repository artifacts."""
@@ -55,6 +76,7 @@ class Entity:
             raise ValueError("Entity name must not be empty")
         if not self.qualified_name:
             raise ValueError("Entity qualified_name must not be empty")
+        validate_json_metadata(cast(dict[str, object], self.metadata), owner="Entity")
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to a JSON-friendly dictionary."""
