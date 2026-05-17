@@ -149,3 +149,5 @@ def test_extract_python_file_module_qualified_name_variants(tmp_path: Path) -> N
     assert init_entities[0].qualified_name == "pkg"
     assert nested_entities[0].qualified_name == "pkg.sub.mod"
     assert lib_entities[0].qualified_name == "lib.tool"
+    assert any(entity.qualified_name == "pkg.sub.mod.x" for entity in nested_entities)
+    assert any(entity.qualified_name == "lib.tool.y" for entity in lib_entities)

@@ -269,6 +269,7 @@ def _module_qualified_name(relative_path: str) -> str:
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     if not parts:
+        # Root-level __init__.py has no package path segment; keep a stable fallback token.
         return "__init__"
     return ".".join(parts)
 
