@@ -25,4 +25,8 @@ uv run pytest
 
 ## Release automation
 
-Releases are automated with `python-semantic-release` on pushes to `main`. The release job runs the same quality checks as CI and then executes `uv run semantic-release version` with tag format `v{version}`. Only `project.version` and `PACKAGE_VERSION` are updated automatically; schema and context-pack versions are managed independently.
+Releases are automated with `python-semantic-release` on pushes to `main`. The release job runs the same quality checks as CI and then executes `uv run semantic-release version` with tag format `v{version}`.
+
+The project is currently pre-1.0 and must remain in the `0.x` range. Do not release `1.0.0` until the public API, schema contract, and context-pack format are declared stable.
+
+Only `project.version` and `PACKAGE_VERSION` are updated automatically; schema and context-pack versions are managed independently and must remain manually controlled.
