@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "repo-semantic-memory"
-version = "0.1.0"
+version = "1.0.0"
 description = "Semantic compiler foundation for repository memory artifacts."
 readme = "README.md"
 requires-python = ">=3.12"
