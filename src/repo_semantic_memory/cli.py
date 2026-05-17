@@ -60,11 +60,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "scan":
         entities = extract_filesystem_entities(args.path)
         if args.json:
+            # Keep legacy list output for scan to preserve existing automation contracts.
             scan_payload = [
                 {"id": entity.id.value, "kind": entity.kind, "path": entity.source_range.path}
                 for entity in entities
             ]
-            print(json.dumps(scan_payload))
+            print(json.dumps(scan_payload, separators=(",", ":")))
             return 0
         print(_format_scan_table(entities))
         return 0
@@ -77,7 +78,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             print(json.dumps(index_payload, separators=(",", ":")))
             return 0
-        print(_format_index_python_table(entities, relations))
+        print(_format_index_python_summary(entities, relations))
         return 0
 
     parser.print_help()
@@ -96,7 +97,7 @@ def _format_scan_table(entities: Sequence[Entity]) -> str:
     )
 
 
-def _format_index_python_table(entities: Sequence[Entity], relations: Sequence[Relation]) -> str:
+def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence[Relation]) -> str:
     return f"entities={len(entities)} relations={len(relations)}"
 
 

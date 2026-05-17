@@ -229,6 +229,7 @@ def _decorators_for(node: ast.AST) -> list[str]:
 
 
 def _static_name(node: ast.expr) -> str | None:
+    """Return a static name for simple expressions (name/attribute/call), else None."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -255,8 +256,10 @@ def _external_symbol_id(relation_kind: str, name: str) -> StableId:
 def _source_range(relative_path: str, node: ast.AST) -> SourceRange:
     start_line = getattr(node, "lineno", 1)
     end_line = getattr(node, "end_lineno", start_line)
-    start_col = _maybe_column(getattr(node, "col_offset", None), add_one=True)
-    end_col = _maybe_column(getattr(node, "end_col_offset", None), add_one=False)
+    # ast column offsets are 0-based; convert start to 1-based for SourceRange.
+    # end_col_offset is an exclusive boundary; we preserve its value except clamping to >= 1.
+    start_col = _normalize_column(getattr(node, "col_offset", None), add_one=True)
+    end_col = _normalize_column(getattr(node, "end_col_offset", None), add_one=False)
     return SourceRange(
         path=relative_path,
         start_line=start_line,
@@ -266,7 +269,7 @@ def _source_range(relative_path: str, node: ast.AST) -> SourceRange:
     )
 
 
-def _maybe_column(value: int | None, *, add_one: bool) -> int | None:
+def _normalize_column(value: int | None, *, add_one: bool) -> int | None:
     if value is None:
         return None
     column = value + 1 if add_one else value
