@@ -7,6 +7,13 @@ import pytest
 from repo_semantic_memory.model import Entity, Evidence, Relation, SourceRange, StableId
 
 
+def _nested_metadata(depth: int) -> dict[str, object]:
+    value: dict[str, object] = {"leaf": "value"}
+    for _ in range(depth):
+        value = {"nest": value}
+    return value
+
+
 def test_stable_id_normalization_is_deterministic() -> None:
     stable_id = StableId.from_parts([" Module  Name ", "Class@Name", "Method Name  "])
     assert stable_id.value == "module-name:class-name:method-name"
@@ -153,3 +160,26 @@ def test_relation_accepts_json_serializable_metadata() -> None:
         metadata={"weight": 2, "details": {"dynamic": False}, "paths": ["a", "b"]},
     )
     assert relation.metadata["weight"] == 2
+
+
+def test_entity_metadata_rejects_excessive_nesting_depth() -> None:
+    source = SourceRange(path="src/pkg/module.py", start_line=10, end_line=20)
+    with pytest.raises(ValueError, match="JSON-serializable"):
+        Entity(
+            id=StableId.from_parts(["module", "pkg.module", "ClassName"]),
+            kind="class",
+            name="ClassName",
+            qualified_name="pkg.module.ClassName",
+            source_range=source,
+            metadata=_nested_metadata(51),
+        )
+
+
+def test_relation_metadata_rejects_excessive_nesting_depth() -> None:
+    with pytest.raises(ValueError, match="JSON-serializable"):
+        Relation(
+            source_entity_id=StableId.from_parts(["function", "pkg.module.a"]),
+            target_entity_id=StableId.from_parts(["function", "pkg.module.b"]),
+            kind="calls",
+            metadata=_nested_metadata(51),
+        )
