@@ -24,7 +24,7 @@ IGNORED_DIRECTORIES: frozenset[str] = frozenset(
 
 DOC_EXTENSIONS: frozenset[str] = frozenset({".md", ".rst", ".txt", ".yaml", ".yml", ".json"})
 MODULE_EXTENSIONS: frozenset[str] = frozenset({".py"})
-_BINARY_SAMPLE_BYTES = 8192
+BINARY_SAMPLE_BYTES = 8192
 
 
 def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
@@ -85,7 +85,7 @@ def _line_count(path: Path) -> int:
 def _is_binary_looking(path: Path) -> bool:
     try:
         with path.open("rb") as file:
-            chunk = file.read(_BINARY_SAMPLE_BYTES)
+            chunk = file.read(BINARY_SAMPLE_BYTES)
     except OSError:
         return True
     if b"\x00" in chunk:
