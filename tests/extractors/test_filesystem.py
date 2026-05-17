@@ -46,7 +46,7 @@ def test_filesystem_extractor_ignores_common_directories(tmp_path: Path) -> None
         ".idea/",
         ".vscode/",
     )
-    assert all(token not in path for path in paths for token in ignored_directory_tokens)
+    assert not any(token in path for path in paths for token in ignored_directory_tokens)
     assert paths == ["keep.py"]
 
 

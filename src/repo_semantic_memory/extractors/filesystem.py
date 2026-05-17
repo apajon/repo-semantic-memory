@@ -72,16 +72,22 @@ def _classify_kind(path: Path) -> EntityKind | None:
 
 
 def _line_count(path: Path) -> int:
-    with path.open("rb") as file:
-        data = file.read()
+    try:
+        with path.open("rb") as file:
+            data = file.read()
+    except OSError:
+        return 1
     if not data:
         return 1
     return max(1, data.count(b"\n") + (0 if data.endswith(b"\n") else 1))
 
 
 def _is_binary_looking(path: Path) -> bool:
-    with path.open("rb") as file:
-        chunk = file.read(_BINARY_SAMPLE_BYTES)
+    try:
+        with path.open("rb") as file:
+            chunk = file.read(_BINARY_SAMPLE_BYTES)
+    except OSError:
+        return True
     if b"\x00" in chunk:
         return True
     try:
