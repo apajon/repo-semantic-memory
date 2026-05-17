@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from repo_semantic_memory.model import Entity, SourceRange, StableId
+from repo_semantic_memory.model import Entity, EntityKind, SourceRange, StableId
 
 IGNORED_DIRECTORIES: frozenset[str] = frozenset(
     {
@@ -33,7 +33,7 @@ def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
     if not root.is_dir():
         raise ValueError(f"Repository root does not exist or is not a directory: {root}")
 
-    discovered: list[tuple[str, Path, str]] = []
+    discovered: list[tuple[str, Path, EntityKind]] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
         dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRECTORIES)
         for filename in sorted(filenames):
@@ -47,12 +47,12 @@ def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
             discovered.append((relative_path, path, kind))
 
     discovered.sort(key=lambda item: item[0])
-    return [_build_entity(relative_path, path, kind=kind) for relative_path, path, kind in discovered]
+    return [
+        _build_entity(relative_path, path, kind=kind) for relative_path, path, kind in discovered
+    ]
 
 
-def _build_entity(relative_path: str, path: Path, *, kind: str | None) -> Entity:
-    if kind is None:
-        raise ValueError(f"Unsupported file kind for path: {path}")
+def _build_entity(relative_path: str, path: Path, *, kind: EntityKind) -> Entity:
     return Entity(
         id=StableId.from_parts(["file", relative_path]),
         kind=kind,
@@ -62,7 +62,7 @@ def _build_entity(relative_path: str, path: Path, *, kind: str | None) -> Entity
     )
 
 
-def _classify_kind(path: Path) -> str | None:
+def _classify_kind(path: Path) -> EntityKind | None:
     suffix = path.suffix.lower()
     if suffix in MODULE_EXTENSIONS:
         return "module"

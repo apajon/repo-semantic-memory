@@ -12,8 +12,27 @@ def _fixture_root() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
 
 
-def test_filesystem_extractor_ignores_common_directories() -> None:
-    entities = extract_filesystem_entities(_fixture_root())
+def test_filesystem_extractor_ignores_common_directories(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "keep.py").write_text("print('keep')", encoding="utf-8")
+    for ignored_directory in (
+        ".git",
+        ".venv",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "dist",
+        "build",
+        ".idea",
+        ".vscode",
+    ):
+        directory = repo_root / ignored_directory
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "ignored.py").write_text("print('ignored')", encoding="utf-8")
+
+    entities = extract_filesystem_entities(repo_root)
     paths = [entity.source_range.path for entity in entities]
     ignored_directory_tokens = (
         ".git/",
@@ -28,6 +47,7 @@ def test_filesystem_extractor_ignores_common_directories() -> None:
         ".vscode/",
     )
     assert all(token not in path for path in paths for token in ignored_directory_tokens)
+    assert paths == ["keep.py"]
 
 
 def test_filesystem_extractor_output_is_deterministic_and_sorted() -> None:
