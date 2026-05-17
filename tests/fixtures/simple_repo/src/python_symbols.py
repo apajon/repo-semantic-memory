@@ -1,9 +1,14 @@
 import os
+
 from pkg.base import BaseThing
 
 
 def decorated(func):
     return func
+
+
+def current_os_name() -> str:
+    return os.name
 
 
 class NoDocClass:

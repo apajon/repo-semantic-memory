@@ -56,10 +56,10 @@ def test_extract_python_file_source_ranges() -> None:
     by_qname = _entities_by_qualified_name(entities)
 
     assert by_qname["src/python_symbols.py"].source_range.start_line == 1
-    assert by_qname["src/python_symbols.py.DerivedThing"].source_range.start_line == 12
-    assert by_qname["src/python_symbols.py.DerivedThing"].source_range.end_line == 21
-    assert by_qname["src/python_symbols.py.top_level_function"].source_range.start_line == 24
-    assert by_qname["src/python_symbols.py.top_level_async"].source_range.start_line == 29
+    assert by_qname["src/python_symbols.py.DerivedThing"].source_range.start_line == 18
+    assert by_qname["src/python_symbols.py.DerivedThing"].source_range.end_line == 27
+    assert by_qname["src/python_symbols.py.top_level_function"].source_range.start_line == 31
+    assert by_qname["src/python_symbols.py.top_level_async"].source_range.start_line == 35
 
 
 def test_extract_python_file_relations_contains_imports_and_inherits() -> None:
@@ -74,7 +74,9 @@ def test_extract_python_file_relations_contains_imports_and_inherits() -> None:
     method_id = by_qname["src/python_symbols.py.DerivedThing.decorated_method"].id
     function_id = by_qname["src/python_symbols.py.top_level_function"].id
 
-    contains_pairs = {(relation.source_entity_id.value, relation.target_entity_id.value) for relation in contains}
+    contains_pairs = {
+        (relation.source_entity_id.value, relation.target_entity_id.value) for relation in contains
+    }
     assert (module_id.value, class_id.value) in contains_pairs
     assert (module_id.value, function_id.value) in contains_pairs
     assert (class_id.value, method_id.value) in contains_pairs
@@ -90,7 +92,9 @@ def test_extract_python_file_is_deterministic() -> None:
     first_entities, first_relations = extract_python_file(_fixture_root(), _fixture_python_file())
     second_entities, second_relations = extract_python_file(_fixture_root(), _fixture_python_file())
 
-    assert [entity.to_dict() for entity in first_entities] == [entity.to_dict() for entity in second_entities]
+    assert [entity.to_dict() for entity in first_entities] == [
+        entity.to_dict() for entity in second_entities
+    ]
     assert [relation.to_dict() for relation in first_relations] == [
         relation.to_dict() for relation in second_relations
     ]
@@ -101,7 +105,9 @@ def test_extract_python_file_stable_ids_include_relative_path_and_qualified_name
     by_qname = _entities_by_qualified_name(entities)
 
     for qname, entity in by_qname.items():
-        expected = StableId.from_parts(["python", "src/python_symbols.py", entity.kind, qname]).value
+        expected = StableId.from_parts(
+            ["python", "src/python_symbols.py", entity.kind, qname]
+        ).value
         assert entity.id.value == expected
 
 

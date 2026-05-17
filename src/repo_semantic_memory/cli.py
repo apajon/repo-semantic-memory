@@ -60,22 +60,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "scan":
         entities = extract_filesystem_entities(args.path)
         if args.json:
-            payload = [
+            scan_payload = [
                 {"id": entity.id.value, "kind": entity.kind, "path": entity.source_range.path}
                 for entity in entities
             ]
-            print(json.dumps(payload))
+            print(json.dumps(scan_payload))
             return 0
         print(_format_scan_table(entities))
         return 0
     if args.command == "index-python":
         entities, relations = index_python_path(args.path)
         if args.json:
-            payload = {
+            index_payload = {
                 "entities": [entity.to_dict() for entity in entities],
                 "relations": [relation.to_dict() for relation in relations],
             }
-            print(json.dumps(payload, separators=(",", ":")))
+            print(json.dumps(index_payload, separators=(",", ":")))
             return 0
         print(_format_index_python_table(entities, relations))
         return 0

@@ -5,9 +5,12 @@ from __future__ import annotations
 import ast
 import os
 from pathlib import Path
+from typing import Literal, cast
 
 from repo_semantic_memory.extractors.filesystem import IGNORED_DIRECTORIES
-from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
+from repo_semantic_memory.model import Entity, JsonValue, Relation, SourceRange, StableId
+
+DefinitionNode = ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
 
 
 def extract_python_file(
@@ -128,8 +131,8 @@ def index_python_path(path: Path | str) -> tuple[list[Entity], list[Relation]]:
         if target.suffix.lower() != ".py":
             return [], []
         root = _infer_repo_root_for_file(target)
-        entities, relations = extract_python_file(root, target)
-        return entities, relations
+        file_entities, file_relations = extract_python_file(root, target)
+        return file_entities, file_relations
 
     root = target
     entities: list[Entity] = []
@@ -152,11 +155,11 @@ def _iter_python_files(root: Path) -> list[Path]:
     return discovered
 
 
-def _metadata_for_definition(node: ast.AST) -> dict[str, bool | list[str] | str]:
-    metadata: dict[str, bool | list[str] | str] = {"has_docstring": ast.get_docstring(node) is not None}
+def _metadata_for_definition(node: DefinitionNode) -> dict[str, JsonValue]:
+    metadata: dict[str, JsonValue] = {"has_docstring": ast.get_docstring(node) is not None}
     decorators = _decorators_for(node)
     if decorators:
-        metadata["decorators"] = decorators
+        metadata["decorators"] = cast(JsonValue, decorators)
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
         metadata["signature"] = ast.unparse(node.args)
         metadata["is_async"] = isinstance(node, ast.AsyncFunctionDef)
@@ -168,7 +171,7 @@ def _build_function_entity(
     relative_path: str,
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     module_qualified_name: str,
-    kind: str,
+    kind: Literal["function", "method"],
 ) -> Entity:
     qualified_name = f"{module_qualified_name}.{node.name}"
     return Entity(
