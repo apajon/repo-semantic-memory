@@ -69,7 +69,7 @@ def _format_scan_table(entities: Sequence[Entity]) -> str:
     for entity in entities:
         rows.append((str(entity.kind), str(entity.id.value), str(entity.source_range.path)))
 
-    widths = [max(len(row[index]) for row in rows) for index in range(3)]
+    widths = [max(len(row[index]) for row in rows) for index in range(len(rows[0]))]
     return "\n".join(
         "  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in rows
     )

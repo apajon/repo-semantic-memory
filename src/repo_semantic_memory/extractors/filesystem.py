@@ -76,7 +76,7 @@ def _line_count(path: Path) -> int:
         data = file.read()
     if not data:
         return 1
-    return data.count(b"\n") + 1
+    return max(1, data.count(b"\n") + (0 if data.endswith(b"\n") else 1))
 
 
 def _is_binary_looking(path: Path) -> bool:
