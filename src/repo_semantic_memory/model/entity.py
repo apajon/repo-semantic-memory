@@ -40,6 +40,7 @@ ENTITY_KINDS: tuple[EntityKind, ...] = (
 
 
 # Guard recursion to avoid pathological deeply nested metadata causing stack overflow.
+# 50 is intentionally far above expected repository metadata depth (usually <10).
 _MAX_JSON_NESTING_DEPTH = 50
 
 
