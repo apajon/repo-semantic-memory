@@ -10,8 +10,8 @@ from repo_semantic_memory.version import (
 
 def test_version_constants_are_deterministic() -> None:
     assert PACKAGE_VERSION == "0.1.0"
-    assert SCHEMA_VERSION == "1.0.0"
-    assert CONTEXT_PACK_VERSION == "1.0.0"
+    assert SCHEMA_VERSION == "0.1.0"
+    assert CONTEXT_PACK_VERSION == "0.1.0"
 
 
 def test_get_version_info_returns_expected_values() -> None:
