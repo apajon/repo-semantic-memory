@@ -6,6 +6,13 @@ It is designed to produce deterministic, evidence-backed semantic artifacts over
 
 This initial scaffold provides a typed Python CLI, explicit artifact versioning, CI checks, and development tooling with `uv`.
 
+## Extraction MVP behavior
+
+- `rsm scan <path>` performs deterministic filesystem discovery.
+- Python files are emitted as `module` entities.
+- Stable IDs are based on repository-relative POSIX file paths (for example `file:src/pkg/app.py`).
+- This MVP intentionally models files as modules; a future schema can split physical files from logical modules.
+
 ## Quick start
 
 ```bash

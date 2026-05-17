@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from repo_semantic_memory.extractors.filesystem import extract_filesystem_entities
@@ -94,3 +95,46 @@ def test_filesystem_extractor_ignores_binary_looking_files(tmp_path: Path) -> No
     paths = [entity.source_range.path for entity in entities]
 
     assert paths == ["notes.md"]
+
+
+def test_filesystem_extractor_is_stable_for_relative_or_absolute_root() -> None:
+    relative_root = Path(os.path.relpath(_fixture_root(), start=Path.cwd()))
+
+    relative_entities = extract_filesystem_entities(relative_root)
+    absolute_entities = extract_filesystem_entities(_fixture_root())
+
+    relative_payload = [(entity.id.value, entity.source_range.path) for entity in relative_entities]
+    absolute_payload = [(entity.id.value, entity.source_range.path) for entity in absolute_entities]
+
+    assert relative_payload == absolute_payload
+    assert all("\\" not in path for _, path in absolute_payload)
+
+
+def test_filesystem_extractor_keeps_github_and_devcontainer_directories(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    github_file = repo_root / ".github" / "notes.md"
+    devcontainer_file = repo_root / ".devcontainer" / "config.json"
+    github_file.parent.mkdir(parents=True)
+    devcontainer_file.parent.mkdir(parents=True)
+    github_file.write_text("keep", encoding="utf-8")
+    devcontainer_file.write_text('{"keep": true}', encoding="utf-8")
+
+    entities = extract_filesystem_entities(repo_root)
+    paths = [entity.source_range.path for entity in entities]
+
+    assert ".github/notes.md" in paths
+    assert ".devcontainer/config.json" in paths
+
+
+def test_filesystem_extractor_ignores_common_lockfiles(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "package-lock.json").write_text("{}", encoding="utf-8")
+    (repo_root / "pnpm-lock.yaml").write_text("lockfileVersion: 9", encoding="utf-8")
+    (repo_root / "docs.md").write_text("keep", encoding="utf-8")
+
+    entities = extract_filesystem_entities(repo_root)
+    paths = [entity.source_range.path for entity in entities]
+
+    assert paths == ["docs.md"]

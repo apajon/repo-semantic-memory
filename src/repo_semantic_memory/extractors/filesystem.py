@@ -1,4 +1,8 @@
-"""Filesystem extractor for deterministic file-level entities."""
+"""Filesystem extractor for deterministic file-level entities.
+
+MVP choice: Python files are emitted as ``module`` entities keyed by repository-relative
+file paths. A future schema may separate physical file entities from logical modules.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +28,17 @@ IGNORED_DIRECTORIES: frozenset[str] = frozenset(
 
 DOC_EXTENSIONS: frozenset[str] = frozenset({".md", ".rst", ".txt", ".yaml", ".yml", ".json"})
 MODULE_EXTENSIONS: frozenset[str] = frozenset({".py"})
+IGNORED_FILES: frozenset[str] = frozenset(
+    {
+        "uv.lock",
+        "poetry.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "cargo.lock",
+        "pipfile.lock",
+    }
+)
 BINARY_SAMPLE_BYTES = 8192
 
 
@@ -37,6 +52,8 @@ def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
         dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRECTORIES)
         for filename in sorted(filenames):
+            if filename.lower() in IGNORED_FILES:
+                continue
             path = Path(dirpath) / filename
             if _is_binary_looking(path):
                 continue
