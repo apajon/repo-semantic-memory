@@ -34,32 +34,33 @@ def test_extract_python_file_extracts_expected_entities_and_docstring_metadata()
     entities, _ = extract_python_file(_fixture_root(), _fixture_python_file())
     by_qname = _entities_by_qualified_name(entities)
 
-    assert "src/python_symbols.py" in by_qname
-    assert "src/python_symbols.py.NoDocClass" in by_qname
-    assert "src/python_symbols.py.DerivedThing" in by_qname
-    assert "src/python_symbols.py.top_level_function" in by_qname
-    assert "src/python_symbols.py.top_level_async" in by_qname
-    assert "src/python_symbols.py.DerivedThing.decorated_method" in by_qname
-    assert "src/python_symbols.py.DerivedThing.async_method" in by_qname
+    assert "python_symbols" in by_qname
+    assert "python_symbols.NoDocClass" in by_qname
+    assert "python_symbols.DerivedThing" in by_qname
+    assert "python_symbols.top_level_function" in by_qname
+    assert "python_symbols.top_level_async" in by_qname
+    assert "python_symbols.DerivedThing.decorated_method" in by_qname
+    assert "python_symbols.DerivedThing.async_method" in by_qname
 
-    assert by_qname["src/python_symbols.py.NoDocClass"].metadata["has_docstring"] is False
-    assert by_qname["src/python_symbols.py.DerivedThing"].metadata["has_docstring"] is True
-    assert by_qname["src/python_symbols.py.top_level_function"].metadata["has_docstring"] is False
-    assert by_qname["src/python_symbols.py.top_level_async"].metadata["is_async"] is True
-    assert by_qname["src/python_symbols.py.DerivedThing.decorated_method"].metadata[
-        "decorators"
-    ] == ["staticmethod", "decorated"]
+    assert by_qname["python_symbols.NoDocClass"].metadata["has_docstring"] is False
+    assert by_qname["python_symbols.DerivedThing"].metadata["has_docstring"] is True
+    assert by_qname["python_symbols.top_level_function"].metadata["has_docstring"] is False
+    assert by_qname["python_symbols.top_level_async"].metadata["is_async"] is True
+    assert by_qname["python_symbols.DerivedThing.decorated_method"].metadata["decorators"] == [
+        "staticmethod",
+        "decorated",
+    ]
 
 
 def test_extract_python_file_source_ranges() -> None:
     entities, _ = extract_python_file(_fixture_root(), _fixture_python_file())
     by_qname = _entities_by_qualified_name(entities)
 
-    assert by_qname["src/python_symbols.py"].source_range.start_line == 1
-    assert by_qname["src/python_symbols.py.DerivedThing"].source_range.start_line == 18
-    assert by_qname["src/python_symbols.py.DerivedThing"].source_range.end_line == 27
-    assert by_qname["src/python_symbols.py.top_level_function"].source_range.start_line == 31
-    assert by_qname["src/python_symbols.py.top_level_async"].source_range.start_line == 35
+    assert by_qname["python_symbols"].source_range.start_line == 1
+    assert by_qname["python_symbols.DerivedThing"].source_range.start_line == 18
+    assert by_qname["python_symbols.DerivedThing"].source_range.end_line == 27
+    assert by_qname["python_symbols.top_level_function"].source_range.start_line == 31
+    assert by_qname["python_symbols.top_level_async"].source_range.start_line == 35
 
 
 def test_extract_python_file_relations_contains_imports_and_inherits() -> None:
@@ -69,10 +70,10 @@ def test_extract_python_file_relations_contains_imports_and_inherits() -> None:
     imports = _relations_by_kind(relations, "imports")
     inherits = _relations_by_kind(relations, "inherits")
 
-    module_id = by_qname["src/python_symbols.py"].id
-    class_id = by_qname["src/python_symbols.py.DerivedThing"].id
-    method_id = by_qname["src/python_symbols.py.DerivedThing.decorated_method"].id
-    function_id = by_qname["src/python_symbols.py.top_level_function"].id
+    module_id = by_qname["python_symbols"].id
+    class_id = by_qname["python_symbols.DerivedThing"].id
+    method_id = by_qname["python_symbols.DerivedThing.decorated_method"].id
+    function_id = by_qname["python_symbols.top_level_function"].id
 
     contains_pairs = {
         (relation.source_entity_id.value, relation.target_entity_id.value) for relation in contains
@@ -86,6 +87,10 @@ def test_extract_python_file_relations_contains_imports_and_inherits() -> None:
 
     base_names = {str(relation.metadata["base_name"]) for relation in inherits}
     assert base_names == {"BaseThing"}
+    assert {str(relation.target_entity_id.value) for relation in inherits} == {
+        "unresolved:python:basething"
+    }
+    assert {relation.metadata["resolved"] for relation in inherits} == {False}
 
 
 def test_extract_python_file_is_deterministic() -> None:

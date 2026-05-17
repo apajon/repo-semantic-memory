@@ -37,7 +37,7 @@ def extract_python_file(
     entities: list[Entity] = []
     relations: list[Relation] = []
 
-    module_qualified_name = relative_path
+    module_qualified_name = _module_qualified_name(relative_path)
     module_id = _entity_id(relative_path, "module", module_qualified_name)
     entities.append(
         Entity(
@@ -95,9 +95,9 @@ def extract_python_file(
                 relations.append(
                     Relation(
                         source_entity_id=class_entity.id,
-                        target_entity_id=_external_symbol_id("inherits", base_name),
+                        target_entity_id=_unresolved_python_symbol_id(base_name),
                         kind="inherits",
-                        metadata={"base_name": base_name},
+                        metadata={"base_name": base_name, "resolved": False},
                     )
                 )
             for class_body_node in node.body:
@@ -251,6 +251,21 @@ def _entity_id(relative_path: str, kind: str, qualified_name: str) -> StableId:
 
 def _external_symbol_id(relation_kind: str, name: str) -> StableId:
     return StableId.from_parts(["python", relation_kind, name])
+
+
+def _unresolved_python_symbol_id(name: str) -> StableId:
+    return StableId.from_parts(["unresolved", "python", name])
+
+
+def _module_qualified_name(relative_path: str) -> str:
+    logical_path = relative_path.removeprefix("src/")
+    module_path = logical_path.removesuffix(".py")
+    parts = [part for part in module_path.split("/") if part]
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    if not parts:
+        return "__init__"
+    return ".".join(parts)
 
 
 def _source_range(relative_path: str, node: ast.AST) -> SourceRange:

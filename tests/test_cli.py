@@ -55,3 +55,11 @@ def test_index_python_command_json_output(capsys: pytest.CaptureFixture[str]) ->
     relation_kinds = {relation["kind"] for relation in payload["relations"]}
     assert {"module", "class", "function", "method"}.issubset(entity_kinds)
     assert {"contains", "imports", "inherits"}.issubset(relation_kinds)
+    qnames = {entity["qualified_name"] for entity in payload["entities"]}
+    assert "python_symbols" in qnames
+    inherits_relations = [
+        relation for relation in payload["relations"] if relation["kind"] == "inherits"
+    ]
+    assert inherits_relations
+    assert inherits_relations[0]["target_entity_id"] == "unresolved:python:basething"
+    assert inherits_relations[0]["metadata"]["resolved"] is False
