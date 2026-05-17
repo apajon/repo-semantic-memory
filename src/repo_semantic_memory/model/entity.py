@@ -44,6 +44,8 @@ _MAX_JSON_NESTING_DEPTH = 50
 
 
 def _is_json_value(value: object, depth: int = 0) -> bool:
+    """Return True only for JSON-compatible values, bounded by recursion depth."""
+    # Depth bounding prevents pathological nesting and eventually rejects cycles too.
     if depth > _MAX_JSON_NESTING_DEPTH:
         return False
     if isinstance(value, (str, int, float, bool)) or value is None:

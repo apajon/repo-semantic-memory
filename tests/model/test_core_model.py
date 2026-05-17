@@ -105,7 +105,7 @@ def test_entity_accepts_json_serializable_metadata() -> None:
     assert entity.metadata["nested"] == {"ok": True}
 
 
-def test_entity_to_dict_metadata_has_deterministic_ordering() -> None:
+def test_entity_to_dict_sorts_metadata_keys() -> None:
     source = SourceRange(path="src/pkg/module.py", start_line=10, end_line=20)
     entity = Entity(
         id=StableId.from_parts(["module", "pkg.module", "ClassName"]),
