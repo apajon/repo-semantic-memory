@@ -22,8 +22,10 @@ _ROS_LIKE_TOKENS = ("publisher", "subscriber", "service", "client", "timer")
 _ROS_LIKE_METHOD_NAMES = frozenset(
     {"publish", "on_message", "on_tick", "call", "call_async", "wait_for_service"}
 )
+_LIFECYCLE_METHOD_NAMES = frozenset({"start", "stop", "reset"})
+_INTERNAL_CLEANUP_METHOD_NAMES = frozenset({"_release_resources", "_on_configure"})
 _MEANINGFUL_METHOD_NAMES = frozenset(
-    _ROS_LIKE_METHOD_NAMES | {"start", "stop", "reset", "_release_resources", "_on_configure"}
+    _ROS_LIKE_METHOD_NAMES | _LIFECYCLE_METHOD_NAMES | _INTERNAL_CLEANUP_METHOD_NAMES
 )
 
 CompactComponentStatus = Literal["confirmed", "inferred", "needs_review"]

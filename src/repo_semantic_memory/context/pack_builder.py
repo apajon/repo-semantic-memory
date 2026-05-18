@@ -69,7 +69,7 @@ _GENERATED_ARTIFACT_PATTERNS = (
     "/.pytest_cache/",
     "/.mypy_cache/",
     "/.ruff_cache/",
-    ".egg-info/",
+    "/.egg-info/",
 )
 
 
