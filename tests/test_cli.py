@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from repo_semantic_memory.cli import main
+from repo_semantic_memory.model import Entity, SourceRange, StableId
+from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 
 
 def test_help_flag_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
@@ -504,15 +506,33 @@ def test_export_jsonl_command_creates_expected_files(
 def test_import_jsonl_command_reconstructs_db(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
     source_db_path = tmp_path / ".rsm" / "index.sqlite"
     export_dir = tmp_path / ".rsm" / "export"
     imported_db_path = tmp_path / ".rsm" / "imported.sqlite"
-    assert main(["index", str(fixture_root), "--db", str(source_db_path)]) == 0
-    capsys.readouterr()
+    source_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    store = SQLiteStore(source_db_path)
+    try:
+        store.initialize()
+        metadata = build_default_extraction_metadata(
+            repository_root=tmp_path,
+            extractor_names=("test",),
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+        lifecycle_entity = Entity(
+            id=StableId("python:src/example.py:class:example.lifecyclemanager"),
+            kind="class",
+            name="LifecycleManager",
+            qualified_name="example.LifecycleManager",
+            source_range=SourceRange(path="src/example.py", start_line=1, end_line=20),
+        )
+        store.persist_index(entities=[lifecycle_entity], relations=[], metadata=metadata)
+    finally:
+        store.close()
+
     assert main(["export-jsonl", "--db", str(source_db_path), "--out", str(export_dir)]) == 0
-    capsys.readouterr()
-    (export_dir / "components.jsonl").write_text('{"derived":true}\n', encoding="utf-8")
+    export_capture = capsys.readouterr()
+    assert "components=1" in export_capture.out
 
     exit_code = main(["import-jsonl", "--in", str(export_dir), "--db", str(imported_db_path)])
     assert exit_code == 0
