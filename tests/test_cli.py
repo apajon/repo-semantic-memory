@@ -235,3 +235,57 @@ def test_eval_retrieval_empty_dataset_fails_clearly(
     )
     assert exit_code == 2
     assert "contains no tasks" in capsys.readouterr().err
+
+
+def test_pack_command_markdown_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "pack",
+            "--task",
+            "DerivedThing",
+            "--db",
+            str(db_path),
+            "--budget",
+            "4000",
+        ]
+    )
+    assert exit_code == 0
+
+    output = capsys.readouterr().out
+    assert output.startswith("# Context pack")
+    assert "## Selected symbols" in output
+    assert "python_symbols.DerivedThing" in output
+
+
+def test_pack_command_yaml_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "pack",
+            "--task",
+            "DerivedThing",
+            "--db",
+            str(db_path),
+            "--budget",
+            "4000",
+            "--format",
+            "yaml",
+        ]
+    )
+    assert exit_code == 0
+
+    # Output is JSON-formatted for deterministic YAML 1.2-compatible serialization.
+    parsed_yaml = json.loads(capsys.readouterr().out)
+    assert parsed_yaml["task"] == "DerivedThing"
+    assert parsed_yaml["selected_entities"]
+    selected_qnames = {entity["qualified_name"] for entity in parsed_yaml["selected_entities"]}
+    assert "python_symbols.DerivedThing" in selected_qnames

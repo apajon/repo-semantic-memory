@@ -10,7 +10,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
-from repo_semantic_memory.context import build_repo_map_markdown
+from repo_semantic_memory.context import (
+    build_context_pack,
+    build_repo_map_markdown,
+    render_context_pack_markdown,
+)
 from repo_semantic_memory.eval import (
     render_compact_table,
     run_retrieval_benchmark,
@@ -111,6 +115,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=4000,
         help="Approximate character budget for map output (not tokenizer-based token count).",
     )
+    pack_parser = subparsers.add_parser(
+        "pack",
+        help="Generate a task-specific context pack.",
+    )
+    pack_parser.add_argument(
+        "--task",
+        required=True,
+        help="Task prompt used for lexical selection.",
+    )
+    pack_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    pack_parser.add_argument(
+        "--budget",
+        type=int,
+        default=4000,
+        help="Approximate character budget for pack output (not tokenizer-based token count).",
+    )
+    pack_parser.add_argument(
+        "--format",
+        choices=("markdown", "yaml"),
+        default="markdown",
+        help="Output format.",
+    )
     eval_parser = subparsers.add_parser(
         "eval", help="Run local deterministic benchmark evaluation."
     )
@@ -192,6 +222,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.command == "repo-map":
         return _run_repo_map_command(path=args.path, db=args.db, budget=args.budget)
+    if args.command == "pack":
+        return _run_pack_command(
+            task=args.task, db=args.db, budget=args.budget, output_format=args.format
+        )
     if args.command == "eval":
         if args.eval_target == "retrieval":
             return _run_eval_retrieval_command(
@@ -315,6 +349,28 @@ def _run_eval_retrieval_command(
         print(json.dumps(to_json_payload(result), separators=(",", ":")))
         return 0
     print(render_compact_table(result))
+    return 0
+
+
+def _run_pack_command(*, task: str, db: str, budget: int, output_format: str) -> int:
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        entities = store.list_entities()
+        relations = store.list_relations()
+    finally:
+        store.close()
+
+    context_pack = build_context_pack(
+        task=task,
+        entities=entities,
+        relations=relations,
+        budget_chars=budget,
+    )
+    if output_format == "yaml":
+        print(context_pack.to_yaml())
+        return 0
+    print(render_context_pack_markdown(context_pack))
     return 0
 
 
