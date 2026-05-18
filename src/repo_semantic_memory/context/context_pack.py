@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from repo_semantic_memory.memory import CompactSemanticComponent
 from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.version import get_version_info
 
@@ -50,6 +51,7 @@ class ContextPack:
     selected_relations: tuple[Relation, ...]
     source_citations: tuple[SourceCitation, ...]
     why_selected: dict[str, tuple[str, ...]]
+    semantic_components: tuple[CompactSemanticComponent, ...]
     uncertainties: tuple[str, ...]
     suggested_files_to_inspect: tuple[str, ...]
     forbidden_assumptions: tuple[str, ...]
@@ -76,6 +78,7 @@ class ContextPack:
             "why_selected": {
                 key: list(self.why_selected[key]) for key in sorted(self.why_selected.keys())
             },
+            "semantic_components": [item.to_dict() for item in self.semantic_components],
             "uncertainties": list(self.uncertainties),
             "suggested_files_to_inspect": list(self.suggested_files_to_inspect),
             "forbidden_assumptions": list(self.forbidden_assumptions),

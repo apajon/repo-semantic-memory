@@ -394,3 +394,37 @@ def test_pack_command_yaml_output(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert parsed_yaml["selected_entities"]
     selected_qnames = {entity["qualified_name"] for entity in parsed_yaml["selected_entities"]}
     assert "python_symbols.DerivedThing" in selected_qnames
+
+
+def test_components_infer_command_json_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(["components", "infer", "--db", str(db_path), "--json"])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list)
+    assert all(item["status"] in {"confirmed", "inferred", "needs_review"} for item in payload)
+    assert all(
+        item["status"] == "needs_review" or item["evidence"] or item.get("inference_note")
+        for item in payload
+    )
+
+
+def test_components_list_command_is_deterministic(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    assert main(["components", "list", "--db", str(db_path), "--json"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert main(["components", "list", "--db", str(db_path), "--json"]) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert first == second

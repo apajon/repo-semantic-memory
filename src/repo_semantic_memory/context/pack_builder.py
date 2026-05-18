@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 
 from repo_semantic_memory.context.context_pack import ContextPack, SourceCitation, relation_key
+from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_./:-]+")
@@ -157,6 +158,9 @@ def build_context_pack(
         selected_relations=budgeted_relations,
         entity_by_id=entity_by_id,
     )
+    semantic_components = compact_component_labels(
+        infer_semantic_components(entities=budgeted_entities, relations=budgeted_relations)
+    )
     why_selected = {
         key: tuple(dict.fromkeys(reasons_by_key[key]))
         for key in sorted(reasons_by_key.keys())
@@ -170,6 +174,7 @@ def build_context_pack(
         selected_relations=tuple(budgeted_relations),
         source_citations=tuple(citations),
         why_selected=why_selected,
+        semantic_components=semantic_components,
         uncertainties=tuple(uncertainties),
         suggested_files_to_inspect=tuple(suggested_files),
         forbidden_assumptions=_FORBIDDEN_ASSUMPTIONS,

@@ -26,7 +26,8 @@ from repo_semantic_memory.eval import (
     write_markdown_report,
 )
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
-from repo_semantic_memory.model import Entity, Relation
+from repo_semantic_memory.memory import infer_semantic_components
+from repo_semantic_memory.model import Entity, Relation, SemanticComponent
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import get_version_info
 
@@ -145,6 +146,39 @@ def build_parser() -> argparse.ArgumentParser:
         default="markdown",
         help="Output format.",
     )
+    components_parser = subparsers.add_parser(
+        "components",
+        help="Infer and inspect ECS-style semantic components.",
+    )
+    components_subparsers = components_parser.add_subparsers(dest="components_target")
+    components_infer_parser = components_subparsers.add_parser(
+        "infer",
+        help="Infer semantic components from indexed entities and relations.",
+    )
+    components_infer_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    components_infer_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit inferred semantic components as JSON.",
+    )
+    components_list_parser = components_subparsers.add_parser(
+        "list",
+        help="List inferred semantic components.",
+    )
+    components_list_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    components_list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit inferred semantic components as JSON.",
+    )
     eval_parser = subparsers.add_parser(
         "eval", help="Run local deterministic benchmark evaluation."
     )
@@ -259,6 +293,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_pack_command(
             task=args.task, db=args.db, budget=args.budget, output_format=args.format
         )
+    if args.command == "components":
+        if args.components_target == "infer":
+            return _run_components_infer_command(db=args.db, emit_json=args.json)
+        if args.components_target == "list":
+            return _run_components_list_command(db=args.db, emit_json=args.json)
+        parser.print_help()
+        return 2
     if args.command == "eval":
         if args.eval_target == "retrieval":
             return _run_eval_retrieval_command(
@@ -443,6 +484,20 @@ def _run_pack_command(*, task: str, db: str, budget: int, output_format: str) ->
     return 0
 
 
+def _run_components_infer_command(*, db: str, emit_json: bool) -> int:
+    entities, relations = _load_index_from_db(db)
+    components = infer_semantic_components(entities=entities, relations=relations)
+    if emit_json:
+        print(json.dumps([component.to_dict() for component in components], separators=(",", ":")))
+        return 0
+    print(_format_components_table(components))
+    return 0
+
+
+def _run_components_list_command(*, db: str, emit_json: bool) -> int:
+    return _run_components_infer_command(db=db, emit_json=emit_json)
+
+
 def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
     repository_root = Path(path).resolve()
     filesystem_entities = extract_filesystem_entities(repository_root)
@@ -450,6 +505,17 @@ def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
     python_entities, python_relations = index_python_path(repository_root)
     all_entities = _merge_entities(filesystem_entities, python_entities)
     return all_entities, python_relations
+
+
+def _load_index_from_db(db: str) -> tuple[list[Entity], list[Relation]]:
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        entities = store.list_entities()
+        relations = store.list_relations()
+    finally:
+        store.close()
+    return entities, relations
 
 
 def _merge_entities(first: Sequence[Entity], second: Sequence[Entity]) -> list[Entity]:
@@ -475,6 +541,25 @@ def _format_relations_table(relations: Sequence[Relation]) -> str:
                 str(relation.kind),
                 str(relation.source_entity_id.value),
                 str(relation.target_entity_id.value),
+            )
+        )
+    columns = zip(*rows, strict=True)
+    widths = [max(len(value) for value in column) for column in columns]
+    return "\n".join(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in rows
+    )
+
+
+def _format_components_table(components: Sequence[SemanticComponent]) -> str:
+    rows = [("component_type", "entity_id", "status", "confidence", "evidence_count")]
+    for component in components:
+        rows.append(
+            (
+                str(component.component_type),
+                str(component.entity_id.value),
+                str(component.status),
+                f"{component.confidence:.2f}",
+                str(len(component.evidence)),
             )
         )
     columns = zip(*rows, strict=True)
