@@ -30,3 +30,25 @@ This repository hosts the `rsm` semantic compiler foundation.
 - The project is in initial development and must remain in the `0.x` range.
 - Do not release `1.0.0` until the public API, schema versioning contract, and context-pack format are explicitly declared stable.
 - Keep `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` manually managed; release automation must not bump them automatically.
+
+## `.ai/` semantic memory export
+
+The canonical workflow for generating portable agent-facing artifacts is:
+
+```bash
+uv run rsm index . --db .rsm/index.sqlite
+uv run rsm export-ai --db .rsm/index.sqlite --out .ai
+```
+
+Use `--force` to regenerate after re-indexing:
+
+```bash
+uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
+```
+
+Generated files under `.ai/` are compiled semantic artifacts. Projects may choose
+to commit them as a shared snapshot (similar to generated protobufs) or keep them
+local-only. The `.rsm/` index (SQLite) must never be committed — it is git-ignored.
+
+Source of truth always remains code, docs, tests, and git history. Generated `.ai/`
+files may be stale; regenerate after significant structural changes.
