@@ -44,7 +44,20 @@ class BenchmarkMetrics:
 
     k_values: tuple[int, ...]
     per_task: tuple[TaskMetrics, ...]
-    aggregate: dict[str, float | dict[int, float]]
+    aggregate: AggregateMetrics
+
+
+@dataclass(frozen=True)
+class AggregateMetrics:
+    """Aggregate benchmark metrics."""
+
+    recall_at_k_files: dict[int, float]
+    recall_at_k_symbols: dict[int, float]
+    mrr_files: float
+    mrr_symbols: float
+    gold_file_coverage: float
+    gold_symbol_coverage: float
+    context_character_estimate: float
 
 
 def compute_benchmark_metrics(
@@ -57,19 +70,19 @@ def compute_benchmark_metrics(
     if not per_task:
         raise ValueError("Benchmark run produced no task outcomes")
 
-    aggregate = {
-        "recall_at_k_files": {
+    aggregate = AggregateMetrics(
+        recall_at_k_files={
             k: mean(task.recall_at_k_files[k] for task in per_task) for k in k_values
         },
-        "recall_at_k_symbols": {
+        recall_at_k_symbols={
             k: mean(task.recall_at_k_symbols[k] for task in per_task) for k in k_values
         },
-        "mrr_files": mean(task.mrr_files for task in per_task),
-        "mrr_symbols": mean(task.mrr_symbols for task in per_task),
-        "gold_file_coverage": mean(task.gold_file_coverage for task in per_task),
-        "gold_symbol_coverage": mean(task.gold_symbol_coverage for task in per_task),
-        "context_character_estimate": mean(task.context_character_estimate for task in per_task),
-    }
+        mrr_files=mean(task.mrr_files for task in per_task),
+        mrr_symbols=mean(task.mrr_symbols for task in per_task),
+        gold_file_coverage=mean(task.gold_file_coverage for task in per_task),
+        gold_symbol_coverage=mean(task.gold_symbol_coverage for task in per_task),
+        context_character_estimate=mean(task.context_character_estimate for task in per_task),
+    )
     return BenchmarkMetrics(k_values=k_values, per_task=per_task, aggregate=aggregate)
 
 

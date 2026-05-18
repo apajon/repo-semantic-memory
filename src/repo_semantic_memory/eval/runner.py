@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from repo_semantic_memory.eval.datasets import RetrievalTask, load_retrieval_dataset
-from repo_semantic_memory.eval.metrics import BenchmarkMetrics, RetrievalOutcome, compute_benchmark_metrics
+from repo_semantic_memory.eval.metrics import (
+    BenchmarkMetrics,
+    RetrievalOutcome,
+    compute_benchmark_metrics,
+)
 from repo_semantic_memory.model import Entity
 from repo_semantic_memory.store import SQLiteStore
 
@@ -78,7 +82,9 @@ def _run_task(
 
     available_files = {entity.source_range.path for entity in entities}
     available_symbols = {
-        entity.qualified_name for entity in entities if entity.kind in _SYMBOL_KINDS and entity.qualified_name
+        entity.qualified_name
+        for entity in entities
+        if entity.kind in _SYMBOL_KINDS and entity.qualified_name
     }
 
     for entity in entities:
@@ -86,7 +92,11 @@ def _run_task(
         file_path = entity.source_range.path
         prior_file = file_scores.get(file_path)
         sort_key = entity.id.value
-        if prior_file is None or score > prior_file[0] or (score == prior_file[0] and sort_key < prior_file[1]):
+        if (
+            prior_file is None
+            or score > prior_file[0]
+            or (score == prior_file[0] and sort_key < prior_file[1])
+        ):
             file_scores[file_path] = (score, sort_key)
 
         if entity.kind not in _SYMBOL_KINDS:

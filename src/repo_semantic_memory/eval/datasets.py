@@ -57,7 +57,9 @@ def load_retrieval_dataset(path: Path | str) -> RetrievalDataset:
                 category=category,
                 prompt=prompt,
                 gold=GoldTargets(
-                    files=_expect_string_list(gold_payload.get("files"), f"tasks[{index}].gold.files"),
+                    files=_expect_string_list(
+                        gold_payload.get("files"), f"tasks[{index}].gold.files"
+                    ),
                     symbols=_expect_string_list(
                         gold_payload.get("symbols"), f"tasks[{index}].gold.symbols"
                     ),

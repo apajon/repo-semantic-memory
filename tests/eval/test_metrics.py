@@ -34,7 +34,7 @@ def test_compute_benchmark_metrics_on_synthetic_data() -> None:
     assert task.context_character_estimate == 42
 
     aggregate = metrics.aggregate
-    assert aggregate["mrr_files"] == 1.0
-    assert aggregate["mrr_symbols"] == 1.0
-    assert aggregate["gold_file_coverage"] == 0.5
-    assert aggregate["gold_symbol_coverage"] == 0.5
+    assert aggregate.mrr_files == 1.0
+    assert aggregate.mrr_symbols == 1.0
+    assert aggregate.gold_file_coverage == 0.5
+    assert aggregate.gold_symbol_coverage == 0.5

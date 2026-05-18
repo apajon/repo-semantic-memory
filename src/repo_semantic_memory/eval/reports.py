@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from repo_semantic_memory.eval.runner import RetrievalBenchmarkResult
@@ -50,20 +51,16 @@ def render_compact_table(result: RetrievalBenchmarkResult) -> str:
             )
         )
     aggregate = result.metrics.aggregate
-    aggregate_files = aggregate["recall_at_k_files"]
-    aggregate_symbols = aggregate["recall_at_k_symbols"]
-    if not isinstance(aggregate_files, dict) or not isinstance(aggregate_symbols, dict):
-        raise ValueError("Aggregate recall payload has unexpected type")
     rows.append(
         (
             "AVG",
-            f"{float(aggregate_files[primary_k]):.3f}",
-            f"{float(aggregate_symbols[primary_k]):.3f}",
-            f"{float(aggregate['mrr_files']):.3f}",
-            f"{float(aggregate['mrr_symbols']):.3f}",
-            f"{float(aggregate['gold_file_coverage']):.3f}",
-            f"{float(aggregate['gold_symbol_coverage']):.3f}",
-            f"{float(aggregate['context_character_estimate']):.1f}",
+            f"{aggregate.recall_at_k_files[primary_k]:.3f}",
+            f"{aggregate.recall_at_k_symbols[primary_k]:.3f}",
+            f"{aggregate.mrr_files:.3f}",
+            f"{aggregate.mrr_symbols:.3f}",
+            f"{aggregate.gold_file_coverage:.3f}",
+            f"{aggregate.gold_symbol_coverage:.3f}",
+            f"{aggregate.context_character_estimate:.1f}",
             "-",
         )
     )
@@ -72,10 +69,7 @@ def render_compact_table(result: RetrievalBenchmarkResult) -> str:
 
 def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
     """Render markdown benchmark report."""
-    payload = to_json_payload(result)
-    aggregate = payload["aggregate"]
-    if not isinstance(aggregate, dict):
-        raise ValueError("Unexpected aggregate payload shape")
+    aggregate = result.metrics.aggregate
     lines = [
         "# Retrieval benchmark report",
         "",
@@ -85,26 +79,26 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
         "",
         "## Aggregate metrics",
         "",
-        f"- mrr_files: `{aggregate['mrr_files']:.6f}`",
-        f"- mrr_symbols: `{aggregate['mrr_symbols']:.6f}`",
-        f"- gold_file_coverage: `{aggregate['gold_file_coverage']:.6f}`",
-        f"- gold_symbol_coverage: `{aggregate['gold_symbol_coverage']:.6f}`",
-        f"- context_character_estimate: `{aggregate['context_character_estimate']:.6f}`",
+        f"- mrr_files: `{aggregate.mrr_files:.6f}`",
+        f"- mrr_symbols: `{aggregate.mrr_symbols:.6f}`",
+        f"- gold_file_coverage: `{aggregate.gold_file_coverage:.6f}`",
+        f"- gold_symbol_coverage: `{aggregate.gold_symbol_coverage:.6f}`",
+        f"- context_character_estimate: `{aggregate.context_character_estimate:.6f}`",
         "",
         "## Task details",
         "",
         "| task_id | category | missing_gold_files | missing_gold_symbols |",
         "|---|---|---|---|",
     ]
-    for task in payload["tasks"]:
-        if not isinstance(task, dict):
-            continue
+    for outcome in result.outcomes:
+        files_text = ", ".join(outcome.missing_gold_files) or "-"
+        symbols_text = ", ".join(outcome.missing_gold_symbols) or "-"
         lines.append(
             "| {task_id} | {category} | {missing_gold_files} | {missing_gold_symbols} |".format(
-                task_id=task["task_id"],
-                category=task["category"],
-                missing_gold_files=", ".join(task["missing_gold_files"]) or "-",
-                missing_gold_symbols=", ".join(task["missing_gold_symbols"]) or "-",
+                task_id=outcome.task_id,
+                category=outcome.category,
+                missing_gold_files=files_text or "-",
+                missing_gold_symbols=symbols_text or "-",
             )
         )
     return "\n".join(lines)
@@ -119,18 +113,14 @@ def write_markdown_report(path: Path | str, result: RetrievalBenchmarkResult) ->
 
 def _aggregate_payload(result: RetrievalBenchmarkResult) -> dict[str, object]:
     aggregate = result.metrics.aggregate
-    files_recall = aggregate["recall_at_k_files"]
-    symbols_recall = aggregate["recall_at_k_symbols"]
-    if not isinstance(files_recall, dict) or not isinstance(symbols_recall, dict):
-        raise ValueError("Aggregate recall payload has unexpected type")
     return {
-        "recall_at_k_files": {str(k): float(files_recall[k]) for k in result.k_values},
-        "recall_at_k_symbols": {str(k): float(symbols_recall[k]) for k in result.k_values},
-        "mrr_files": float(aggregate["mrr_files"]),
-        "mrr_symbols": float(aggregate["mrr_symbols"]),
-        "context_character_estimate": float(aggregate["context_character_estimate"]),
-        "gold_file_coverage": float(aggregate["gold_file_coverage"]),
-        "gold_symbol_coverage": float(aggregate["gold_symbol_coverage"]),
+        "recall_at_k_files": {str(k): aggregate.recall_at_k_files[k] for k in result.k_values},
+        "recall_at_k_symbols": {str(k): aggregate.recall_at_k_symbols[k] for k in result.k_values},
+        "mrr_files": aggregate.mrr_files,
+        "mrr_symbols": aggregate.mrr_symbols,
+        "context_character_estimate": aggregate.context_character_estimate,
+        "gold_file_coverage": aggregate.gold_file_coverage,
+        "gold_symbol_coverage": aggregate.gold_symbol_coverage,
     }
 
 
@@ -164,7 +154,7 @@ def _task_payload(result: RetrievalBenchmarkResult, index: int) -> dict[str, obj
     }
 
 
-def _render_rows(rows: list[tuple[str, ...]]) -> str:
+def _render_rows(rows: Sequence[tuple[str, ...]]) -> str:
     columns = zip(*rows, strict=True)
     widths = [max(len(value) for value in column) for column in columns]
     return "\n".join(

@@ -111,7 +111,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=4000,
         help="Approximate character budget for map output (not tokenizer-based token count).",
     )
-    eval_parser = subparsers.add_parser("eval", help="Run local deterministic benchmark evaluation.")
+    eval_parser = subparsers.add_parser(
+        "eval", help="Run local deterministic benchmark evaluation."
+    )
     eval_subparsers = eval_parser.add_subparsers(dest="eval_target")
     eval_retrieval_parser = eval_subparsers.add_parser(
         "retrieval",
