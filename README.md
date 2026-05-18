@@ -76,75 +76,79 @@ Clone the repository:
 ```bash
 git clone https://github.com/<owner>/repo-semantic-memory.git
 cd repo-semantic-memory
+```
 
 Install dependencies:
-
+```bash
 uv sync --all-groups
-
+```
 Run the CLI:
-
+```bash
 uv run rsm --help
 uv run rsm version
+```
 
 ## Quick start
 
 Index a repository into SQLite:
-
+```bash
 uv run rsm index /path/to/repo --db .rsm/index.sqlite
-
+```
 Inspect indexed entities:
-
+```bash
 uv run rsm inspect entities --db .rsm/index.sqlite
-
+```
 Inspect indexed relations:
-
+```bash
 uv run rsm inspect relations --db .rsm/index.sqlite
-
+```
 Generate a compact repo map:
-
+```bash
 uv run rsm repo-map --db .rsm/index.sqlite --budget 4000
-
+```
 Generate a task-specific context pack in Markdown:
-
+```bash
 uv run rsm pack \
   --task "Update DerivedThing imports in src/python_symbols.py" \
   --db .rsm/index.sqlite \
   --budget 4000
-
+```
 Generate a task-specific context pack in YAML-compatible structured output:
-
+```bash
 uv run rsm pack \
   --task "Update DerivedThing imports in src/python_symbols.py" \
   --db .rsm/index.sqlite \
   --budget 4000 \
   --format yaml
-
+```
 Or generate a repo map directly from a path without leaving persistent artifacts:
-
+```bash
 uv run rsm repo-map --path /path/to/repo --budget 4000
-
+```
 Run a retrieval benchmark:
-
+```bash
 uv run rsm eval retrieval \
   --db .rsm/index.sqlite \
   --dataset benchmarks/tasks.yaml
-
+```
 Generate JSON output:
-
+```bash
 uv run rsm eval retrieval \
   --db .rsm/index.sqlite \
   --dataset benchmarks/tasks.yaml \
   --json
-
+```
 Generate a Markdown report:
-
+```bash
 uv run rsm eval retrieval \
   --db .rsm/index.sqlite \
   --dataset benchmarks/tasks.yaml \
   --markdown-report retrieval_report.md
+```
+
 
 ## CLI overview
-
+```bash
 rsm version
 rsm scan <path>
 rsm index-python <path> --json
@@ -155,6 +159,8 @@ rsm repo-map --db .rsm/index.sqlite --budget 4000
 rsm repo-map --path <path> --budget 4000
 rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml]
 rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
+```
+
 
 ## Data model
 
@@ -402,28 +408,30 @@ breaking changes do not imply 1.0.0
 ## Development
 
 Install all dependencies:
-
+```bash
 uv sync --all-groups
-
+```
 Run checks:
-
+```bash
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src
 uv run pytest
-
+```
 Format code:
-
+```bash
 uv run ruff format .
+```
+
 
 ## Devcontainer
 
 A minimal devcontainer is provided for reproducible development.
 
 Open the repository in VS Code or a compatible environment and rebuild the container. The devcontainer installs uv and runs:
-
+```bash
 uv sync --all-groups
-
+```
 ## Roadmap
 
 Near-term:
