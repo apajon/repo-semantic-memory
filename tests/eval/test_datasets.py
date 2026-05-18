@@ -48,3 +48,28 @@ def test_load_retrieval_dataset_fails_clearly_for_empty_tasks(tmp_path: Path) ->
 
     with pytest.raises(ValueError, match="contains no tasks"):
         load_retrieval_dataset(dataset_path)
+
+
+def test_load_retrieval_dataset_rejects_non_posix_gold_file_paths(tmp_path: Path) -> None:
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: bad_path",
+                "    category: code_localization",
+                '    prompt: "locate thing"',
+                "    gold:",
+                "      files:",
+                r"        - src\example.py",
+                "      symbols:",
+                "        - example.Symbol",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="POSIX separators"):
+        load_retrieval_dataset(dataset_path)

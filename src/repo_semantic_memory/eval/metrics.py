@@ -116,6 +116,7 @@ def _recall_at_k(gold: tuple[str, ...], ranked: tuple[str, ...], *, k: int) -> f
 
 
 def _mrr(gold: tuple[str, ...], ranked: tuple[str, ...]) -> float:
+    """Return reciprocal rank of the first ranked item that matches any gold target."""
     if not gold:
         return 1.0
     gold_set = set(gold)

@@ -1,4 +1,9 @@
-"""Deterministic lexical retrieval benchmark runner."""
+"""Deterministic lexical retrieval benchmark runner.
+
+Matching policy in this MVP:
+- gold files are matched against ``Entity.source_range.path``
+- gold symbols are matched against ``Entity.qualified_name``
+"""
 
 from __future__ import annotations
 
@@ -114,14 +119,14 @@ def _run_task(
         path
         for path, _ in sorted(
             file_scores.items(),
-            key=lambda item: (-item[1][0], item[0], item[1][1]),
+            key=lambda item: (-item[1][0], item[1][1], item[0]),
         )[:max_ranked_results]
     )
     ranked_symbols = tuple(
         symbol
         for symbol, _ in sorted(
             symbol_scores.items(),
-            key=lambda item: (-item[1][0], item[0], item[1][1]),
+            key=lambda item: (-item[1][0], item[1][1], item[0]),
         )[:max_ranked_results]
     )
 

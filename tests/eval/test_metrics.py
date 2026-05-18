@@ -38,3 +38,25 @@ def test_compute_benchmark_metrics_on_synthetic_data() -> None:
     assert aggregate.mrr_symbols == 1.0
     assert aggregate.gold_file_coverage == 0.5
     assert aggregate.gold_symbol_coverage == 0.5
+
+
+def test_mrr_uses_first_ranked_gold_match() -> None:
+    outcomes = (
+        RetrievalOutcome(
+            task_id="t2",
+            category="code_localization",
+            prompt="find target",
+            ranked_files=("src/nope.py", "src/also_nope.py", "src/hit.py", "src/hit2.py"),
+            ranked_symbols=("pkg.none",),
+            gold_files=("src/hit2.py", "src/hit.py"),
+            gold_symbols=(),
+            gold_invariants=(),
+            missing_gold_files=(),
+            missing_gold_symbols=(),
+            context_character_estimate=12,
+        ),
+    )
+
+    metrics = compute_benchmark_metrics(outcomes, k_values=(1, 3))
+
+    assert metrics.per_task[0].mrr_files == 1 / 3

@@ -40,3 +40,5 @@ def test_report_generation_outputs_expected_sections() -> None:
     assert "# Retrieval benchmark report" in markdown
     assert "## Aggregate metrics" in markdown
     assert "## Task details" in markdown
+    assert "context_character_estimate" in markdown
+    assert "Gold invariants are dataset metadata only" in markdown

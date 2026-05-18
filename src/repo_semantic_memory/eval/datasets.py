@@ -8,7 +8,10 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class GoldTargets:
-    """Gold retrieval targets for a benchmark task."""
+    """Gold retrieval targets for a benchmark task.
+
+    ``files`` entries must be repository-relative POSIX paths.
+    """
 
     files: tuple[str, ...]
     symbols: tuple[str, ...]
@@ -51,15 +54,16 @@ def load_retrieval_dataset(path: Path | str) -> RetrievalDataset:
         gold_payload = task_payload.get("gold")
         if not isinstance(gold_payload, dict):
             raise ValueError(f"tasks[{index}].gold must be a mapping")
+        gold_files = _expect_string_list(gold_payload.get("files"), f"tasks[{index}].gold.files")
+        for gold_file in gold_files:
+            _validate_gold_file_path(gold_file, f"tasks[{index}].gold.files")
         tasks.append(
             RetrievalTask(
                 id=task_id,
                 category=category,
                 prompt=prompt,
                 gold=GoldTargets(
-                    files=_expect_string_list(
-                        gold_payload.get("files"), f"tasks[{index}].gold.files"
-                    ),
+                    files=gold_files,
                     symbols=_expect_string_list(
                         gold_payload.get("symbols"), f"tasks[{index}].gold.symbols"
                     ),
@@ -89,6 +93,13 @@ def _expect_string_list(value: object, field: str) -> tuple[str, ...]:
     if any(not isinstance(item, str) for item in value):
         raise ValueError(f"{field} must be a list of strings")
     return tuple(value)
+
+
+def _validate_gold_file_path(path: str, field: str) -> None:
+    if path.startswith("/") or path.startswith("./"):
+        raise ValueError(f"{field} must contain repository-relative POSIX paths: {path}")
+    if "\\" in path:
+        raise ValueError(f"{field} must use POSIX separators ('/'): {path}")
 
 
 def _parse_yaml_mapping(content: str) -> dict[str, object]:
