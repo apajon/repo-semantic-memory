@@ -1,0 +1,181 @@
+"""Context pack builder tests."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
+from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.model import Entity, Relation
+
+
+def _fixture_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
+
+
+def _indexed_entities_and_relations() -> tuple[list[Entity], list[Relation]]:
+    fixture_root = _fixture_root()
+    filesystem_entities = [
+        entity
+        for entity in extract_filesystem_entities(fixture_root)
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
+    python_entities, python_relations = index_python_path(fixture_root)
+    return [*filesystem_entities, *python_entities], python_relations
+
+
+def test_pack_selects_symbol_by_name() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Update DerivedThing behavior.",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    selected = {entity.qualified_name for entity in pack.selected_entities}
+    assert "python_symbols.DerivedThing" in selected
+
+
+def test_pack_selects_symbol_by_qualified_name() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Inspect python_symbols.DerivedThing implementation.",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    selected = {entity.qualified_name for entity in pack.selected_entities}
+    assert "python_symbols.DerivedThing" in selected
+
+
+def test_pack_selects_symbol_by_source_path() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Work on src/python_symbols.py imports.",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    selected_paths = {entity.source_range.path for entity in pack.selected_entities}
+    assert "src/python_symbols.py" in selected_paths
+
+
+def test_pack_includes_direct_neighbors() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="DerivedThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    selected = {entity.qualified_name for entity in pack.selected_entities}
+    assert "python_symbols.DerivedThing" in selected
+    assert "python_symbols" in selected
+
+
+def test_pack_budget_is_approximately_respected_and_marked_when_truncated() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="python_symbols",
+        entities=entities,
+        relations=relations,
+        budget_chars=200,
+    )
+    output = render_context_pack_markdown(pack)
+
+    assert len(output) <= 200
+    assert "[truncated: budget reached]" in output
+
+
+def test_pack_includes_source_citations() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="top_level_function",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    assert pack.source_citations
+    citation_paths = {citation.path for citation in pack.source_citations}
+    assert "src/python_symbols.py" in citation_paths
+
+
+def test_pack_output_is_deterministic() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    first = build_context_pack(
+        task="DerivedThing import BaseThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    second = build_context_pack(
+        task="DerivedThing import BaseThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    assert first.to_dict() == second.to_dict()
+    assert render_context_pack_markdown(first) == render_context_pack_markdown(second)
+
+
+def test_pack_yaml_output_parses() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="DerivedThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    payload = json.loads(pack.to_yaml())
+
+    assert payload["task"] == "DerivedThing"
+    assert "context_pack_version" in payload
+    assert "schema_version" in payload
+    assert "package_version" in payload
+
+
+def test_unresolved_imports_and_inherits_are_marked_uncertain() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="imports inherits",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    markdown = render_context_pack_markdown(pack)
+
+    assert any("Relation imports" in uncertainty for uncertainty in pack.uncertainties)
+    assert any("Relation inherits" in uncertainty for uncertainty in pack.uncertainties)
+    assert "Do not assume inheritance targets are resolved" in markdown
+    assert "Do not assume imports are resolved" in markdown
+
+
+def test_pack_output_excludes_source_bodies_and_docstrings() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="DerivedThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    markdown = render_context_pack_markdown(pack)
+
+    assert '"""A class with a docstring."""' not in markdown
+    assert "return str(value)" not in markdown
