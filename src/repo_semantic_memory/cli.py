@@ -163,6 +163,7 @@ def _run_index_command(*, path: str, db: str) -> int:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     filesystem_entities = extract_filesystem_entities(repository_root)
+    filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     python_entities, python_relations = index_python_path(repository_root)
     all_entities = _merge_entities(filesystem_entities, python_entities)
     metadata = build_default_extraction_metadata(
@@ -215,6 +216,14 @@ def _merge_entities(first: Sequence[Entity], second: Sequence[Entity]) -> list[E
     for entity in [*first, *second]:
         merged[entity.id.value] = entity
     return sorted(merged.values(), key=lambda entity: entity.id.value)
+
+
+def _drop_python_module_file_entities(entities: Sequence[Entity]) -> list[Entity]:
+    return [
+        entity
+        for entity in entities
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
 
 
 def _format_relations_table(relations: Sequence[Relation]) -> str:

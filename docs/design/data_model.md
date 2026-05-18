@@ -22,3 +22,15 @@ A later schema may split these into:
 - `file` entities for physical files
 - `module` entities for logical importable modules
 - `contains` or `defines` relations between them
+
+For persisted index output (`rsm index`), Python module/class/function/method entities are owned by the Python AST extractor.
+Filesystem-discovered `.py` module entities are not persisted to avoid duplicate Python module representations.
+
+## Relation identity (SQLite MVP)
+
+SQLite currently models relations as logical edges keyed by:
+
+- `(source_id, target_id, kind)`
+
+This means repeated occurrences of the same logical relation are intentionally collapsed in the MVP.
+If occurrence-level tracking is required later, a future schema can introduce explicit relation occurrence IDs.

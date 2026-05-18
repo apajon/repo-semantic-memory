@@ -111,3 +111,21 @@ def test_inspect_relations_command_json_output(
     assert payload
     assert "source_entity_id" in payload[0]
     assert "target_entity_id" in payload[0]
+
+
+def test_index_command_uses_ast_as_python_module_source(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    index_exit = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert index_exit == 0
+    capsys.readouterr()
+
+    inspect_exit = main(["inspect", "entities", "--db", str(db_path), "--json"])
+    assert inspect_exit == 0
+    payload = json.loads(capsys.readouterr().out)
+
+    module_entities = [entity for entity in payload if entity["kind"] == "module"]
+    assert module_entities
+    assert all(not entity["id"].startswith("file:") for entity in module_entities)
