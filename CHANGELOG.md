@@ -2,6 +2,50 @@
 
 <!-- version list -->
 
+## v0.3.0 (2026-05-18)
+
+### Bug Fixes
+
+- Align python qualified names and unresolved inherits modeling
+  ([`7901455`](https://github.com/apajon/repo-semantic-memory/commit/790145592f601d5ffbd9a8ce4e855e59b9ce2fb9))
+
+- Refine python ast typing and extractor tests
+  ([`0586bc0`](https://github.com/apajon/repo-semantic-memory/commit/0586bc06104370fd2ffa2dd58645d841300fcf70))
+
+### Chores
+
+- Drop unrelated lockfile delta
+  ([`d8eb106`](https://github.com/apajon/repo-semantic-memory/commit/d8eb106a837cb5a3a3124d72c244f8cfc5b12bcb))
+
+- Plan python ast extractor implementation
+  ([`5ec99a2`](https://github.com/apajon/repo-semantic-memory/commit/5ec99a2ae59deb925bc2b2eb0b20517e4e158b31))
+
+- Polish extractor docs and cli output consistency
+  ([`86f1334`](https://github.com/apajon/repo-semantic-memory/commit/86f1334e05ecf1e0559229ebbabcde1f4785655b))
+
+- Refresh uv lockfile for 0.2.0 metadata
+  ([`93a9a62`](https://github.com/apajon/repo-semantic-memory/commit/93a9a62cdb2f37afe1eed0581b03b643201cb377))
+
+- Revert unintended lockfile change
+  ([`3e6edcf`](https://github.com/apajon/repo-semantic-memory/commit/3e6edcfc0da51ec31af5597395101df6adb7cba7))
+
+### Features
+
+- Add python ast extractor and index-python cli
+  ([`3f2bc78`](https://github.com/apajon/repo-semantic-memory/commit/3f2bc7818092927a7df08a943b28804287bafed7))
+
+### Testing
+
+- Cover module name variants and normalize unresolved ids
+  ([`d992a76`](https://github.com/apajon/repo-semantic-memory/commit/d992a7656284bdd60a33c9ec9f0a8663428233fd))
+
+- Extend module name edge case coverage
+  ([`91baf53`](https://github.com/apajon/repo-semantic-memory/commit/91baf5329ac994bab37fd3f6804eada3222a7fa8))
+
+- Update deterministic package version assertion
+  ([`e2464cd`](https://github.com/apajon/repo-semantic-memory/commit/e2464cd678d5fd204eebe03492947bfbecf6e734))
+
+
 ## v0.2.0 (2026-05-17)
 
 ### Bug Fixes
