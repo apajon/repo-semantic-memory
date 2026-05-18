@@ -97,3 +97,33 @@ def test_decide_winner_returns_tie_or_inconclusive() -> None:
         extra_selected_symbols=(),
     )
     assert decide_winner(inconclusive_repo_map, inconclusive_pack) == "inconclusive"
+
+
+def test_decide_winner_prioritizes_gold_coverage_before_density() -> None:
+    higher_coverage = BaselineTaskResult(
+        baseline="repo_map",
+        context_character_count=200,
+        selected_files=("src/a.py",),
+        selected_symbols=("pkg.a",),
+        gold_file_coverage=1.0,
+        gold_symbol_coverage=1.0,
+        useful_context_ratio=0.3,
+        missing_gold_files=(),
+        missing_gold_symbols=(),
+        extra_selected_files=(),
+        extra_selected_symbols=(),
+    )
+    smaller_but_misses_gold = BaselineTaskResult(
+        baseline="lexical_context_pack",
+        context_character_count=50,
+        selected_files=("src/a.py",),
+        selected_symbols=("pkg.a",),
+        gold_file_coverage=1.0,
+        gold_symbol_coverage=0.0,
+        useful_context_ratio=0.9,
+        missing_gold_files=(),
+        missing_gold_symbols=("pkg.missing",),
+        extra_selected_files=(),
+        extra_selected_symbols=(),
+    )
+    assert decide_winner(higher_coverage, smaller_but_misses_gold) == "repo_map"

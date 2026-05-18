@@ -39,6 +39,11 @@ class BaselineTaskResult:
     extra_selected_files: tuple[str, ...]
     extra_selected_symbols: tuple[str, ...]
 
+    @property
+    def approx_useful_item_ratio(self) -> float:
+        """Approximate item-level useful-context ratio (not token-level semantic usefulness)."""
+        return self.useful_context_ratio
+
 
 @dataclass(frozen=True)
 class TaskBaselineComparison:
@@ -91,17 +96,33 @@ def decide_winner(
     repo_map_result: BaselineTaskResult,
     lexical_context_pack_result: BaselineTaskResult,
 ) -> WinnerName:
-    """Choose task-level winner from approximate useful-context ratio."""
-    if (
-        repo_map_result.useful_context_ratio == 0.0
-        and lexical_context_pack_result.useful_context_ratio == 0.0
-    ):
+    """Choose task-level winner, prioritizing gold coverage before density/compactness."""
+    repo_map_coverage = repo_map_result.gold_file_coverage + repo_map_result.gold_symbol_coverage
+    lexical_coverage = (
+        lexical_context_pack_result.gold_file_coverage
+        + lexical_context_pack_result.gold_symbol_coverage
+    )
+    if repo_map_coverage != lexical_coverage:
+        return "repo_map" if repo_map_coverage > lexical_coverage else "lexical_context_pack"
+
+    repo_map_ratio = repo_map_result.approx_useful_item_ratio
+    lexical_ratio = lexical_context_pack_result.approx_useful_item_ratio
+    if repo_map_ratio == 0.0 and lexical_ratio == 0.0:
         return "inconclusive"
-    if repo_map_result.useful_context_ratio == lexical_context_pack_result.useful_context_ratio:
-        return "tie"
-    if repo_map_result.useful_context_ratio > lexical_context_pack_result.useful_context_ratio:
-        return "repo_map"
-    return "lexical_context_pack"
+    if repo_map_ratio != lexical_ratio:
+        return "repo_map" if repo_map_ratio > lexical_ratio else "lexical_context_pack"
+
+    if (
+        repo_map_result.context_character_count
+        != lexical_context_pack_result.context_character_count
+    ):
+        return (
+            "repo_map"
+            if repo_map_result.context_character_count
+            < lexical_context_pack_result.context_character_count
+            else "lexical_context_pack"
+        )
+    return "tie"
 
 
 def _evaluate_repo_map_baseline(

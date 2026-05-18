@@ -36,6 +36,9 @@ def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, objec
             "average_gold_symbol_coverage": dict(
                 sorted(result.aggregate.average_gold_symbol_coverage.items())
             ),
+            "average_approx_useful_item_ratio": dict(
+                sorted(result.aggregate.average_useful_context_ratio.items())
+            ),
             "average_useful_context_ratio": dict(
                 sorted(result.aggregate.average_useful_context_ratio.items())
             ),
@@ -99,8 +102,8 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
     rows = [
         (
             "task_id",
-            "repo_map useful",
-            "pack useful",
+            "repo_map approx_useful",
+            "pack approx_useful",
             "repo_map gold_cov",
             "pack gold_cov",
             "repo_map chars",
@@ -112,8 +115,8 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
         rows.append(
             (
                 task.task_id,
-                f"{task.repo_map.useful_context_ratio:.3f}",
-                f"{task.lexical_context_pack.useful_context_ratio:.3f}",
+                f"{task.repo_map.approx_useful_item_ratio:.3f}",
+                f"{task.lexical_context_pack.approx_useful_item_ratio:.3f}",
                 f"{task.repo_map.gold_file_coverage:.3f}/{task.repo_map.gold_symbol_coverage:.3f}",
                 (
                     f"{task.lexical_context_pack.gold_file_coverage:.3f}/"
@@ -213,7 +216,7 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
             f"`{aggregate.average_gold_symbol_coverage['lexical_context_pack']:.6f}`"
         ),
         (
-            f"- average_useful_context_ratio: repo_map="
+            f"- average_approx_useful_item_ratio: repo_map="
             f"`{aggregate.average_useful_context_ratio['repo_map']:.6f}`, "
             f"lexical_context_pack="
             f"`{aggregate.average_useful_context_ratio['lexical_context_pack']:.6f}`"
@@ -229,7 +232,8 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         "## Per-task results",
         "",
         (
-            "| task_id | winner | repo_map useful_ratio | pack useful_ratio | "
+            "| task_id | winner | repo_map approx_useful_item_ratio | "
+            "pack approx_useful_item_ratio | "
             "repo_map missing | pack missing |"
         ),
         "|---|---|---|---|---|---|",
@@ -244,8 +248,8 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         )
         lines.append(
             f"| {task.task_id} | {task.winner} | "
-            f"{task.repo_map.useful_context_ratio:.6f} | "
-            f"{task.lexical_context_pack.useful_context_ratio:.6f} | "
+            f"{task.repo_map.approx_useful_item_ratio:.6f} | "
+            f"{task.lexical_context_pack.approx_useful_item_ratio:.6f} | "
             f"{repo_missing} | {pack_missing} |"
         )
 
@@ -256,14 +260,22 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
             "",
             (
                 "- `useful_context_ratio` is an approximation over selected "
-                "files/symbol identifiers "
+                "files/symbol identifiers (item-level, not token-level) "
                 "and does not measure semantic correctness."
             ),
             "- Character budget is character-based and not tokenizer-based.",
             (
+                "- `extra_selected_files` and `extra_selected_symbols` are "
+                "non-gold selections, not guaranteed irrelevant noise."
+            ),
+            (
                 "- Ties and all-zero useful-context outcomes are reported as "
                 "`tie` or `inconclusive`; "
                 "the report does not claim superiority in those cases."
+            ),
+            (
+                "- Small repositories can make generic repo-map retrieval "
+                "artificially strong relative to task-specific packs."
             ),
             (
                 "- Results from toy fixtures should not be interpreted as "
@@ -343,7 +355,10 @@ def _compare_task_payload(comparison: TaskBaselineComparison) -> dict[str, objec
             "context_character_count": comparison.repo_map.context_character_count,
             "gold_file_coverage": comparison.repo_map.gold_file_coverage,
             "gold_symbol_coverage": comparison.repo_map.gold_symbol_coverage,
+            "approx_useful_item_ratio": comparison.repo_map.approx_useful_item_ratio,
             "useful_context_ratio": comparison.repo_map.useful_context_ratio,
+            "selected_files": list(comparison.repo_map.selected_files),
+            "selected_symbols": list(comparison.repo_map.selected_symbols),
             "missing_gold_files": list(comparison.repo_map.missing_gold_files),
             "missing_gold_symbols": list(comparison.repo_map.missing_gold_symbols),
             "extra_selected_files": list(comparison.repo_map.extra_selected_files),
@@ -353,7 +368,10 @@ def _compare_task_payload(comparison: TaskBaselineComparison) -> dict[str, objec
             "context_character_count": comparison.lexical_context_pack.context_character_count,
             "gold_file_coverage": comparison.lexical_context_pack.gold_file_coverage,
             "gold_symbol_coverage": comparison.lexical_context_pack.gold_symbol_coverage,
+            "approx_useful_item_ratio": comparison.lexical_context_pack.approx_useful_item_ratio,
             "useful_context_ratio": comparison.lexical_context_pack.useful_context_ratio,
+            "selected_files": list(comparison.lexical_context_pack.selected_files),
+            "selected_symbols": list(comparison.lexical_context_pack.selected_symbols),
             "missing_gold_files": list(comparison.lexical_context_pack.missing_gold_files),
             "missing_gold_symbols": list(comparison.lexical_context_pack.missing_gold_symbols),
             "extra_selected_files": list(comparison.lexical_context_pack.extra_selected_files),

@@ -115,6 +115,11 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     payload_two = to_compare_json_payload(result)
     assert payload_one == payload_two
     assert json.dumps(payload_one, sort_keys=True) == json.dumps(payload_two, sort_keys=True)
+    assert "average_approx_useful_item_ratio" in payload_one["aggregate"]
+    repo_payload = payload_one["tasks"][0]["repo_map"]
+    assert repo_payload["approx_useful_item_ratio"] == 0.75
+    assert repo_payload["selected_files"] == ["src/a.py"]
+    assert repo_payload["selected_symbols"] == ["pkg.a"]
 
     markdown_one = render_compare_markdown_report(result)
     markdown_two = render_compare_markdown_report(result)
@@ -122,6 +127,9 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     assert "# Baseline comparison report" in markdown_one
     assert "## Limitations" in markdown_one
     assert "does not claim superiority" in markdown_one
+    assert "item-level, not token-level" in markdown_one
+    assert "not guaranteed irrelevant noise" in markdown_one
+    assert "Small repositories can make generic repo-map retrieval" in markdown_one
 
     output_path = tmp_path / "compare.md"
     write_compare_markdown_report(output_path, result)
