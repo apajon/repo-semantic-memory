@@ -222,7 +222,7 @@ def _drop_python_module_file_entities(entities: Sequence[Entity]) -> list[Entity
     return [
         entity
         for entity in entities
-        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+        if not (entity.kind == "module" and Path(entity.source_range.path).suffix == ".py")
     ]
 
 

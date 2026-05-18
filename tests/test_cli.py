@@ -129,3 +129,4 @@ def test_index_command_uses_ast_as_python_module_source(
     module_entities = [entity for entity in payload if entity["kind"] == "module"]
     assert module_entities
     assert all(not entity["id"].startswith("file:") for entity in module_entities)
+    assert any(entity["id"].startswith("python:") for entity in module_entities)
