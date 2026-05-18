@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
+from repo_semantic_memory.context import build_repo_map_markdown
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
@@ -84,6 +85,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit rows as JSON.",
     )
+    repo_map_parser = subparsers.add_parser(
+        "repo-map",
+        help="Generate a compact Markdown repository map.",
+    )
+    repo_map_source_group = repo_map_parser.add_mutually_exclusive_group()
+    repo_map_source_group.add_argument(
+        "--db",
+        help="SQLite database file path.",
+    )
+    repo_map_source_group.add_argument(
+        "--path",
+        help="Repository root path to index in-memory before generating the map.",
+    )
+    repo_map_parser.add_argument(
+        "--budget",
+        type=int,
+        default=4000,
+        help="Approximate character budget for map output (not tokenizer-based token count).",
+    )
     return parser
 
 
@@ -136,6 +156,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_inspect_relations_command(db=args.db, emit_json=args.json)
         parser.print_help()
         return 2
+    if args.command == "repo-map":
+        return _run_repo_map_command(path=args.path, db=args.db, budget=args.budget)
 
     parser.print_help()
     return 0
@@ -209,6 +231,33 @@ def _run_inspect_relations_command(*, db: str, emit_json: bool) -> int:
         return 0
     print(_format_relations_table(relations))
     return 0
+
+
+def _run_repo_map_command(*, path: str | None, db: str | None, budget: int) -> int:
+    if path is not None:
+        entities, relations = _index_for_repo_map(path=path)
+        print(build_repo_map_markdown(entities, relations, budget_chars=budget))
+        return 0
+
+    db_path = db if db is not None else ".rsm/index.sqlite"
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        entities = store.list_entities()
+        relations = store.list_relations()
+    finally:
+        store.close()
+    print(build_repo_map_markdown(entities, relations, budget_chars=budget))
+    return 0
+
+
+def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
+    repository_root = Path(path).resolve()
+    filesystem_entities = extract_filesystem_entities(repository_root)
+    filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
+    python_entities, python_relations = index_python_path(repository_root)
+    all_entities = _merge_entities(filesystem_entities, python_entities)
+    return all_entities, python_relations
 
 
 def _merge_entities(first: Sequence[Entity], second: Sequence[Entity]) -> list[Entity]:

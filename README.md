@@ -22,6 +22,13 @@ This initial scaffold provides a typed Python CLI, explicit artifact versioning,
 - Nested functions are currently ignored.
 - Decorators and signatures are static best-effort metadata.
 
+## Repo map
+
+- `rsm repo-map --db .rsm/index.sqlite --budget 4000` renders from an existing SQLite index.
+- `rsm repo-map --path . --budget 4000` renders directly from a repository path without creating persistent artifacts in the target repository.
+- `--budget` is currently an approximate **character** budget (not tokenizer-based token counting yet).
+- Import lines are static extracted names and are labeled unresolved; cross-file import resolution is not implemented in this phase.
+
 ## Quick start
 
 ```bash
