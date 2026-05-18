@@ -159,6 +159,8 @@ def _append_module_section(budget: CharacterBudget, section: ModuleSection) -> b
 
 def _format_source_citation(entity: Entity) -> str:
     source = entity.source_range
+    if source.start_line == source.end_line:
+        return f"{source.path}:{source.start_line}"
     return f"{source.path}:{source.start_line}-{source.end_line}"
 
 

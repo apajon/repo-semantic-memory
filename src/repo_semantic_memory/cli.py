@@ -7,7 +7,6 @@ import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
 from repo_semantic_memory.context import build_repo_map_markdown
@@ -258,24 +257,7 @@ def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     python_entities, python_relations = index_python_path(repository_root)
     all_entities = _merge_entities(filesystem_entities, python_entities)
-    with TemporaryDirectory(prefix="rsm-repo-map-") as temp_directory:
-        temp_db_path = Path(temp_directory) / "index.sqlite"
-        metadata = build_default_extraction_metadata(
-            repository_root=repository_root,
-            extractor_names=("filesystem", "python_ast"),
-            timestamp=datetime.now(tz=UTC).isoformat(),
-        )
-        store = SQLiteStore(temp_db_path)
-        try:
-            store.initialize()
-            store.persist_index(
-                entities=all_entities,
-                relations=python_relations,
-                metadata=metadata,
-            )
-            return store.list_entities(), store.list_relations()
-        finally:
-            store.close()
+    return all_entities, python_relations
 
 
 def _merge_entities(first: Sequence[Entity], second: Sequence[Entity]) -> list[Entity]:
