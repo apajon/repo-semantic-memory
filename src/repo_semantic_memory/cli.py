@@ -25,6 +25,7 @@ from repo_semantic_memory.eval import (
     write_compare_markdown_report,
     write_markdown_report,
 )
+from repo_semantic_memory.exporters import AiDirectoryExporter
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
@@ -235,6 +236,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--markdown-report",
         help="Write a Markdown comparison report to this path.",
     )
+    export_ai_parser = subparsers.add_parser(
+        "export-ai",
+        help="Export semantic memory as a portable .ai/ directory.",
+    )
+    export_ai_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    export_ai_parser.add_argument(
+        "--out",
+        default=".ai",
+        help="Output directory path for generated .ai/ files.",
+    )
+    export_ai_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing files in the output directory.",
+    )
     return parser
 
 
@@ -318,6 +338,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         parser.print_help()
         return 2
+    if args.command == "export-ai":
+        return _run_export_ai_command(db=args.db, out=args.out, force=args.force)
 
     parser.print_help()
     return 0
@@ -497,6 +519,42 @@ def _run_components_infer_command(*, db: str, emit_json: bool) -> int:
 def _run_components_list_command(*, db: str, emit_json: bool) -> int:
     """List the same derived component view as infer (components are not persisted)."""
     return _run_components_infer_command(db=db, emit_json=emit_json)
+
+
+def _run_export_ai_command(*, db: str, out: str, force: bool) -> int:
+    db_path = Path(db)
+    output_dir = Path(out)
+    entities, relations = _load_index_from_db(db)
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        metadata = store.get_metadata()
+    finally:
+        store.close()
+    generated_at = datetime.now(tz=UTC).isoformat()
+    exporter = AiDirectoryExporter(
+        db_path=db_path,
+        output_dir=output_dir,
+        entities=entities,
+        relations=relations,
+        metadata=metadata,
+        generated_at=generated_at,
+    )
+    result = exporter.export(force=force)
+    written = len(result.files_written)
+    skipped = len(result.files_skipped)
+    print(
+        f"exported to {output_dir} "
+        f"entities={result.entity_count} relations={result.relation_count} "
+        f"components={result.component_count} invariants={result.invariant_count} "
+        f"files_written={written} files_skipped={skipped}"
+    )
+    if result.files_skipped:
+        print(
+            f"skipped (use --force to overwrite): {', '.join(sorted(result.files_skipped))}",
+            file=sys.stderr,
+        )
+    return 0
 
 
 def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
