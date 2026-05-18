@@ -7,8 +7,8 @@ import json
 from collections.abc import Sequence
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
-from repo_semantic_memory.extractors import extract_filesystem_entities
-from repo_semantic_memory.model import Entity
+from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.version import get_version_info
 
 
@@ -27,6 +27,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit discovered file entities as JSON.",
+    )
+    index_python_parser = subparsers.add_parser(
+        "index-python", help="Extract Python symbols and structural relations."
+    )
+    index_python_parser.add_argument("path", help="Python file or directory to index.")
+    index_python_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit extracted entities and relations as JSON.",
     )
     return parser
 
@@ -51,13 +60,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "scan":
         entities = extract_filesystem_entities(args.path)
         if args.json:
-            payload = [
+            # Keep legacy list output for scan to preserve existing automation contracts.
+            scan_payload = [
                 {"id": entity.id.value, "kind": entity.kind, "path": entity.source_range.path}
                 for entity in entities
             ]
-            print(json.dumps(payload))
+            print(json.dumps(scan_payload, separators=(",", ":")))
             return 0
         print(_format_scan_table(entities))
+        return 0
+    if args.command == "index-python":
+        entities, relations = index_python_path(args.path)
+        if args.json:
+            index_payload = {
+                "entities": [entity.to_dict() for entity in entities],
+                "relations": [relation.to_dict() for relation in relations],
+            }
+            print(json.dumps(index_payload, separators=(",", ":")))
+            return 0
+        print(_format_index_python_summary(entities, relations))
         return 0
 
     parser.print_help()
@@ -74,6 +95,10 @@ def _format_scan_table(entities: Sequence[Entity]) -> str:
     return "\n".join(
         "  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in rows
     )
+
+
+def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence[Relation]) -> str:
+    return f"entities={len(entities)} relations={len(relations)}"
 
 
 if __name__ == "__main__":

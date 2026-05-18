@@ -12,6 +12,15 @@ This initial scaffold provides a typed Python CLI, explicit artifact versioning,
 - Python files are emitted as `module` entities.
 - Stable IDs are based on repository-relative POSIX file paths (for example `file:src/pkg/app.py`).
 - This MVP intentionally models files as modules; a future schema can split physical files from logical modules.
+- `rsm index-python <path> --json` extracts Python AST entities (`module`, `class`, `function`, `method`) and structural relations (`contains`, `imports`, `inherits`).
+- Python `qualified_name` values are logical symbol names (for example `python_symbols.DerivedThing`), while stable IDs keep repository-relative paths.
+
+### Python AST MVP limitations
+
+- Import resolution across files is not implemented.
+- Inheritance resolution across files is not implemented. Unresolved bases use IDs like `unresolved:python:<BaseName>`.
+- Nested functions are currently ignored.
+- Decorators and signatures are static best-effort metadata.
 
 ## Quick start
 
