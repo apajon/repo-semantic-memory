@@ -15,7 +15,7 @@ class CharacterBudget:
 
     def __post_init__(self) -> None:
         if self.max_chars < 1:
-            raise ValueError("Budget must be >= 1")
+            raise ValueError("Character budget must be >= 1")
 
     def append_line(self, line: str) -> bool:
         """Append a line if it fits the remaining budget."""

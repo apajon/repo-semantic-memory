@@ -33,7 +33,7 @@ def build_repo_map_markdown(
     module_sections = _build_module_sections(entities, relations)
 
     if not budget.append_line("# Repo map"):
-        return ""
+        return "# Repo map"[:budget_chars]
     if not budget.append_line(""):
         return budget.render()
 
@@ -98,18 +98,18 @@ def _build_module_sections(
 
 def _preferred_module_entities(entities: Sequence[Entity]) -> list[Entity]:
     modules = [entity for entity in entities if entity.kind == "module"]
-    python_by_path: dict[str, list[Entity]] = defaultdict(list)
+    python_modules_by_path: dict[str, list[Entity]] = defaultdict(list)
     passthrough_modules: list[Entity] = []
 
     for module in modules:
         if Path(module.source_range.path).suffix == ".py":
-            python_by_path[module.source_range.path].append(module)
+            python_modules_by_path[module.source_range.path].append(module)
             continue
         passthrough_modules.append(module)
 
     preferred_python_modules: list[Entity] = []
-    for path in sorted(python_by_path):
-        candidates = python_by_path[path]
+    for path in sorted(python_modules_by_path):
+        candidates = python_modules_by_path[path]
         python_ast_candidates = [
             candidate for candidate in candidates if candidate.id.value.startswith("python:")
         ]
