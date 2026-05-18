@@ -149,4 +149,6 @@ def _coerce_extractor_names(value: Any) -> tuple[str, ...]:
         )
     if isinstance(value, list) and all(isinstance(item, str) for item in value):
         return tuple(sorted(value))
-    raise ValueError("metadata.json: extraction_metadata.extractor_names must be list[str] or string")
+    raise ValueError(
+        "metadata.json: extraction_metadata.extractor_names must be list[str] or string"
+    )

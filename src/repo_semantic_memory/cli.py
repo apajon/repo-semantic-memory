@@ -26,8 +26,8 @@ from repo_semantic_memory.eval import (
     write_markdown_report,
 )
 from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_directory
-from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.memory import (
     export_invariants_yaml,
     import_invariants_yaml,

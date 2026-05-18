@@ -52,7 +52,9 @@ def test_export_jsonl_lines_parse(tmp_path: Path) -> None:
     db_path = _build_db(tmp_path)
     entities, relations, metadata = _load_index(db_path)
     out_dir = tmp_path / ".rsm" / "export"
-    export_jsonl_directory(output_dir=out_dir, entities=entities, relations=relations, metadata=metadata)
+    export_jsonl_directory(
+        output_dir=out_dir, entities=entities, relations=relations, metadata=metadata
+    )
 
     entity_lines = (out_dir / "entities.jsonl").read_text(encoding="utf-8").splitlines()
     relation_lines = (out_dir / "relations.jsonl").read_text(encoding="utf-8").splitlines()
@@ -78,8 +80,12 @@ def test_export_jsonl_is_deterministic(tmp_path: Path) -> None:
     out_1 = tmp_path / "out_1"
     out_2 = tmp_path / "out_2"
 
-    export_jsonl_directory(output_dir=out_1, entities=entities, relations=relations, metadata=metadata)
-    export_jsonl_directory(output_dir=out_2, entities=entities, relations=relations, metadata=metadata)
+    export_jsonl_directory(
+        output_dir=out_1, entities=entities, relations=relations, metadata=metadata
+    )
+    export_jsonl_directory(
+        output_dir=out_2, entities=entities, relations=relations, metadata=metadata
+    )
 
     assert (out_1 / "entities.jsonl").read_text(encoding="utf-8") == (
         out_2 / "entities.jsonl"
