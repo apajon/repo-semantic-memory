@@ -63,3 +63,51 @@ def test_index_python_command_json_output(capsys: pytest.CaptureFixture[str]) ->
     assert inherits_relations
     assert inherits_relations[0]["target_entity_id"] == "unresolved:python:basething"
     assert inherits_relations[0]["metadata"]["resolved"] is False
+
+
+def test_index_command_creates_db(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+    assert db_path.exists()
+
+    out = capsys.readouterr().out
+    assert "entities=" in out
+    assert "relations=" in out
+
+
+def test_inspect_entities_command_json_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    index_exit = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert index_exit == 0
+    capsys.readouterr()
+
+    inspect_exit = main(["inspect", "entities", "--db", str(db_path), "--json"])
+    assert inspect_exit == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list)
+    assert payload
+    assert "id" in payload[0]
+    assert "kind" in payload[0]
+
+
+def test_inspect_relations_command_json_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    index_exit = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert index_exit == 0
+    capsys.readouterr()
+
+    inspect_exit = main(["inspect", "relations", "--db", str(db_path), "--json"])
+    assert inspect_exit == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert isinstance(payload, list)
+    assert payload
+    assert "source_entity_id" in payload[0]
+    assert "target_entity_id" in payload[0]
