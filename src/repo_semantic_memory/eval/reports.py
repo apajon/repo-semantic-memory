@@ -260,7 +260,7 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
             "",
             (
                 "- `useful_context_ratio` is an approximation over selected "
-                "files/symbol identifiers (item-level, not token-level) "
+                "file and symbol identifiers (item-level, not token-level) "
                 "and does not measure semantic correctness."
             ),
             "- Character budget is character-based and not tokenizer-based.",

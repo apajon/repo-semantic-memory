@@ -97,10 +97,16 @@ def decide_winner(
     lexical_context_pack_result: BaselineTaskResult,
 ) -> WinnerName:
     """Choose task-level winner, prioritizing gold coverage before density/compactness."""
-    repo_map_coverage = repo_map_result.gold_file_coverage + repo_map_result.gold_symbol_coverage
+    repo_map_coverage = (
+        repo_map_result.gold_file_coverage + repo_map_result.gold_symbol_coverage,
+        repo_map_result.gold_file_coverage,
+        repo_map_result.gold_symbol_coverage,
+    )
     lexical_coverage = (
         lexical_context_pack_result.gold_file_coverage
-        + lexical_context_pack_result.gold_symbol_coverage
+        + lexical_context_pack_result.gold_symbol_coverage,
+        lexical_context_pack_result.gold_file_coverage,
+        lexical_context_pack_result.gold_symbol_coverage,
     )
     if repo_map_coverage != lexical_coverage:
         return "repo_map" if repo_map_coverage > lexical_coverage else "lexical_context_pack"
