@@ -167,6 +167,28 @@ rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
 rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 [--json]
 ```
 
+## Git temporal metadata (optional)
+
+`rsm index --with-git` attaches local Git metadata under `entity.metadata.git`.
+
+Important scope:
+
+- This metadata is **temporal context only**.
+- It is not semantic evidence, architectural truth, or inferred claims.
+- `SCHEMA_VERSION` remains unchanged because data is stored in the existing JSON metadata field.
+
+Current fields:
+
+- `last_commit_hash`
+- `last_commit_date` (stable ISO 8601 UTC, e.g. `2024-05-18T00:00:00+00:00`)
+- `commit_count`
+
+Behavior details:
+
+- Dirty state in `rsm git summary` is `true` when `git status --porcelain` returns any entry.
+- File lookups use repository-relative POSIX paths.
+- `--with-git` can be slower on large repositories because it runs local Git queries per indexed path.
+
 ## JSONL interop
 
 Machine-facing graph portability is available via JSONL import/export.
@@ -508,7 +530,7 @@ JSONL import/export
 
 Later:
 
-git temporal memory
+historical git temporal memory
 
 MCP server
 

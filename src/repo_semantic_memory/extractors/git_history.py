@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from repo_semantic_memory.model import JsonValue
@@ -97,7 +98,8 @@ def get_git_repository_summary(path: Path | str) -> GitRepositorySummary:
         in_git_repo=True,
         repository_root=repository_root.strip() if repository_root is not None else None,
         current_commit=current_commit.strip() if current_commit is not None else None,
-        is_dirty=None if status_porcelain is None else bool(status_porcelain.strip()),
+        # Dirty means `git status --porcelain` produced at least one status row.
+        is_dirty=None if status_porcelain is None else _is_dirty_from_porcelain(status_porcelain),
         tracked_file_count=tracked_count,
         unavailable_reason="; ".join(errors) if errors else None,
     )
@@ -112,7 +114,7 @@ def collect_git_file_metadata(
     root = Path(repository_root).resolve()
     metadata_by_path: dict[str, GitFileMetadata] = {}
     for relative_path in sorted(set(relative_paths)):
-        normalized = Path(relative_path).as_posix()
+        normalized = _normalize_repo_relative_path(relative_path)
         file_metadata = _extract_file_metadata(root=root, relative_path=normalized)
         if file_metadata is not None:
             metadata_by_path[normalized] = file_metadata
@@ -122,7 +124,7 @@ def collect_git_file_metadata(
 def _extract_file_metadata(*, root: Path, relative_path: str) -> GitFileMetadata | None:
     log_output, log_error = _run_git(
         cwd=root,
-        args=("log", "-n", "1", "--format=%H%n%cI", "--", relative_path),
+        args=("log", "-n", "1", "--format=%H%n%ct", "--", relative_path),
     )
     if log_output is None or log_error is not None:
         return None
@@ -142,7 +144,7 @@ def _extract_file_metadata(*, root: Path, relative_path: str) -> GitFileMetadata
 
     return GitFileMetadata(
         last_commit_hash=parsed.last_commit_hash,
-        last_commit_date=parsed.last_commit_date,
+        last_commit_date=_to_utc_isoformat(parsed.last_commit_unix_timestamp),
         commit_count=commit_count,
     )
 
@@ -150,14 +152,18 @@ def _extract_file_metadata(*, root: Path, relative_path: str) -> GitFileMetadata
 @dataclass(frozen=True)
 class _ParsedCommit:
     last_commit_hash: str
-    last_commit_date: str
+    last_commit_unix_timestamp: int
 
 
 def _parse_last_commit_payload(payload: str) -> _ParsedCommit | None:
     lines = [line.strip() for line in payload.splitlines() if line.strip()]
     if len(lines) < 2:
         return None
-    return _ParsedCommit(last_commit_hash=lines[0], last_commit_date=lines[1])
+    try:
+        timestamp = int(lines[1])
+    except ValueError:
+        return None
+    return _ParsedCommit(last_commit_hash=lines[0], last_commit_unix_timestamp=timestamp)
 
 
 def _parse_commit_count(payload: str) -> int | None:
@@ -174,6 +180,18 @@ def _count_tracked_files(payload: str) -> int:
     if payload == "":
         return 0
     return payload.count("\x00")
+
+
+def _to_utc_isoformat(unix_timestamp: int) -> str:
+    return datetime.fromtimestamp(unix_timestamp, tz=UTC).isoformat()
+
+
+def _is_dirty_from_porcelain(payload: str) -> bool:
+    return any(line.strip() for line in payload.splitlines())
+
+
+def _normalize_repo_relative_path(path: str) -> str:
+    return path.replace("\\", "/")
 
 
 def _run_git(*, cwd: Path, args: Sequence[str]) -> tuple[str | None, str | None]:

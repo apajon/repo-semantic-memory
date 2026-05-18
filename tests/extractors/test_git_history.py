@@ -8,9 +8,11 @@ from pathlib import Path
 import pytest
 
 from repo_semantic_memory.extractors.git_history import (
+    _is_dirty_from_porcelain,
     _parse_commit_count,
     _parse_last_commit_payload,
     _run_git,
+    _to_utc_isoformat,
     collect_git_file_metadata,
     get_git_repository_summary,
 )
@@ -36,11 +38,11 @@ def test_collect_git_file_metadata_parses_mocked_output(monkeypatch: pytest.Monk
     ) -> subprocess.CompletedProcess[str]:
         del cwd, check, capture_output, text, shell
         key = tuple(command)
-        if key == ("git", "log", "-n", "1", "--format=%H%n%cI", "--", "src/a.py"):
+        if key == ("git", "log", "-n", "1", "--format=%H%n%ct", "--", "src/a.py"):
             return subprocess.CompletedProcess(
                 args=command,
                 returncode=0,
-                stdout="abc123\n2026-05-18T00:00:00+00:00\n",
+                stdout="abc123\n1715990400\n",
                 stderr="",
             )
         if key == ("git", "rev-list", "--count", "HEAD", "--", "src/a.py"):
@@ -59,19 +61,26 @@ def test_collect_git_file_metadata_parses_mocked_output(monkeypatch: pytest.Monk
     assert list(metadata) == ["src/a.py"]
     assert metadata["src/a.py"].to_dict() == {
         "last_commit_hash": "abc123",
-        "last_commit_date": "2026-05-18T00:00:00+00:00",
+        "last_commit_date": "2024-05-18T00:00:00+00:00",
         "commit_count": 7,
     }
 
 
 def test_parse_helpers_are_deterministic() -> None:
-    parsed = _parse_last_commit_payload("deadbeef\n2026-05-18T00:00:00+00:00\n")
+    parsed = _parse_last_commit_payload("deadbeef\n1715990400\n")
     assert parsed is not None
     assert parsed.last_commit_hash == "deadbeef"
-    assert parsed.last_commit_date == "2026-05-18T00:00:00+00:00"
+    assert parsed.last_commit_unix_timestamp == 1715990400
     assert _parse_last_commit_payload("only-one-line\n") is None
+    assert _parse_last_commit_payload("deadbeef\nbad-timestamp\n") is None
     assert _parse_commit_count("12\n") == 12
     assert _parse_commit_count("not-a-number\n") is None
+
+
+def test_utc_format_and_dirty_parsing_helpers() -> None:
+    assert _to_utc_isoformat(1715990400) == "2024-05-18T00:00:00+00:00"
+    assert _is_dirty_from_porcelain("") is False
+    assert _is_dirty_from_porcelain(" M src/app.py\n") is True
 
 
 def test_run_git_uses_safe_subprocess_arguments(

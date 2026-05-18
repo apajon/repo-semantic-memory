@@ -47,7 +47,7 @@ def test_attach_git_metadata_to_entities_returns_unavailable_for_non_repo() -> N
 def test_attach_git_metadata_to_entities_attaches_file_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entities = [_entity("id:a", "src/a.py"), _entity("id:b", "README.md")]
+    entities = [_entity("id:a", "src\\a.py"), _entity("id:b", "README.md")]
     summary = GitRepositorySummary(
         path="/repo",
         in_git_repo=True,
@@ -66,7 +66,7 @@ def test_attach_git_metadata_to_entities_attaches_file_metadata(
         return {
             "src/a.py": GitFileMetadata(
                 last_commit_hash="def456",
-                last_commit_date="2026-05-18T00:00:00+00:00",
+                last_commit_date="2024-05-18T00:00:00+00:00",
                 commit_count=3,
             )
         }
@@ -81,7 +81,7 @@ def test_attach_git_metadata_to_entities_attaches_file_metadata(
     entity_by_id = {entity.id.value: entity for entity in result.entities}
     assert entity_by_id["id:a"].metadata["git"] == {
         "last_commit_hash": "def456",
-        "last_commit_date": "2026-05-18T00:00:00+00:00",
+        "last_commit_date": "2024-05-18T00:00:00+00:00",
         "commit_count": 3,
     }
     assert entity_by_id["id:b"].metadata == {}

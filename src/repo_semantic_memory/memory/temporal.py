@@ -1,4 +1,7 @@
-"""Temporal metadata enrichment helpers for entities."""
+"""Temporal metadata enrichment helpers for entities.
+
+Git metadata attached here is contextual timing information only; it is not semantic evidence.
+"""
 
 from __future__ import annotations
 
@@ -65,7 +68,9 @@ def _attach_metadata(
 ) -> list[Entity]:
     updated: list[Entity] = []
     for entity in entities:
-        metadata_payload = file_metadata.get(entity.source_range.path)
+        metadata_payload = file_metadata.get(
+            _normalize_repo_relative_path(entity.source_range.path)
+        )
         if metadata_payload is None:
             updated.append(entity)
             continue
@@ -86,3 +91,7 @@ def _attach_metadata(
 
 def _sorted_entities(entities: Sequence[Entity]) -> list[Entity]:
     return sorted(entities, key=lambda entity: entity.id.value)
+
+
+def _normalize_repo_relative_path(path: str) -> str:
+    return path.replace("\\", "/")
