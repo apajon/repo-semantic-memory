@@ -5,10 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.model import Entity, Relation
+from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import get_version_info
 
 
@@ -36,6 +39,50 @@ def build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit extracted entities and relations as JSON.",
+    )
+    index_parser = subparsers.add_parser(
+        "index",
+        help="Extract and persist semantic data to SQLite.",
+    )
+    index_parser.add_argument("path", help="Repository root path to index.")
+    index_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Inspect stored entities or relations.",
+    )
+    inspect_subparsers = inspect_parser.add_subparsers(dest="inspect_target")
+    inspect_entities_parser = inspect_subparsers.add_parser(
+        "entities",
+        help="List stored entities.",
+    )
+    inspect_entities_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    inspect_entities_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit rows as JSON.",
+    )
+    inspect_relations_parser = inspect_subparsers.add_parser(
+        "relations",
+        help="List stored relations.",
+    )
+    inspect_relations_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    inspect_relations_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit rows as JSON.",
     )
     return parser
 
@@ -80,6 +127,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         print(_format_index_python_summary(entities, relations))
         return 0
+    if args.command == "index":
+        return _run_index_command(path=args.path, db=args.db)
+    if args.command == "inspect":
+        if args.inspect_target == "entities":
+            return _run_inspect_entities_command(db=args.db, emit_json=args.json)
+        if args.inspect_target == "relations":
+            return _run_inspect_relations_command(db=args.db, emit_json=args.json)
+        parser.print_help()
+        return 2
 
     parser.print_help()
     return 0
@@ -99,6 +155,92 @@ def _format_scan_table(entities: Sequence[Entity]) -> str:
 
 def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence[Relation]) -> str:
     return f"entities={len(entities)} relations={len(relations)}"
+
+
+def _run_index_command(*, path: str, db: str) -> int:
+    repository_root = Path(path).resolve()
+    db_path = Path(db)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    filesystem_entities = extract_filesystem_entities(repository_root)
+    filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
+    python_entities, python_relations = index_python_path(repository_root)
+    all_entities = _merge_entities(filesystem_entities, python_entities)
+    metadata = build_default_extraction_metadata(
+        repository_root=repository_root,
+        extractor_names=("filesystem", "python_ast"),
+        timestamp=datetime.now(tz=UTC).isoformat(),
+    )
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        store.persist_index(entities=all_entities, relations=python_relations, metadata=metadata)
+    finally:
+        store.close()
+    print(f"entities={len(all_entities)} relations={len(python_relations)}")
+    return 0
+
+
+def _run_inspect_entities_command(*, db: str, emit_json: bool) -> int:
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        entities = store.list_entities()
+    finally:
+        store.close()
+
+    if emit_json:
+        print(json.dumps([entity.to_dict() for entity in entities], separators=(",", ":")))
+        return 0
+    print(_format_scan_table(entities))
+    return 0
+
+
+def _run_inspect_relations_command(*, db: str, emit_json: bool) -> int:
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        relations = store.list_relations()
+    finally:
+        store.close()
+
+    if emit_json:
+        print(json.dumps([relation.to_dict() for relation in relations], separators=(",", ":")))
+        return 0
+    print(_format_relations_table(relations))
+    return 0
+
+
+def _merge_entities(first: Sequence[Entity], second: Sequence[Entity]) -> list[Entity]:
+    merged: dict[str, Entity] = {}
+    for entity in [*first, *second]:
+        merged[entity.id.value] = entity
+    return sorted(merged.values(), key=lambda entity: entity.id.value)
+
+
+def _drop_python_module_file_entities(entities: Sequence[Entity]) -> list[Entity]:
+    return [
+        entity
+        for entity in entities
+        if not (entity.kind == "module" and Path(entity.source_range.path).suffix == ".py")
+    ]
+
+
+def _format_relations_table(relations: Sequence[Relation]) -> str:
+    rows = [("kind", "source_id", "target_id")]
+    for relation in relations:
+        rows.append(
+            (
+                str(relation.kind),
+                str(relation.source_entity_id.value),
+                str(relation.target_entity_id.value),
+            )
+        )
+    columns = zip(*rows, strict=True)
+    widths = [max(len(value) for value in column) for column in columns]
+    return "\n".join(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row)) for row in rows
+    )
 
 
 if __name__ == "__main__":
