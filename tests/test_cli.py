@@ -445,3 +445,27 @@ def test_components_list_matches_infer_derived_view(
     listed = json.loads(capsys.readouterr().out)
 
     assert listed == inferred
+
+
+def test_invariants_export_import_commands_work(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    invariants_path = tmp_path / "invariants.yaml"
+
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    export_exit = main(
+        ["invariants", "export", "--db", str(db_path), "--out", str(invariants_path)]
+    )
+    assert export_exit == 0
+    export_out = capsys.readouterr().out
+    assert "exported invariants document" in export_out
+    assert invariants_path.exists()
+
+    import_exit = main(["invariants", "import", "--db", str(db_path), str(invariants_path)])
+    assert import_exit == 0
+    import_out = capsys.readouterr().out
+    assert "validated invariants document" in import_out
