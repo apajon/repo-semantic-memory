@@ -130,3 +130,31 @@ def test_index_command_uses_ast_as_python_module_source(
     assert module_entities
     assert all(not entity["id"].startswith("file:") for entity in module_entities)
     assert any(entity["id"].startswith("python:") for entity in module_entities)
+
+
+def test_repo_map_command_with_db(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    index_exit = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert index_exit == 0
+    capsys.readouterr()
+
+    repo_map_exit = main(["repo-map", "--db", str(db_path), "--budget", "4000"])
+    assert repo_map_exit == 0
+
+    output = capsys.readouterr().out
+    assert output.startswith("# Repo map")
+    assert "## src/python_symbols.py" in output
+    assert "- module `python_symbols`" in output
+
+
+def test_repo_map_command_with_path(capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+
+    repo_map_exit = main(["repo-map", "--path", str(fixture_root), "--budget", "4000"])
+    assert repo_map_exit == 0
+
+    output = capsys.readouterr().out
+    assert output.startswith("# Repo map")
+    assert "## src/python_symbols.py" in output
+    assert "- module `python_symbols`" in output

@@ -1,0 +1,176 @@
+"""Compact markdown repository map rendering from indexed entities and relations."""
+
+from __future__ import annotations
+
+from collections import defaultdict
+from collections.abc import Sequence
+from dataclasses import dataclass
+from pathlib import Path
+
+from repo_semantic_memory.context.budget import CharacterBudget
+from repo_semantic_memory.model import Entity, Relation
+
+
+@dataclass(frozen=True)
+class ModuleSection:
+    """Flattened module section payload for deterministic rendering."""
+
+    module: Entity
+    classes: tuple[Entity, ...]
+    functions: tuple[Entity, ...]
+    methods_by_class_id: dict[str, tuple[Entity, ...]]
+    imports: tuple[str, ...]
+
+
+def build_repo_map_markdown(
+    entities: Sequence[Entity],
+    relations: Sequence[Relation],
+    *,
+    budget_chars: int,
+) -> str:
+    """Build a compact Markdown repository map constrained by an approximate character budget."""
+    budget = CharacterBudget(max_chars=budget_chars)
+    module_sections = _build_module_sections(entities, relations)
+
+    if not budget.append_line("# Repo map"):
+        return ""
+    if not budget.append_line(""):
+        return budget.render()
+
+    for index, section in enumerate(module_sections):
+        if index > 0 and not budget.append_line(""):
+            budget.append_truncation_notice()
+            break
+        if not _append_module_section(budget, section):
+            budget.append_truncation_notice()
+            break
+
+    return budget.render()
+
+
+def _build_module_sections(
+    entities: Sequence[Entity], relations: Sequence[Relation]
+) -> list[ModuleSection]:
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    contains_targets: dict[str, list[Entity]] = defaultdict(list)
+    import_names_by_module_id: dict[str, set[str]] = defaultdict(set)
+
+    for relation in relations:
+        if relation.kind == "contains":
+            target = entity_by_id.get(relation.target_entity_id.value)
+            if target is not None:
+                contains_targets[relation.source_entity_id.value].append(target)
+            continue
+        if relation.kind == "imports":
+            imported_name = relation.metadata.get("imported_name")
+            if isinstance(imported_name, str):
+                import_names_by_module_id[relation.source_entity_id.value].add(imported_name)
+
+    modules = _preferred_module_entities(entities)
+    sections: list[ModuleSection] = []
+    for module in modules:
+        contained = contains_targets.get(module.id.value, [])
+        classes = tuple(entity for entity in _sort_entities(contained) if entity.kind == "class")
+        functions = tuple(
+            entity for entity in _sort_entities(contained) if entity.kind == "function"
+        )
+        methods_by_class_id = {
+            class_entity.id.value: tuple(
+                method
+                for method in _sort_entities(contains_targets.get(class_entity.id.value, []))
+                if method.kind == "method"
+            )
+            for class_entity in classes
+        }
+        imports = tuple(sorted(import_names_by_module_id.get(module.id.value, set())))
+        sections.append(
+            ModuleSection(
+                module=module,
+                classes=classes,
+                functions=functions,
+                methods_by_class_id=methods_by_class_id,
+                imports=imports,
+            )
+        )
+
+    return sorted(sections, key=lambda section: _entity_sort_key(section.module))
+
+
+def _preferred_module_entities(entities: Sequence[Entity]) -> list[Entity]:
+    modules = [entity for entity in entities if entity.kind == "module"]
+    python_by_path: dict[str, list[Entity]] = defaultdict(list)
+    passthrough_modules: list[Entity] = []
+
+    for module in modules:
+        if Path(module.source_range.path).suffix == ".py":
+            python_by_path[module.source_range.path].append(module)
+            continue
+        passthrough_modules.append(module)
+
+    preferred_python_modules: list[Entity] = []
+    for path in sorted(python_by_path):
+        candidates = python_by_path[path]
+        python_ast_candidates = [
+            candidate for candidate in candidates if candidate.id.value.startswith("python:")
+        ]
+        selected_pool = python_ast_candidates if python_ast_candidates else candidates
+        preferred_python_modules.append(sorted(selected_pool, key=_entity_sort_key)[0])
+
+    all_modules = [*passthrough_modules, *preferred_python_modules]
+    return sorted(all_modules, key=_entity_sort_key)
+
+
+def _append_module_section(budget: CharacterBudget, section: ModuleSection) -> bool:
+    module = section.module
+    if not budget.append_line(f"## {module.source_range.path}"):
+        return False
+    if not budget.append_line(
+        f"- module `{module.qualified_name}` {_format_source_citation(module)}"
+    ):
+        return False
+
+    for class_entity in section.classes:
+        if not budget.append_line(
+            f"- class `{class_entity.qualified_name}` {_format_source_citation(class_entity)}"
+        ):
+            return False
+        for method in section.methods_by_class_id.get(class_entity.id.value, ()):
+            if not budget.append_line(
+                f"  - method `{method.name}` {_format_source_citation(method)}"
+            ):
+                return False
+
+    for function in section.functions:
+        if not budget.append_line(
+            f"- function `{function.qualified_name}` {_format_source_citation(function)}"
+        ):
+            return False
+
+    if section.imports:
+        if not budget.append_line(""):
+            return False
+        if not budget.append_line("Imports:"):
+            return False
+        for imported_name in section.imports:
+            if not budget.append_line(f"- `{imported_name}`"):
+                return False
+    return True
+
+
+def _format_source_citation(entity: Entity) -> str:
+    source = entity.source_range
+    return f"{source.path}:{source.start_line}-{source.end_line}"
+
+
+def _entity_sort_key(entity: Entity) -> tuple[str, int, int, str, str]:
+    return (
+        entity.source_range.path,
+        entity.source_range.start_line,
+        entity.source_range.start_col or 0,
+        entity.kind,
+        entity.id.value,
+    )
+
+
+def _sort_entities(entities: Sequence[Entity]) -> list[Entity]:
+    return sorted(entities, key=_entity_sort_key)
