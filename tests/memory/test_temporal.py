@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -47,7 +47,8 @@ def test_attach_git_metadata_to_entities_returns_unavailable_for_non_repo() -> N
 def test_attach_git_metadata_to_entities_attaches_file_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    entities = [_entity("id:a", "src\\a.py"), _entity("id:b", "README.md")]
+    windows_relative_path = str(PureWindowsPath("src/a.py"))
+    entities = [_entity("id:a", windows_relative_path), _entity("id:b", "README.md")]
     summary = GitRepositorySummary(
         path="/repo",
         in_git_repo=True,
