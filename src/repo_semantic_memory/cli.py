@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--budget",
         type=int,
         default=4000,
-        help="Approximate character budget for map output.",
+        help="Approximate character budget for map output (not tokenizer-based token count).",
     )
     return parser
 

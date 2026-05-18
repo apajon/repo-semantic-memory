@@ -6,7 +6,7 @@ from pathlib import Path
 
 from repo_semantic_memory.context.repo_map import build_repo_map_markdown
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
-from repo_semantic_memory.model import Entity, Relation
+from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
 
 def _fixture_root() -> Path:
@@ -31,7 +31,7 @@ def test_repo_map_includes_modules_classes_methods_functions_imports_and_source_
     assert "- class `python_symbols.DerivedThing` src/python_symbols.py:18-27" in output
     assert "  - method `decorated_method` src/python_symbols.py:23-24" in output
     assert "- function `python_symbols.top_level_function` src/python_symbols.py:31-32" in output
-    assert "Imports:" in output
+    assert "Static imports (unresolved):" in output
     assert "- `os`" in output
     assert "- `pkg.base.BaseThing`" in output
 
@@ -52,7 +52,7 @@ def test_repo_map_budget_is_approximately_respected() -> None:
 
     assert len(output) <= 160
     assert output.startswith("# Repo map")
-    assert output.endswith("...")
+    assert output.endswith("[truncated: budget reached]")
 
 
 def test_repo_map_rendering_is_deterministic() -> None:
@@ -62,3 +62,20 @@ def test_repo_map_rendering_is_deterministic() -> None:
     second = build_repo_map_markdown(entities, relations, budget_chars=4000)
 
     assert first == second
+
+
+def test_repo_map_source_citations_are_posix_paths() -> None:
+    entities = [
+        Entity(
+            id=StableId.from_parts(["python", "src\\pkg\\module.py", "module", "pkg.module"]),
+            kind="module",
+            name="module",
+            qualified_name="pkg.module",
+            source_range=SourceRange(path="src\\pkg\\module.py", start_line=3, end_line=6),
+        ),
+    ]
+
+    output = build_repo_map_markdown(entities, [], budget_chars=4000)
+
+    assert "## src/pkg/module.py" in output
+    assert "- module `pkg.module` src/pkg/module.py:3-6" in output

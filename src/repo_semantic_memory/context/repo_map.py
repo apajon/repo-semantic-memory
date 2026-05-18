@@ -122,7 +122,7 @@ def _preferred_module_entities(entities: Sequence[Entity]) -> list[Entity]:
 
 def _append_module_section(budget: CharacterBudget, section: ModuleSection) -> bool:
     module = section.module
-    if not budget.append_line(f"## {module.source_range.path}"):
+    if not budget.append_line(f"## {_to_posix_path(module.source_range.path)}"):
         return False
     if not budget.append_line(
         f"- module `{module.qualified_name}` {_format_source_citation(module)}"
@@ -149,7 +149,7 @@ def _append_module_section(budget: CharacterBudget, section: ModuleSection) -> b
     if section.imports:
         if not budget.append_line(""):
             return False
-        if not budget.append_line("Imports:"):
+        if not budget.append_line("Static imports (unresolved):"):
             return False
         for imported_name in section.imports:
             if not budget.append_line(f"- `{imported_name}`"):
@@ -159,9 +159,14 @@ def _append_module_section(budget: CharacterBudget, section: ModuleSection) -> b
 
 def _format_source_citation(entity: Entity) -> str:
     source = entity.source_range
+    path = _to_posix_path(source.path)
     if source.start_line == source.end_line:
-        return f"{source.path}:{source.start_line}"
-    return f"{source.path}:{source.start_line}-{source.end_line}"
+        return f"{path}:{source.start_line}"
+    return f"{path}:{source.start_line}-{source.end_line}"
+
+
+def _to_posix_path(path: str) -> str:
+    return path.replace("\\", "/")
 
 
 def _entity_sort_key(entity: Entity) -> tuple[str, int, int, str, str]:

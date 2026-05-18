@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -158,3 +159,18 @@ def test_repo_map_command_with_path(capsys: pytest.CaptureFixture[str]) -> None:
     assert output.startswith("# Repo map")
     assert "## src/python_symbols.py" in output
     assert "- module `python_symbols`" in output
+
+
+def test_repo_map_command_with_path_creates_no_persistent_artifacts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    target_repo = tmp_path / "repo"
+    shutil.copytree(fixture_root, target_repo)
+
+    repo_map_exit = main(["repo-map", "--path", str(target_repo), "--budget", "4000"])
+    assert repo_map_exit == 0
+    capsys.readouterr()
+
+    assert not (target_repo / ".rsm").exists()
+    assert list(target_repo.rglob("*.sqlite")) == []

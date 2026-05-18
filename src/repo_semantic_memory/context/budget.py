@@ -30,7 +30,7 @@ class CharacterBudget:
 
     def append_truncation_notice(self) -> None:
         """Append a deterministic truncation notice when budget is exhausted."""
-        self.append_line("...")
+        self.append_line("[truncated: budget reached]")
 
     def render(self) -> str:
         """Render accumulated lines."""
