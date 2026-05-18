@@ -9,7 +9,7 @@ from repo_semantic_memory.version import (
 
 
 def test_version_constants_are_deterministic() -> None:
-    assert PACKAGE_VERSION == "0.2.0"
+    assert PACKAGE_VERSION == "0.3.0"
     assert SCHEMA_VERSION == "0.1.0"
     assert CONTEXT_PACK_VERSION == "0.1.0"
 
