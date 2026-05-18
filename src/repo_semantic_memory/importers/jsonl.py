@@ -171,11 +171,11 @@ def _coerce_extractor_names(value: Any) -> tuple[str, ...]:
             return ()
         try:
             loaded = json.loads(stripped)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as exc:
             raise ValueError(
                 "metadata.json: extraction_metadata.extractor_names string must contain "
-                f"JSON array, got: {stripped!r}"
-            ) from None
+                f"JSON array, got: {stripped!r}; parse error: {exc.msg}"
+            ) from exc
         if isinstance(loaded, list) and all(isinstance(item, str) for item in loaded):
             return tuple(sorted(loaded))
         raise ValueError(

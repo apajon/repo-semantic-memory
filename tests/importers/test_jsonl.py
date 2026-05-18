@@ -122,6 +122,7 @@ def test_import_jsonl_missing_extraction_metadata_does_not_invent_facts(tmp_path
 
     import_jsonl_directory(input_dir=export_dir, db_path=imported_db)
     _, _, imported_metadata = _load_index(imported_db)
+    assert imported_metadata["schema_version"] == "0.1.0"
     assert imported_metadata["repository_root"] == ""
     assert imported_metadata["package_version"] == ""
     assert imported_metadata["timestamp"] == ""
