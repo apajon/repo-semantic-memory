@@ -25,7 +25,8 @@ from repo_semantic_memory.eval import (
     write_compare_markdown_report,
     write_markdown_report,
 )
-from repo_semantic_memory.exporters import AiDirectoryExporter
+from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_directory
+from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.memory import (
     export_invariants_yaml,
@@ -297,6 +298,35 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Overwrite existing files in the output directory.",
     )
+    export_jsonl_parser = subparsers.add_parser(
+        "export-jsonl",
+        help="Export indexed entities/relations as JSONL for machine interop.",
+    )
+    export_jsonl_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    export_jsonl_parser.add_argument(
+        "--out",
+        default=".rsm/export",
+        help="Output directory for JSONL export files.",
+    )
+    import_jsonl_parser = subparsers.add_parser(
+        "import-jsonl",
+        help="Import JSONL export files into SQLite.",
+    )
+    import_jsonl_parser.add_argument(
+        "--in",
+        dest="input_dir",
+        required=True,
+        help="Input directory containing JSONL export files.",
+    )
+    import_jsonl_parser.add_argument(
+        "--db",
+        required=True,
+        help="SQLite database file path to create or update.",
+    )
     return parser
 
 
@@ -389,6 +419,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.command == "export-ai":
         return _run_export_ai_command(db=args.db, out=args.out, force=args.force)
+    if args.command == "export-jsonl":
+        return _run_export_jsonl_command(db=args.db, out=args.out)
+    if args.command == "import-jsonl":
+        return _run_import_jsonl_command(input_dir=args.input_dir, db=args.db)
 
     parser.print_help()
     return 0
@@ -625,6 +659,43 @@ def _run_export_ai_command(*, db: str, out: str, force: bool) -> int:
             f"skipped (use --force to overwrite): {', '.join(sorted(result.files_skipped))}",
             file=sys.stderr,
         )
+    return 0
+
+
+def _run_export_jsonl_command(*, db: str, out: str) -> int:
+    db_path = Path(db)
+    output_dir = Path(out)
+    entities, relations = _load_index_from_db(db)
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        metadata = store.get_metadata()
+    finally:
+        store.close()
+    result = export_jsonl_directory(
+        output_dir=output_dir,
+        entities=entities,
+        relations=relations,
+        metadata=metadata,
+    )
+    print(
+        f"exported jsonl to {output_dir} "
+        f"entities={result.entity_count} relations={result.relation_count} "
+        f"components={result.component_count} files_written={len(result.files_written)}"
+    )
+    return 0
+
+
+def _run_import_jsonl_command(*, input_dir: str, db: str) -> int:
+    try:
+        result = import_jsonl_directory(input_dir=input_dir, db_path=db)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    print(
+        f"imported jsonl from {result.input_dir} "
+        f"entities={result.entity_count} relations={result.relation_count} db={result.db_path}"
+    )
     return 0
 
 

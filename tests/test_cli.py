@@ -481,3 +481,46 @@ def test_invariants_export_import_commands_work(
     assert import_exit == 0
     import_out = capsys.readouterr().out
     assert "validated invariants document" in import_out
+
+
+def test_export_jsonl_command_creates_expected_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    out_dir = tmp_path / ".rsm" / "export"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(["export-jsonl", "--db", str(db_path), "--out", str(out_dir)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "exported jsonl to" in out
+    assert (out_dir / "entities.jsonl").exists()
+    assert (out_dir / "relations.jsonl").exists()
+    assert (out_dir / "metadata.json").exists()
+
+
+def test_import_jsonl_command_reconstructs_db(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    source_db_path = tmp_path / ".rsm" / "index.sqlite"
+    export_dir = tmp_path / ".rsm" / "export"
+    imported_db_path = tmp_path / ".rsm" / "imported.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(source_db_path)]) == 0
+    capsys.readouterr()
+    assert main(["export-jsonl", "--db", str(source_db_path), "--out", str(export_dir)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        ["import-jsonl", "--in", str(export_dir), "--db", str(imported_db_path)]
+    )
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "imported jsonl from" in out
+
+    inspect_exit = main(["inspect", "entities", "--db", str(imported_db_path), "--json"])
+    assert inspect_exit == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload

@@ -61,8 +61,6 @@ Implemented:
 
 Not implemented yet:
 
-- `.ai/` export
-- JSONL import/export
 - git temporal memory
 - MCP server
 - embeddings
@@ -161,9 +159,23 @@ rsm components infer --db .rsm/index.sqlite [--json]
 rsm components list --db .rsm/index.sqlite [--json]
 rsm invariants export --db .rsm/index.sqlite --out invariants.yaml
 rsm invariants import --db .rsm/index.sqlite invariants.yaml
+rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
+rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
 rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
 rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 [--json]
 ```
+
+## JSONL interop
+
+Machine-facing graph portability is available via JSONL import/export:
+
+```bash
+uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
+uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
+```
+
+`export-jsonl` emits deterministic `entities.jsonl`, `relations.jsonl`, and `metadata.json`
+(`components.jsonl` is included only when inferred components are available).
 
 ## Data model
 
