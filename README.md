@@ -61,7 +61,6 @@ Implemented:
 
 Not implemented yet:
 
-- claims and invariants
 - `.ai/` export
 - JSONL import/export
 - git temporal memory
@@ -160,6 +159,8 @@ rsm repo-map --path <path> --budget 4000
 rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml]
 rsm components infer --db .rsm/index.sqlite [--json]
 rsm components list --db .rsm/index.sqlite [--json]
+rsm invariants export --db .rsm/index.sqlite --out invariants.yaml
+rsm invariants import --db .rsm/index.sqlite invariants.yaml
 rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
 rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 [--json]
 ```
@@ -323,6 +324,28 @@ uv run rsm components list --db .rsm/index.sqlite --json
 ```
 
 `components list` recomputes and returns the same derived view as `components infer`.
+
+## Claims and invariants
+
+Claims and invariants now have explicit typed models with evidence and uncertainty states.
+
+Current persistence decision:
+
+- claims/invariants are exported and imported as standalone JSON-style YAML 1.2-compatible files
+- SQLite schema is unchanged for this phase (no claim/invariant tables yet)
+- `SCHEMA_VERSION` is intentionally unchanged because persisted DB schema did not change
+- `--db` is used only for index/schema compatibility checks; claim/invariant payloads are not read from SQLite
+
+Use:
+
+```bash
+uv run rsm invariants export --db .rsm/index.sqlite --out invariants.yaml
+uv run rsm invariants import --db .rsm/index.sqlite invariants.yaml
+```
+
+`rsm invariants import` currently validates the payload only and does not persist claims/invariants to SQLite.
+`rsm invariants export` writes an explicit empty document note when no claims/invariants are provided:
+`No claims or invariants are inferred automatically by default.`
 
 ## Retrieval benchmarks
 

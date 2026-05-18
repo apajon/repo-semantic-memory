@@ -27,7 +27,11 @@ from repo_semantic_memory.eval import (
 )
 from repo_semantic_memory.exporters import AiDirectoryExporter
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
-from repo_semantic_memory.memory import infer_semantic_components
+from repo_semantic_memory.memory import (
+    export_invariants_yaml,
+    import_invariants_yaml,
+    infer_semantic_components,
+)
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import get_version_info
@@ -180,6 +184,44 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit inferred semantic components as JSON.",
     )
+    invariants_parser = subparsers.add_parser(
+        "invariants",
+        help="Import and export standalone claim/invariant YAML documents.",
+    )
+    invariants_subparsers = invariants_parser.add_subparsers(dest="invariants_target")
+    invariants_export_parser = invariants_subparsers.add_parser(
+        "export",
+        help="Export claims/invariants to JSON-style YAML 1.2-compatible output.",
+    )
+    invariants_export_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help=(
+            "SQLite database file path checked for index availability/schema compatibility only; "
+            "claim/invariant data currently lives in standalone YAML files."
+        ),
+    )
+    invariants_export_parser.add_argument(
+        "--out",
+        required=True,
+        help="Output YAML file path.",
+    )
+    invariants_import_parser = invariants_subparsers.add_parser(
+        "import",
+        help="Import and validate claims/invariants YAML payload.",
+    )
+    invariants_import_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help=(
+            "SQLite database file path checked for index availability/schema compatibility only; "
+            "claim/invariant data currently lives in standalone YAML files."
+        ),
+    )
+    invariants_import_parser.add_argument(
+        "path",
+        help="Input YAML file path.",
+    )
     eval_parser = subparsers.add_parser(
         "eval", help="Run local deterministic benchmark evaluation."
     )
@@ -318,6 +360,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_components_infer_command(db=args.db, emit_json=args.json)
         if args.components_target == "list":
             return _run_components_list_command(db=args.db, emit_json=args.json)
+        parser.print_help()
+        return 2
+    if args.command == "invariants":
+        if args.invariants_target == "export":
+            return _run_invariants_export_command(db=args.db, out=args.out)
+        if args.invariants_target == "import":
+            return _run_invariants_import_command(db=args.db, path=args.path)
         parser.print_help()
         return 2
     if args.command == "eval":
@@ -519,6 +568,28 @@ def _run_components_infer_command(*, db: str, emit_json: bool) -> int:
 def _run_components_list_command(*, db: str, emit_json: bool) -> int:
     """List the same derived component view as infer (components are not persisted)."""
     return _run_components_infer_command(db=db, emit_json=emit_json)
+
+
+def _run_invariants_export_command(*, db: str, out: str) -> int:
+    _load_index_from_db(db)
+    document = export_invariants_yaml(out_path=out)
+    print(
+        f"exported invariants document to {out} "
+        f"claims={len(document.claims)} invariants={len(document.invariants)} "
+        "(standalone YAML; SQLite persistence not yet implemented)"
+    )
+    return 0
+
+
+def _run_invariants_import_command(*, db: str, path: str) -> int:
+    _load_index_from_db(db)
+    document = import_invariants_yaml(path)
+    print(
+        f"validated invariants document from {path} "
+        f"claims={len(document.claims)} invariants={len(document.invariants)} "
+        "(standalone YAML; SQLite persistence not yet implemented)"
+    )
+    return 0
 
 
 def _run_export_ai_command(*, db: str, out: str, force: bool) -> int:
