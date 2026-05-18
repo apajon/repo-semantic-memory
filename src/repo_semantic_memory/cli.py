@@ -26,9 +26,14 @@ from repo_semantic_memory.eval import (
     write_markdown_report,
 )
 from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_directory
-from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.extractors import (
+    extract_filesystem_entities,
+    get_git_repository_summary,
+    index_python_path,
+)
 from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.memory import (
+    attach_git_metadata_to_entities,
     export_invariants_yaml,
     import_invariants_yaml,
     infer_semantic_components,
@@ -72,6 +77,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--db",
         default=".rsm/index.sqlite",
         help="SQLite database file path.",
+    )
+    index_parser.add_argument(
+        "--with-git",
+        action="store_true",
+        help="Attach optional local Git temporal metadata to indexed entities.",
+    )
+
+    git_parser = subparsers.add_parser(
+        "git",
+        help="Inspect minimal local Git repository metadata.",
+    )
+    git_subparsers = git_parser.add_subparsers(dest="git_target")
+    git_summary_parser = git_subparsers.add_parser(
+        "summary",
+        help="Show minimal Git repository summary for a path.",
+    )
+    git_summary_parser.add_argument("path", help="Path to inspect.")
+    git_summary_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit summary as JSON.",
     )
 
     inspect_parser = subparsers.add_parser(
@@ -371,7 +397,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_format_index_python_summary(entities, relations))
         return 0
     if args.command == "index":
-        return _run_index_command(path=args.path, db=args.db)
+        return _run_index_command(path=args.path, db=args.db, with_git=args.with_git)
+    if args.command == "git":
+        if args.git_target == "summary":
+            return _run_git_summary_command(path=args.path, emit_json=args.json)
+        parser.print_help()
+        return 2
     if args.command == "inspect":
         if args.inspect_target == "entities":
             return _run_inspect_entities_command(db=args.db, emit_json=args.json)
@@ -444,7 +475,7 @@ def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence
     return f"entities={len(entities)} relations={len(relations)}"
 
 
-def _run_index_command(*, path: str, db: str) -> int:
+def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -453,9 +484,27 @@ def _run_index_command(*, path: str, db: str) -> int:
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     python_entities, python_relations = index_python_path(repository_root)
     all_entities = _merge_entities(filesystem_entities, python_entities)
+    git_status = "disabled"
+    if with_git:
+        git_summary = get_git_repository_summary(repository_root)
+        temporal_result = attach_git_metadata_to_entities(
+            all_entities,
+            repository_root=repository_root,
+            summary=git_summary,
+        )
+        all_entities = temporal_result.entities
+        git_status = temporal_result.status
+        if temporal_result.warning:
+            print(f"git metadata: {temporal_result.warning}", file=sys.stderr)
     metadata = build_default_extraction_metadata(
         repository_root=repository_root,
-        extractor_names=("filesystem", "python_ast"),
+        extractor_names=(
+            "filesystem",
+            "git_history",
+            "python_ast",
+        )
+        if with_git
+        else ("filesystem", "python_ast"),
         timestamp=datetime.now(tz=UTC).isoformat(),
     )
     store = SQLiteStore(db_path)
@@ -464,7 +513,33 @@ def _run_index_command(*, path: str, db: str) -> int:
         store.persist_index(entities=all_entities, relations=python_relations, metadata=metadata)
     finally:
         store.close()
+    if with_git:
+        print(
+            f"entities={len(all_entities)} relations={len(python_relations)} "
+            f"git_metadata={git_status}"
+        )
+        return 0
     print(f"entities={len(all_entities)} relations={len(python_relations)}")
+    return 0
+
+
+def _run_git_summary_command(*, path: str, emit_json: bool) -> int:
+    summary = get_git_repository_summary(path)
+    if emit_json:
+        print(json.dumps(summary.to_dict(), separators=(",", ":")))
+        return 0
+    if not summary.in_git_repo:
+        print(
+            "Path is not inside a Git repository. "
+            f"path={summary.path} reason={summary.unavailable_reason or 'unknown'}"
+        )
+        return 0
+    print(f"repository_root: {summary.repository_root}")
+    print(f"current_commit: {summary.current_commit}")
+    print(f"dirty: {summary.is_dirty}")
+    print(f"tracked_files: {summary.tracked_file_count}")
+    if summary.unavailable_reason:
+        print(f"note: {summary.unavailable_reason}")
     return 0
 
 

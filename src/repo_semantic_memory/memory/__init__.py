@@ -10,10 +10,16 @@ from repo_semantic_memory.memory.invariants import (
     export_invariants_yaml,
     import_invariants_yaml,
 )
+from repo_semantic_memory.memory.temporal import (
+    TemporalMetadataResult,
+    attach_git_metadata_to_entities,
+)
 
 __all__ = [
     "CompactSemanticComponent",
     "InvariantsDocument",
+    "TemporalMetadataResult",
+    "attach_git_metadata_to_entities",
     "compact_component_labels",
     "export_invariants_yaml",
     "infer_semantic_components",
