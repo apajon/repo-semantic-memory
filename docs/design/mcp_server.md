@@ -24,6 +24,17 @@ A full MCP server is intentionally deferred because the project is still stabili
 This phase documents the contract and adds typed placeholders only. It does **not** add an
 MCP runtime dependency, a server process, or any network behavior.
 
+## Pre-stable placeholder status
+
+The MCP dataclasses added in this step are design artifacts for an internal, pre-runtime phase.
+They document intended request/response shapes, but they are **not** a declared stable public API
+yet. Callers should treat them as provisional contracts that may evolve until a read-only MCP
+runtime, serialization contract, and compatibility policy are explicitly documented.
+
+`get_mcp_tool_contracts()` is similarly declarative only. It returns metadata describing planned
+tool names and typed envelopes; it does **not** register executable handlers, start a transport,
+perform repository queries, or imply that the runtime contract is frozen.
+
 ## Scope and non-goals
 
 This future MCP layer must:
@@ -128,7 +139,9 @@ portable handoff format.
 
 ### `validate_patch_context`
 
-Check whether a proposed patch has enough repository context before an agent acts on it.
+Check whether a proposed patch has enough cited repository context before an agent acts on it.
+This tool is about context coverage and touched-file justification, not patch correctness,
+linting, testing, or semantic validation of the patch itself.
 
 **Inputs**
 - `task`: current task statement
@@ -137,7 +150,8 @@ Check whether a proposed patch has enough repository context before an agent act
 - `budget_chars`: optional target budget for suggested follow-up context
 
 **Outputs**
-- missing paths, entities, or relations that should be loaded first
+- missing paths, entities, relations, or citations that should be loaded first
+- touched files that still need explicit justification in the available context
 - suggested context-pack or symbol queries to gather that context
 - uncertainty notes when the repository index does not cover touched files
 - a bounded remediation summary suitable for an agent loop
@@ -256,13 +270,21 @@ an interactive query contract layered on top of local indexed data.
 Exposing repo queries to agents introduces security constraints even without a network server.
 The future runtime should preserve these boundaries:
 
+- no network access by default
 - repository access must stay rooted to explicitly configured local paths
-- tool inputs must not permit arbitrary filesystem traversal outside the repository root
-- no shell execution from MCP query tools
+- tool inputs must not permit arbitrary filesystem traversal or reads outside the repository root
+  unless explicit future configuration allows it
+- no arbitrary command execution or shell execution from MCP query tools
 - no implicit re-indexing or mutation without explicit future write-tool design
 - Git exposure should remain summary-only unless more granular access is reviewed
 - large result sets must be bounded to prevent context flooding or accidental data overexposure
 - citations should reference repository-local evidence only
+
+## Versioning impact
+
+Keeping `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` unchanged in this step is correct because the
+change is design-only. No persisted storage schema, `.ai/` artifact contract, JSONL interchange
+format, or serialized context-pack payload was modified here.
 
 ## Placeholder code in this step
 

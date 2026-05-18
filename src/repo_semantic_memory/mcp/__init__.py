@@ -1,4 +1,8 @@
-"""Minimal typed placeholders for the future MCP integration layer."""
+"""Minimal typed placeholders for the future MCP integration layer.
+
+These exports are pre-stable design artifacts for a future read-only MCP
+surface. They are not a declared stable public API yet.
+"""
 
 from repo_semantic_memory.mcp.tools import (
     BudgetEnvelope,

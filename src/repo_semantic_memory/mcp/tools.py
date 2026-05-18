@@ -1,7 +1,8 @@
 """Typed placeholders for a future MCP tool surface.
 
 These contracts document the intended local query API without introducing any
-runtime MCP dependency, transport implementation, or server process.
+runtime MCP dependency, transport implementation, or server process. They are
+pre-stable design artifacts rather than a declared public compatibility surface.
 """
 
 from __future__ import annotations
@@ -71,7 +72,10 @@ class BudgetEnvelope:
 
 @dataclass(frozen=True)
 class ToolContract:
-    """Declarative description of a future MCP tool."""
+    """Declarative description of a future MCP tool.
+
+    This is metadata only; it does not bind an executable MCP handler.
+    """
 
     name: McpToolName
     summary: str
@@ -214,7 +218,11 @@ class ExportAiMemoryResponse:
 
 @dataclass(frozen=True)
 class ValidatePatchContextRequest:
-    """Placeholder request for patch-context sufficiency checks."""
+    """Placeholder request for cited patch-context coverage checks.
+
+    This future tool is scoped to touched-file justification and context
+    sufficiency, not patch correctness.
+    """
 
     task: str
     changed_paths: tuple[str, ...]
@@ -232,7 +240,11 @@ class ValidatePatchContextRequest:
 
 @dataclass(frozen=True)
 class ValidatePatchContextResponse:
-    """Placeholder response for missing-context recommendations."""
+    """Placeholder response for missing-context recommendations.
+
+    The response is meant to explain what context is missing or unjustified,
+    not whether a patch is correct.
+    """
 
     missing_paths: tuple[str, ...] = ()
     missing_entity_ids: tuple[str, ...] = ()
@@ -265,7 +277,11 @@ class GetGitSummaryResponse:
 
 
 def get_mcp_tool_contracts() -> tuple[ToolContract, ...]:
-    """Return the deterministic set of planned MCP tools."""
+    """Return declarative contracts for the planned MCP tool surface.
+
+    The returned values describe names and typed envelopes only. They are not
+    executable handlers and do not start or configure any MCP runtime.
+    """
 
     return (
         ToolContract(
