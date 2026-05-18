@@ -18,7 +18,7 @@ def test_runner_is_deterministic_and_reports_missing_gold(tmp_path: Path) -> Non
                 "tasks:",
                 "  - id: deterministic_001",
                 "    category: code_localization",
-                '    prompt: "Where is python symbols defined?"',
+                '    prompt: "Where are python symbols defined?"',
                 "    gold:",
                 "      files:",
                 "        - src/python_symbols.py",

@@ -128,7 +128,7 @@ def _run_task(
     missing_gold_files = tuple(sorted(set(task.gold.files) - available_files))
     missing_gold_symbols = tuple(sorted(set(task.gold.symbols) - available_symbols))
 
-    context_character_estimate = len("\n".join([*ranked_files, *ranked_symbols]))
+    context_character_estimate = _estimate_context_characters(ranked_files, ranked_symbols)
     return RetrievalOutcome(
         task_id=task.id,
         category=task.category,
@@ -183,3 +183,10 @@ def _collect_metadata_strings(value: object, out: list[str]) -> None:
 def _tokenize(text: str) -> tuple[str, ...]:
     tokens = sorted({token.lower() for token in _TOKEN_PATTERN.findall(text)})
     return tuple(tokens)
+
+
+def _estimate_context_characters(
+    ranked_files: tuple[str, ...], ranked_symbols: tuple[str, ...]
+) -> int:
+    """Return a simple newline-joined character estimate for baseline context size."""
+    return len("\n".join([*ranked_files, *ranked_symbols]))

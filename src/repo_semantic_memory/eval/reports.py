@@ -93,14 +93,7 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
     for outcome in result.outcomes:
         files_text = ", ".join(outcome.missing_gold_files) or "-"
         symbols_text = ", ".join(outcome.missing_gold_symbols) or "-"
-        lines.append(
-            "| {task_id} | {category} | {missing_gold_files} | {missing_gold_symbols} |".format(
-                task_id=outcome.task_id,
-                category=outcome.category,
-                missing_gold_files=files_text or "-",
-                missing_gold_symbols=symbols_text or "-",
-            )
-        )
+        lines.append(f"| {outcome.task_id} | {outcome.category} | {files_text} | {symbols_text} |")
     return "\n".join(lines)
 
 
