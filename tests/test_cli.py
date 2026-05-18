@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from repo_semantic_memory.cli import main
+from repo_semantic_memory.model import Entity, SourceRange, StableId
+from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 
 
 def test_help_flag_prints_usage(capsys: pytest.CaptureFixture[str]) -> None:
@@ -481,3 +483,65 @@ def test_invariants_export_import_commands_work(
     assert import_exit == 0
     import_out = capsys.readouterr().out
     assert "validated invariants document" in import_out
+
+
+def test_export_jsonl_command_creates_expected_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    out_dir = tmp_path / ".rsm" / "export"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(["export-jsonl", "--db", str(db_path), "--out", str(out_dir)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "exported jsonl to" in out
+    assert (out_dir / "entities.jsonl").exists()
+    assert (out_dir / "relations.jsonl").exists()
+    assert (out_dir / "metadata.json").exists()
+
+
+def test_import_jsonl_command_reconstructs_db(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_db_path = tmp_path / ".rsm" / "index.sqlite"
+    export_dir = tmp_path / ".rsm" / "export"
+    imported_db_path = tmp_path / ".rsm" / "imported.sqlite"
+    source_db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    store = SQLiteStore(source_db_path)
+    try:
+        store.initialize()
+        metadata = build_default_extraction_metadata(
+            repository_root=tmp_path,
+            extractor_names=("test",),
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+        lifecycle_entity = Entity(
+            id=StableId("python:src/example.py:class:example.lifecyclemanager"),
+            kind="class",
+            name="LifecycleManager",
+            qualified_name="example.LifecycleManager",
+            source_range=SourceRange(path="src/example.py", start_line=1, end_line=20),
+        )
+        store.persist_index(entities=[lifecycle_entity], relations=[], metadata=metadata)
+    finally:
+        store.close()
+
+    assert main(["export-jsonl", "--db", str(source_db_path), "--out", str(export_dir)]) == 0
+    export_capture = capsys.readouterr()
+    assert "components=1" in export_capture.out
+
+    exit_code = main(["import-jsonl", "--in", str(export_dir), "--db", str(imported_db_path)])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "imported jsonl from" in out
+    assert "ignored components.jsonl" in captured.err
+
+    inspect_exit = main(["inspect", "entities", "--db", str(imported_db_path), "--json"])
+    assert inspect_exit == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload
