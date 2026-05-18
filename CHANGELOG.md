@@ -2,6 +2,38 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-05-18)
+
+### Bug Fixes
+
+- Address repo-map merge feedback items
+  ([`a94fe33`](https://github.com/apajon/repo-semantic-memory/commit/a94fe33bd0edb92a8bc094349ee910df11fce065))
+
+- Refine repo map citation format and path indexing flow
+  ([`cca5e5a`](https://github.com/apajon/repo-semantic-memory/commit/cca5e5a401e4a3abc192955976604916a927fd2d))
+
+### Chores
+
+- Polish repo map budget and naming details
+  ([`f560950`](https://github.com/apajon/repo-semantic-memory/commit/f560950f71d3c663246090cdd1b6e0d74e881a0c))
+
+- Revert unrelated uv lockfile change
+  ([`4d40cd4`](https://github.com/apajon/repo-semantic-memory/commit/4d40cd40c1d8e2117d60af1db5a3dff73e204415))
+
+- Start repo map implementation plan
+  ([`e0a7c9a`](https://github.com/apajon/repo-semantic-memory/commit/e0a7c9aa7a50312db563c14eae8b8812e0089cee))
+
+### Features
+
+- Add compact repo map generator and CLI command
+  ([`13b3010`](https://github.com/apajon/repo-semantic-memory/commit/13b3010f3b351679e99084ad0f3359de96194650))
+
+### Testing
+
+- Align version constant test with package version
+  ([`5f0df03`](https://github.com/apajon/repo-semantic-memory/commit/5f0df03f3e43db792e18f4b025d1216b8ca28cf5))
+
+
 ## v0.4.0 (2026-05-18)
 
 ### Bug Fixes
