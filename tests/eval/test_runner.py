@@ -212,7 +212,9 @@ def test_run_baseline_comparison_passes_budget_to_both_baselines(
 
     observed_budgets: list[int] = []
 
-    def _fake_evaluate_task_baselines(*, task: object, entities: object, relations: object, budget_chars: int) -> TaskBaselineComparison:
+    def _fake_evaluate_task_baselines(
+        *, task: object, entities: object, relations: object, budget_chars: int
+    ) -> TaskBaselineComparison:
         del task, entities, relations
         observed_budgets.append(budget_chars)
         baseline = BaselineTaskResult(

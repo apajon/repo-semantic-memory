@@ -14,7 +14,11 @@ from repo_semantic_memory.eval.reports import (
     to_compare_json_payload,
     write_compare_markdown_report,
 )
-from repo_semantic_memory.eval.runner import BaselineComparisonResult, CompareAggregate, RetrievalBenchmarkResult
+from repo_semantic_memory.eval.runner import (
+    BaselineComparisonResult,
+    CompareAggregate,
+    RetrievalBenchmarkResult,
+)
 
 
 def test_report_generation_outputs_expected_sections() -> None:

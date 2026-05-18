@@ -18,8 +18,8 @@ from repo_semantic_memory.context import (
 from repo_semantic_memory.eval import (
     render_compact_table,
     render_compare_compact_table,
-    run_retrieval_benchmark,
     run_baseline_comparison,
+    run_retrieval_benchmark,
     to_compare_json_payload,
     to_json_payload,
     write_compare_markdown_report,

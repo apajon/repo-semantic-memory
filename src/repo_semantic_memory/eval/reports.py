@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from repo_semantic_memory.eval.baselines import TaskBaselineComparison
 from repo_semantic_memory.eval.runner import BaselineComparisonResult, RetrievalBenchmarkResult
 
 
@@ -26,8 +27,12 @@ def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, objec
         "db_path": result.db_path,
         "budget": result.budget,
         "aggregate": {
-            "average_context_character_count": dict(sorted(result.aggregate.average_context_character_count.items())),
-            "average_gold_file_coverage": dict(sorted(result.aggregate.average_gold_file_coverage.items())),
+            "average_context_character_count": dict(
+                sorted(result.aggregate.average_context_character_count.items())
+            ),
+            "average_gold_file_coverage": dict(
+                sorted(result.aggregate.average_gold_file_coverage.items())
+            ),
             "average_gold_symbol_coverage": dict(
                 sorted(result.aggregate.average_gold_symbol_coverage.items())
             ),
@@ -230,18 +235,18 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         "|---|---|---|---|---|---|",
     ]
     for task in result.outcomes:
-        repo_missing = _format_missing(task.repo_map.missing_gold_files, task.repo_map.missing_gold_symbols)
+        repo_missing = _format_missing(
+            task.repo_map.missing_gold_files, task.repo_map.missing_gold_symbols
+        )
         pack_missing = _format_missing(
             task.lexical_context_pack.missing_gold_files,
             task.lexical_context_pack.missing_gold_symbols,
         )
         lines.append(
-            (
-                f"| {task.task_id} | {task.winner} | "
-                f"{task.repo_map.useful_context_ratio:.6f} | "
-                f"{task.lexical_context_pack.useful_context_ratio:.6f} | "
-                f"{repo_missing} | {pack_missing} |"
-            )
+            f"| {task.task_id} | {task.winner} | "
+            f"{task.repo_map.useful_context_ratio:.6f} | "
+            f"{task.lexical_context_pack.useful_context_ratio:.6f} | "
+            f"{repo_missing} | {pack_missing} |"
         )
 
     lines.extend(
@@ -250,15 +255,20 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
             "## Limitations",
             "",
             (
-                "- `useful_context_ratio` is an approximation over selected files/symbol identifiers "
+                "- `useful_context_ratio` is an approximation over selected "
+                "files/symbol identifiers "
                 "and does not measure semantic correctness."
             ),
             "- Character budget is character-based and not tokenizer-based.",
             (
-                "- Ties and all-zero useful-context outcomes are reported as `tie` or `inconclusive`; "
+                "- Ties and all-zero useful-context outcomes are reported as "
+                "`tie` or `inconclusive`; "
                 "the report does not claim superiority in those cases."
             ),
-            "- Results from toy fixtures should not be interpreted as scientific superiority claims.",
+            (
+                "- Results from toy fixtures should not be interpreted as "
+                "scientific superiority claims."
+            ),
         ]
     )
     return "\n".join(lines)
@@ -321,8 +331,7 @@ def _task_payload(result: RetrievalBenchmarkResult, index: int) -> dict[str, obj
     }
 
 
-def _compare_task_payload(task: object) -> dict[str, object]:
-    comparison = task
+def _compare_task_payload(comparison: TaskBaselineComparison) -> dict[str, object]:
     return {
         "task_id": comparison.task_id,
         "category": comparison.category,

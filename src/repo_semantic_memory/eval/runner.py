@@ -133,7 +133,9 @@ def _compute_compare_aggregate(outcomes: tuple[TaskBaselineComparison, ...]) -> 
     }
     average_gold_file_coverage = {
         "repo_map": mean(task.repo_map.gold_file_coverage for task in outcomes),
-        "lexical_context_pack": mean(task.lexical_context_pack.gold_file_coverage for task in outcomes),
+        "lexical_context_pack": mean(
+            task.lexical_context_pack.gold_file_coverage for task in outcomes
+        ),
     }
     average_gold_symbol_coverage = {
         "repo_map": mean(task.repo_map.gold_symbol_coverage for task in outcomes),
@@ -149,7 +151,9 @@ def _compute_compare_aggregate(outcomes: tuple[TaskBaselineComparison, ...]) -> 
     }
     wins = {
         "repo_map": sum(1 for task in outcomes if task.winner == "repo_map"),
-        "lexical_context_pack": sum(1 for task in outcomes if task.winner == "lexical_context_pack"),
+        "lexical_context_pack": sum(
+            1 for task in outcomes if task.winner == "lexical_context_pack"
+        ),
         "tie": sum(1 for task in outcomes if task.winner == "tie"),
         "inconclusive": sum(1 for task in outcomes if task.winner == "inconclusive"),
     }
@@ -157,7 +161,8 @@ def _compute_compare_aggregate(outcomes: tuple[TaskBaselineComparison, ...]) -> 
     miss_counts: dict[str, int] = {}
     for task in outcomes:
         for file_path in sorted(
-            set(task.repo_map.missing_gold_files) | set(task.lexical_context_pack.missing_gold_files)
+            set(task.repo_map.missing_gold_files)
+            | set(task.lexical_context_pack.missing_gold_files)
         ):
             miss_counts[f"file:{file_path}"] = miss_counts.get(f"file:{file_path}", 0) + 1
         for symbol in sorted(

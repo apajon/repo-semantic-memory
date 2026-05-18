@@ -193,9 +193,7 @@ def _select_entity_for_label(
     if not candidates:
         return None
     path_candidates = [
-        entity
-        for entity in candidates
-        if entity.source_range.path.replace("\\", "/") == path_hint
+        entity for entity in candidates if entity.source_range.path.replace("\\", "/") == path_hint
     ]
     pool = path_candidates if path_candidates else list(candidates)
     return sorted(pool, key=lambda entity: entity.id.value)[0]
