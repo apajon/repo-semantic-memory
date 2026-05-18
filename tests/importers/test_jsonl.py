@@ -10,6 +10,7 @@ import pytest
 from repo_semantic_memory.cli import main
 from repo_semantic_memory.exporters import export_jsonl_directory
 from repo_semantic_memory.importers import import_jsonl_directory
+from repo_semantic_memory.model import Entity, SourceRange, StableId
 from repo_semantic_memory.store import SQLiteStore
 
 FIXTURE_ROOT = Path(__file__).resolve().parent.parent / "fixtures" / "simple_repo"
@@ -143,3 +144,31 @@ def test_import_jsonl_malformed_line_fails_clearly(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match=r"entities\.jsonl:\d+: malformed JSONL row"):
         import_jsonl_directory(input_dir=export_dir, db_path=tmp_path / "imported.sqlite")
+
+
+def test_import_jsonl_ignores_real_components_snapshot_from_export(tmp_path: Path) -> None:
+    export_dir = tmp_path / ".rsm" / "export"
+    imported_db = tmp_path / ".rsm" / "imported.sqlite"
+    entities = [
+        Entity(
+            id=StableId("python:src/example.py:class:example.lifecyclemanager"),
+            kind="class",
+            name="LifecycleManager",
+            qualified_name="example.LifecycleManager",
+            source_range=SourceRange(path="src/example.py", start_line=1, end_line=20),
+        )
+    ]
+    export_result = export_jsonl_directory(
+        output_dir=export_dir,
+        entities=entities,
+        relations=[],
+        metadata={},
+    )
+    assert "components.jsonl" in export_result.files_written
+
+    import_result = import_jsonl_directory(input_dir=export_dir, db_path=imported_db)
+    assert import_result.components_snapshot_ignored is True
+    imported_entities, imported_relations, _ = _load_index(imported_db)
+    assert len(imported_entities) == 1
+    assert imported_entities[0].qualified_name == "example.LifecycleManager"
+    assert imported_relations == []

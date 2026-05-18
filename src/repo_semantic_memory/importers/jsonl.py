@@ -173,7 +173,8 @@ def _coerce_extractor_names(value: Any) -> tuple[str, ...]:
             loaded = json.loads(stripped)
         except json.JSONDecodeError:
             raise ValueError(
-                "metadata.json: extraction_metadata.extractor_names string must contain JSON array"
+                "metadata.json: extraction_metadata.extractor_names string must contain "
+                f"JSON array, got: {stripped!r}"
             ) from None
         if isinstance(loaded, list) and all(isinstance(item, str) for item in loaded):
             return tuple(sorted(loaded))
