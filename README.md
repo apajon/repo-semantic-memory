@@ -53,6 +53,7 @@ Implemented:
 - filesystem scanning
 - Python AST symbol extraction
 - SQLite local index
+- optional minimal Git temporal metadata extraction
 - compact repo map generation
 - task-specific context pack generation
 - local retrieval benchmark harness
@@ -61,7 +62,7 @@ Implemented:
 
 Not implemented yet:
 
-- git temporal memory
+- full historical semantic memory
 - MCP server
 - embeddings
 - LLM summarization
@@ -149,7 +150,8 @@ uv run rsm eval retrieval \
 rsm version
 rsm scan <path>
 rsm index-python <path> --json
-rsm index <path> --db .rsm/index.sqlite
+rsm index <path> --db .rsm/index.sqlite [--with-git]
+rsm git summary <path> [--json]
 rsm inspect entities --db .rsm/index.sqlite [--json]
 rsm inspect relations --db .rsm/index.sqlite [--json]
 rsm repo-map --db .rsm/index.sqlite --budget 4000

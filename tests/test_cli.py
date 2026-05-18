@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from repo_semantic_memory.cli import main
+from repo_semantic_memory.extractors.git_history import GitRepositorySummary
 from repo_semantic_memory.model import Entity, SourceRange, StableId
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 
@@ -78,6 +79,68 @@ def test_index_command_creates_db(tmp_path: Path, capsys: pytest.CaptureFixture[
     out = capsys.readouterr().out
     assert "entities=" in out
     assert "relations=" in out
+
+
+def test_index_command_with_git_unavailable_remains_graceful(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    monkeypatch.setattr(
+        "repo_semantic_memory.cli.get_git_repository_summary",
+        lambda path: GitRepositorySummary(
+            path=str(path),
+            in_git_repo=False,
+            repository_root=None,
+            current_commit=None,
+            is_dirty=None,
+            tracked_file_count=None,
+            unavailable_reason="path is not inside a Git repository",
+        ),
+    )
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path), "--with-git"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "entities=" in captured.out
+    assert "relations=" in captured.out
+    assert "git_metadata=unavailable" in captured.out
+    assert "git metadata:" in captured.err
+
+
+def test_git_summary_command_non_repo_path(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = main(["git", "summary", str(tmp_path)])
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "not inside a Git repository" in out
+
+
+def test_git_summary_command_json_output(
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "repo_semantic_memory.cli.get_git_repository_summary",
+        lambda path: GitRepositorySummary(
+            path=str(path),
+            in_git_repo=True,
+            repository_root="/repo",
+            current_commit="abc123",
+            is_dirty=False,
+            tracked_file_count=5,
+        ),
+    )
+    exit_code = main(["git", "summary", ".", "--json"])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["in_git_repo"] is True
+    assert payload["repository_root"] == "/repo"
+    assert payload["current_commit"] == "abc123"
+    assert payload["tracked_file_count"] == 5
 
 
 def test_inspect_entities_command_json_output(
