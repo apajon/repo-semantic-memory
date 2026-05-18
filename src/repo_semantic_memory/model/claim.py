@@ -108,4 +108,4 @@ def _validate_claim_provenance(claim: Claim) -> None:
     if claim.status == "inferred" and not (has_evidence or has_note):
         raise ValueError("Inferred claim requires evidence or note")
     if claim.status == "rejected" and not has_note:
-        raise ValueError("Rejected claim must preserve rejection note")
+        raise ValueError("Rejected claim requires a note explaining the rejection")

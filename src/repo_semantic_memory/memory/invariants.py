@@ -89,4 +89,7 @@ def _load_yaml_payload(content: str) -> Any:
     try:
         return json.loads(content)
     except json.JSONDecodeError as exc:
-        raise ValueError("PyYAML is not installed; only JSON-formatted YAML is supported") from exc
+        raise ValueError(
+            "PyYAML is not installed and the content is not valid JSON. "
+            "Install PyYAML with 'pip install pyyaml' or provide JSON-formatted YAML."
+        ) from exc
