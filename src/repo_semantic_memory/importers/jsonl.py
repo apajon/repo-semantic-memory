@@ -47,7 +47,7 @@ def import_jsonl_directory(*, input_dir: Path | str, db_path: Path | str) -> Jso
 
 def _read_entities(path: Path) -> list[Entity]:
     entities: list[Entity] = []
-    for line_number, row in _iter_jsonl_rows(path):
+    for line_number, row in _load_jsonl_rows(path):
         if not isinstance(row, dict):
             raise ValueError(f"{path.name}:{line_number}: expected JSON object")
         try:
@@ -59,7 +59,7 @@ def _read_entities(path: Path) -> list[Entity]:
 
 def _read_relations(path: Path) -> list[Relation]:
     relations: list[Relation] = []
-    for line_number, row in _iter_jsonl_rows(path):
+    for line_number, row in _load_jsonl_rows(path):
         if not isinstance(row, dict):
             raise ValueError(f"{path.name}:{line_number}: expected JSON object")
         try:
@@ -69,7 +69,7 @@ def _read_relations(path: Path) -> list[Relation]:
     return relations
 
 
-def _iter_jsonl_rows(path: Path) -> list[tuple[int, Any]]:
+def _load_jsonl_rows(path: Path) -> list[tuple[int, Any]]:
     if not path.exists():
         raise ValueError(f"Missing required file: {path}")
     rows: list[tuple[int, Any]] = []

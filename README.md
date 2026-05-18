@@ -167,12 +167,7 @@ rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget
 
 ## JSONL interop
 
-Machine-facing graph portability is available via JSONL import/export:
-
-```bash
-uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
-uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
-```
+Machine-facing graph portability is available via JSONL import/export.
 
 `export-jsonl` emits deterministic `entities.jsonl`, `relations.jsonl`, and `metadata.json`
 (`components.jsonl` is included only when inferred components are available).
