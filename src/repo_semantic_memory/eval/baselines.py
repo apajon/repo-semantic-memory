@@ -97,17 +97,8 @@ def decide_winner(
     lexical_context_pack_result: BaselineTaskResult,
 ) -> WinnerName:
     """Choose task-level winner, prioritizing gold coverage before density/compactness."""
-    repo_map_coverage = (
-        repo_map_result.gold_file_coverage + repo_map_result.gold_symbol_coverage,
-        repo_map_result.gold_file_coverage,
-        repo_map_result.gold_symbol_coverage,
-    )
-    lexical_coverage = (
-        lexical_context_pack_result.gold_file_coverage
-        + lexical_context_pack_result.gold_symbol_coverage,
-        lexical_context_pack_result.gold_file_coverage,
-        lexical_context_pack_result.gold_symbol_coverage,
-    )
+    repo_map_coverage = _coverage_priority_key(repo_map_result)
+    lexical_coverage = _coverage_priority_key(lexical_context_pack_result)
     if repo_map_coverage != lexical_coverage:
         return "repo_map" if repo_map_coverage > lexical_coverage else "lexical_context_pack"
 
@@ -129,6 +120,15 @@ def decide_winner(
             else "lexical_context_pack"
         )
     return "tie"
+
+
+def _coverage_priority_key(result: BaselineTaskResult) -> tuple[float, float, float]:
+    """Return deterministic coverage priority key as (total, file, symbol)."""
+    return (
+        result.gold_file_coverage + result.gold_symbol_coverage,
+        result.gold_file_coverage,
+        result.gold_symbol_coverage,
+    )
 
 
 def _evaluate_repo_map_baseline(
