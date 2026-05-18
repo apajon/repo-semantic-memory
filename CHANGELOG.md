@@ -2,6 +2,33 @@
 
 <!-- version list -->
 
+## v0.4.0 (2026-05-18)
+
+### Bug Fixes
+
+- Avoid duplicate python module entities in index output
+  ([`93b7d77`](https://github.com/apajon/repo-semantic-memory/commit/93b7d7705478419bdfba616792d90ef570f9d881))
+
+- Finalize sqlite store and CLI formatting
+  ([`867e7d7`](https://github.com/apajon/repo-semantic-memory/commit/867e7d717bd959346b7d35cbb3b63756ee665657))
+
+- Tighten python module filtering and assertion coverage
+  ([`780c473`](https://github.com/apajon/repo-semantic-memory/commit/780c473f11f075595a28616d34a5e6de63b24589))
+
+### Chores
+
+- Revert unrelated uv lockfile change
+  ([`f160d3c`](https://github.com/apajon/repo-semantic-memory/commit/f160d3c9b39ce8c69211c8348baa7c464f11a57d))
+
+- Update plan after reproducing CI failure
+  ([`58a95a0`](https://github.com/apajon/repo-semantic-memory/commit/58a95a01114878ea0f4bcb3b9b9a26853c1f2db5))
+
+### Features
+
+- Add sqlite store and CLI index/inspect commands
+  ([`0b85784`](https://github.com/apajon/repo-semantic-memory/commit/0b8578427a12aa28555a8fc663e1093f48dcb17b))
+
+
 ## v0.3.0 (2026-05-18)
 
 ### Bug Fixes
