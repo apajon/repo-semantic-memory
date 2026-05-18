@@ -8,8 +8,6 @@ tasks:
       symbols:
         - repo_semantic_memory.context.pack_builder.build_context_pack
         - repo_semantic_memory.context.pack_builder._rank_entities
-      invariants:
-        - deterministic_lexical_selection_and_ranking
   - id: repo_map_generation_impl
     category: code_localization
     prompt: "Find where compact repo map generation is implemented."
@@ -19,8 +17,6 @@ tasks:
       symbols:
         - repo_semantic_memory.context.repo_map.build_repo_map_markdown
         - repo_semantic_memory.context.repo_map._build_module_sections
-      invariants:
-        - deterministic_repo_map_rendering
   - id: sqlite_persistence_impl
     category: code_localization
     prompt: "Find where entities and relations are persisted in SQLite."
@@ -31,5 +27,3 @@ tasks:
         - repo_semantic_memory.store.sqlite_store.SQLiteStore.persist_index
         - repo_semantic_memory.store.sqlite_store.SQLiteStore._upsert_entities
         - repo_semantic_memory.store.sqlite_store.SQLiteStore._upsert_relations
-      invariants:
-        - schema_version_validated_before_persistence
