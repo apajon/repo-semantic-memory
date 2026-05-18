@@ -32,7 +32,7 @@ class InvariantsDocument:
         }
 
     def to_yaml(self) -> str:
-        """Render document as deterministic YAML-compatible output."""
+        """Render document as deterministic JSON-formatted YAML 1.2-compatible output."""
         return json.dumps(self.to_dict(), sort_keys=True, indent=2)
 
     @classmethod
@@ -91,5 +91,5 @@ def _load_yaml_payload(content: str) -> Any:
     except json.JSONDecodeError as exc:
         raise ValueError(
             "PyYAML is not installed and the content is not valid JSON. "
-            "Install PyYAML with 'pip install pyyaml' or provide JSON-formatted YAML."
+            "Install PyYAML with 'uv add pyyaml' or provide JSON-formatted YAML."
         ) from exc
