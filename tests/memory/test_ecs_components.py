@@ -103,9 +103,7 @@ def test_init_exports_infer_public_api_only_when_relation_is_resolved() -> None:
         entities=[init_module, exported, unresolved_target],
         relations=relations,
     )
-    public_api = [
-        component for component in components if component.component_type == "PublicAPI"
-    ]
+    public_api = [component for component in components if component.component_type == "PublicAPI"]
     assert len(public_api) == 1
     assert public_api[0].entity_id.value == exported.id.value
     assert all(component.status != "confirmed" for component in components)

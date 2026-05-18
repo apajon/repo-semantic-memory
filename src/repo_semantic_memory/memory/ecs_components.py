@@ -5,11 +5,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Literal, cast
+from typing import Literal
 
 from repo_semantic_memory.model import (
     Entity,
     Evidence,
+    JsonValue,
     Relation,
     SemanticComponent,
     SemanticComponentType,
@@ -104,9 +105,7 @@ def _infer_test_components(
             )
         if entity.kind != "module" and (starts_with_test or in_tests_path):
             reason = (
-                "name_starts_with_test_prefix"
-                if starts_with_test
-                else "entity_path_contains_tests"
+                "name_starts_with_test_prefix" if starts_with_test else "entity_path_contains_tests"
             )
             _upsert(
                 components,
@@ -200,7 +199,9 @@ def _infer_public_api_components(
                     "relation_kind": relation.kind,
                     "exporter_module_id": source_id,
                 },
-                inference_note="Derived from __init__.py relation; export intent may be incomplete.",
+                inference_note=(
+                    "Derived from __init__.py relation; export intent may be incomplete."
+                ),
             ),
         )
 
@@ -209,11 +210,11 @@ def _build_inferred_component(
     *,
     entity: Entity,
     component_type: SemanticComponentType,
-    properties: dict[str, str],
+    properties: dict[str, JsonValue],
     inference_note: str | None = None,
 ) -> SemanticComponent:
     return SemanticComponent(
-        component_type=cast(SemanticComponentType, component_type),
+        component_type=component_type,
         entity_id=entity.id,
         properties=properties,
         evidence=(

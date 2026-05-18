@@ -114,12 +114,12 @@ class SemanticComponent:
         confidence = float(confidence_payload)
 
         return cls(
-            component_type=cast(SemanticComponentType, component_type),
+            component_type=component_type,
             entity_id=StableId.from_dict(entity_id),
             properties=dict(sorted(cast(dict[str, JsonValue], properties_payload).items())),
             evidence=tuple(evidence),
             confidence=confidence,
-            status=cast(SemanticComponentStatus, status),
+            status=status,
             inference_note=inference_note,
         )
 
@@ -129,12 +129,8 @@ def _validate_component_provenance(component: SemanticComponent) -> None:
     has_note = component.inference_note is not None
 
     if not has_evidence and component.status != "needs_review":
-        raise ValueError(
-            "SemanticComponent requires evidence unless status is needs_review"
-        )
+        raise ValueError("SemanticComponent requires evidence unless status is needs_review")
     if component.status == "confirmed" and not has_evidence:
         raise ValueError("Confirmed SemanticComponent requires evidence")
     if component.status == "inferred" and not (has_evidence or has_note):
-        raise ValueError(
-            "Inferred SemanticComponent requires evidence or inference_note"
-        )
+        raise ValueError("Inferred SemanticComponent requires evidence or inference_note")
