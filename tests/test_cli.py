@@ -174,3 +174,64 @@ def test_repo_map_command_with_path_creates_no_persistent_artifacts(
 
     assert not (target_repo / ".rsm").exists()
     assert list(target_repo.rglob("*.sqlite")) == []
+
+
+def test_eval_retrieval_command_json_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: eval_001",
+                "    category: code_localization",
+                '    prompt: "Where is DerivedThing defined?"',
+                "    gold:",
+                "      files:",
+                "        - src/python_symbols.py",
+                "      symbols:",
+                "        - python_symbols.DerivedThing",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "retrieval",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--json",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dataset_path"] == str(dataset_path)
+    assert payload["db_path"] == str(db_path)
+    assert payload["tasks"][0]["task_id"] == "eval_001"
+
+
+def test_eval_retrieval_empty_dataset_fails_clearly(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text("tasks:\n", encoding="utf-8")
+
+    exit_code = main(
+        ["eval", "retrieval", "--db", str(db_path), "--dataset", str(dataset_path), "--json"]
+    )
+    assert exit_code == 2
+    assert "contains no tasks" in capsys.readouterr().err

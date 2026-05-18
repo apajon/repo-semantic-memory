@@ -1,0 +1,11 @@
+tasks:
+  - id: example_001
+    category: code_localization
+    prompt: "Where is inactive publish gating enforced?"
+    gold:
+      files:
+        - src/example.py
+      symbols:
+        - example.Symbol
+      invariants:
+        - inactive_outgoing_calls_forbidden

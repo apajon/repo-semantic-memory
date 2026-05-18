@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
 from repo_semantic_memory.context import build_repo_map_markdown
+from repo_semantic_memory.eval import (
+    render_compact_table,
+    run_retrieval_benchmark,
+    to_json_payload,
+    write_markdown_report,
+)
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
@@ -104,6 +111,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=4000,
         help="Approximate character budget for map output (not tokenizer-based token count).",
     )
+    eval_parser = subparsers.add_parser("eval", help="Run local deterministic benchmark evaluation.")
+    eval_subparsers = eval_parser.add_subparsers(dest="eval_target")
+    eval_retrieval_parser = eval_subparsers.add_parser(
+        "retrieval",
+        help="Benchmark lexical retrieval quality for known tasks.",
+    )
+    eval_retrieval_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    eval_retrieval_parser.add_argument(
+        "--dataset",
+        required=True,
+        help="YAML benchmark dataset file path.",
+    )
+    eval_retrieval_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit benchmark result payload as JSON.",
+    )
+    eval_retrieval_parser.add_argument(
+        "--markdown-report",
+        help="Write a Markdown report to this path.",
+    )
     return parser
 
 
@@ -158,6 +190,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.command == "repo-map":
         return _run_repo_map_command(path=args.path, db=args.db, budget=args.budget)
+    if args.command == "eval":
+        if args.eval_target == "retrieval":
+            return _run_eval_retrieval_command(
+                db=args.db,
+                dataset=args.dataset,
+                emit_json=args.json,
+                markdown_report=args.markdown_report,
+            )
+        parser.print_help()
+        return 2
 
     parser.print_help()
     return 0
@@ -248,6 +290,29 @@ def _run_repo_map_command(*, path: str | None, db: str | None, budget: int) -> i
     finally:
         store.close()
     print(build_repo_map_markdown(entities, relations, budget_chars=budget))
+    return 0
+
+
+def _run_eval_retrieval_command(
+    *,
+    db: str,
+    dataset: str,
+    emit_json: bool,
+    markdown_report: str | None,
+) -> int:
+    try:
+        result = run_retrieval_benchmark(db_path=db, dataset_path=dataset)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if markdown_report:
+        write_markdown_report(markdown_report, result)
+
+    if emit_json:
+        print(json.dumps(to_json_payload(result), separators=(",", ":")))
+        return 0
+    print(render_compact_table(result))
     return 0
 
 

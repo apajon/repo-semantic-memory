@@ -29,6 +29,13 @@ This initial scaffold provides a typed Python CLI, explicit artifact versioning,
 - `--budget` is currently an approximate **character** budget (not tokenizer-based token counting yet).
 - Import lines are static extracted names and are labeled unresolved; cross-file import resolution is not implemented in this phase.
 
+## Retrieval benchmark MVP
+
+- `rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml` runs deterministic lexical retrieval evaluation.
+- `--json` emits full machine-readable benchmark output.
+- `--markdown-report out.md` writes a markdown report with aggregate and per-task details.
+- Dataset files are YAML with top-level `tasks`, each containing `id`, `category`, `prompt`, and `gold` lists for `files`, `symbols`, and `invariants`.
+
 ## Quick start
 
 ```bash
