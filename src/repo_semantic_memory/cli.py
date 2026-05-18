@@ -17,8 +17,12 @@ from repo_semantic_memory.context import (
 )
 from repo_semantic_memory.eval import (
     render_compact_table,
+    render_compare_compact_table,
     run_retrieval_benchmark,
+    run_baseline_comparison,
+    to_compare_json_payload,
     to_json_payload,
+    write_compare_markdown_report,
     write_markdown_report,
 )
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
@@ -168,6 +172,35 @@ def build_parser() -> argparse.ArgumentParser:
         "--markdown-report",
         help="Write a Markdown report to this path.",
     )
+    eval_compare_parser = eval_subparsers.add_parser(
+        "compare",
+        help="Compare repo-map and lexical context-pack baselines.",
+    )
+    eval_compare_parser.add_argument(
+        "--db",
+        default=".rsm/index.sqlite",
+        help="SQLite database file path.",
+    )
+    eval_compare_parser.add_argument(
+        "--dataset",
+        required=True,
+        help="YAML benchmark dataset file path.",
+    )
+    eval_compare_parser.add_argument(
+        "--budget",
+        type=int,
+        default=4000,
+        help="Approximate character budget shared by both baselines.",
+    )
+    eval_compare_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit comparison payload as JSON.",
+    )
+    eval_compare_parser.add_argument(
+        "--markdown-report",
+        help="Write a Markdown comparison report to this path.",
+    )
     return parser
 
 
@@ -231,6 +264,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_eval_retrieval_command(
                 db=args.db,
                 dataset=args.dataset,
+                emit_json=args.json,
+                markdown_report=args.markdown_report,
+            )
+        if args.eval_target == "compare":
+            return _run_eval_compare_command(
+                db=args.db,
+                dataset=args.dataset,
+                budget=args.budget,
                 emit_json=args.json,
                 markdown_report=args.markdown_report,
             )
@@ -349,6 +390,34 @@ def _run_eval_retrieval_command(
         print(json.dumps(to_json_payload(result), separators=(",", ":")))
         return 0
     print(render_compact_table(result))
+    return 0
+
+
+def _run_eval_compare_command(
+    *,
+    db: str,
+    dataset: str,
+    budget: int,
+    emit_json: bool,
+    markdown_report: str | None,
+) -> int:
+    try:
+        result = run_baseline_comparison(
+            db_path=db,
+            dataset_path=dataset,
+            budget_chars=budget,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if markdown_report:
+        write_compare_markdown_report(markdown_report, result)
+
+    if emit_json:
+        print(json.dumps(to_compare_json_payload(result), separators=(",", ":")))
+        return 0
+    print(render_compare_compact_table(result))
     return 0
 
 

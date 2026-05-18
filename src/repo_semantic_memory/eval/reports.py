@@ -1,15 +1,15 @@
-"""Report rendering for retrieval benchmark results."""
+"""Report rendering for benchmark results."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
 
-from repo_semantic_memory.eval.runner import RetrievalBenchmarkResult
+from repo_semantic_memory.eval.runner import BaselineComparisonResult, RetrievalBenchmarkResult
 
 
 def to_json_payload(result: RetrievalBenchmarkResult) -> dict[str, object]:
-    """Convert benchmark result to deterministic JSON payload."""
+    """Convert retrieval benchmark result to deterministic JSON payload."""
     return {
         "dataset_path": result.dataset_path,
         "db_path": result.db_path,
@@ -19,8 +19,30 @@ def to_json_payload(result: RetrievalBenchmarkResult) -> dict[str, object]:
     }
 
 
+def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, object]:
+    """Convert baseline comparison result to deterministic JSON payload."""
+    return {
+        "dataset_path": result.dataset_path,
+        "db_path": result.db_path,
+        "budget": result.budget,
+        "aggregate": {
+            "average_context_character_count": dict(sorted(result.aggregate.average_context_character_count.items())),
+            "average_gold_file_coverage": dict(sorted(result.aggregate.average_gold_file_coverage.items())),
+            "average_gold_symbol_coverage": dict(
+                sorted(result.aggregate.average_gold_symbol_coverage.items())
+            ),
+            "average_useful_context_ratio": dict(
+                sorted(result.aggregate.average_useful_context_ratio.items())
+            ),
+            "wins": dict(sorted(result.aggregate.wins.items())),
+            "major_misses": list(result.aggregate.major_misses),
+        },
+        "tasks": [_compare_task_payload(task) for task in result.outcomes],
+    }
+
+
 def render_compact_table(result: RetrievalBenchmarkResult) -> str:
-    """Render compact plain-text benchmark table."""
+    """Render compact plain-text retrieval benchmark table."""
     primary_k = result.k_values[-1]
     rows = [
         (
@@ -67,8 +89,61 @@ def render_compact_table(result: RetrievalBenchmarkResult) -> str:
     return _render_rows(rows)
 
 
+def render_compare_compact_table(result: BaselineComparisonResult) -> str:
+    """Render compact plain-text table for baseline comparison."""
+    rows = [
+        (
+            "task_id",
+            "repo_map useful",
+            "pack useful",
+            "repo_map gold_cov",
+            "pack gold_cov",
+            "repo_map chars",
+            "pack chars",
+            "winner",
+        )
+    ]
+    for task in result.outcomes:
+        rows.append(
+            (
+                task.task_id,
+                f"{task.repo_map.useful_context_ratio:.3f}",
+                f"{task.lexical_context_pack.useful_context_ratio:.3f}",
+                f"{task.repo_map.gold_file_coverage:.3f}/{task.repo_map.gold_symbol_coverage:.3f}",
+                (
+                    f"{task.lexical_context_pack.gold_file_coverage:.3f}/"
+                    f"{task.lexical_context_pack.gold_symbol_coverage:.3f}"
+                ),
+                str(task.repo_map.context_character_count),
+                str(task.lexical_context_pack.context_character_count),
+                task.winner,
+            )
+        )
+
+    aggregate = result.aggregate
+    rows.append(
+        (
+            "AVG",
+            f"{aggregate.average_useful_context_ratio['repo_map']:.3f}",
+            f"{aggregate.average_useful_context_ratio['lexical_context_pack']:.3f}",
+            (
+                f"{aggregate.average_gold_file_coverage['repo_map']:.3f}/"
+                f"{aggregate.average_gold_symbol_coverage['repo_map']:.3f}"
+            ),
+            (
+                f"{aggregate.average_gold_file_coverage['lexical_context_pack']:.3f}/"
+                f"{aggregate.average_gold_symbol_coverage['lexical_context_pack']:.3f}"
+            ),
+            f"{aggregate.average_context_character_count['repo_map']:.1f}",
+            f"{aggregate.average_context_character_count['lexical_context_pack']:.1f}",
+            "-",
+        )
+    )
+    return _render_rows(rows)
+
+
 def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
-    """Render markdown benchmark report."""
+    """Render markdown retrieval benchmark report."""
     aggregate = result.metrics.aggregate
     lines = [
         "# Retrieval benchmark report",
@@ -101,11 +176,106 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
     return "\n".join(lines)
 
 
+def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
+    """Render markdown report for repo-map vs lexical-context-pack comparison."""
+    aggregate = result.aggregate
+    lines = [
+        "# Baseline comparison report",
+        "",
+        f"- dataset: `{result.dataset_path}`",
+        f"- db: `{result.db_path}`",
+        f"- budget_chars: `{result.budget}`",
+        f"- tasks: `{len(result.outcomes)}`",
+        "",
+        "## Aggregate results",
+        "",
+        (
+            f"- average_context_character_count: repo_map="
+            f"`{aggregate.average_context_character_count['repo_map']:.6f}`, "
+            f"lexical_context_pack="
+            f"`{aggregate.average_context_character_count['lexical_context_pack']:.6f}`"
+        ),
+        (
+            f"- average_gold_file_coverage: repo_map="
+            f"`{aggregate.average_gold_file_coverage['repo_map']:.6f}`, "
+            f"lexical_context_pack="
+            f"`{aggregate.average_gold_file_coverage['lexical_context_pack']:.6f}`"
+        ),
+        (
+            f"- average_gold_symbol_coverage: repo_map="
+            f"`{aggregate.average_gold_symbol_coverage['repo_map']:.6f}`, "
+            f"lexical_context_pack="
+            f"`{aggregate.average_gold_symbol_coverage['lexical_context_pack']:.6f}`"
+        ),
+        (
+            f"- average_useful_context_ratio: repo_map="
+            f"`{aggregate.average_useful_context_ratio['repo_map']:.6f}`, "
+            f"lexical_context_pack="
+            f"`{aggregate.average_useful_context_ratio['lexical_context_pack']:.6f}`"
+        ),
+        (
+            f"- wins: repo_map=`{aggregate.wins['repo_map']}`, "
+            f"lexical_context_pack=`{aggregate.wins['lexical_context_pack']}`, "
+            f"tie=`{aggregate.wins['tie']}`, "
+            f"inconclusive=`{aggregate.wins['inconclusive']}`"
+        ),
+        f"- major_misses: `{', '.join(aggregate.major_misses) or '-'}`",
+        "",
+        "## Per-task results",
+        "",
+        (
+            "| task_id | winner | repo_map useful_ratio | pack useful_ratio | "
+            "repo_map missing | pack missing |"
+        ),
+        "|---|---|---|---|---|---|",
+    ]
+    for task in result.outcomes:
+        repo_missing = _format_missing(task.repo_map.missing_gold_files, task.repo_map.missing_gold_symbols)
+        pack_missing = _format_missing(
+            task.lexical_context_pack.missing_gold_files,
+            task.lexical_context_pack.missing_gold_symbols,
+        )
+        lines.append(
+            (
+                f"| {task.task_id} | {task.winner} | "
+                f"{task.repo_map.useful_context_ratio:.6f} | "
+                f"{task.lexical_context_pack.useful_context_ratio:.6f} | "
+                f"{repo_missing} | {pack_missing} |"
+            )
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Limitations",
+            "",
+            (
+                "- `useful_context_ratio` is an approximation over selected files/symbol identifiers "
+                "and does not measure semantic correctness."
+            ),
+            "- Character budget is character-based and not tokenizer-based.",
+            (
+                "- Ties and all-zero useful-context outcomes are reported as `tie` or `inconclusive`; "
+                "the report does not claim superiority in those cases."
+            ),
+            "- Results from toy fixtures should not be interpreted as scientific superiority claims.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def write_markdown_report(path: Path | str, result: RetrievalBenchmarkResult) -> None:
-    """Write markdown report to disk."""
+    """Write retrieval markdown report to disk."""
     report_path = Path(path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_markdown_report(result), encoding="utf-8")
+
+
+def write_compare_markdown_report(path: Path | str, result: BaselineComparisonResult) -> None:
+    """Write baseline comparison markdown report to disk."""
+    report_path = Path(path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_compare_markdown_report(result), encoding="utf-8")
 
 
 def _aggregate_payload(result: RetrievalBenchmarkResult) -> dict[str, object]:
@@ -147,6 +317,38 @@ def _task_payload(result: RetrievalBenchmarkResult, index: int) -> dict[str, obj
             "gold_file_coverage": metrics.gold_file_coverage,
             "gold_symbol_coverage": metrics.gold_symbol_coverage,
             "context_character_estimate": metrics.context_character_estimate,
+        },
+    }
+
+
+def _compare_task_payload(task: object) -> dict[str, object]:
+    comparison = task
+    return {
+        "task_id": comparison.task_id,
+        "category": comparison.category,
+        "prompt": comparison.prompt,
+        "gold_files": list(comparison.gold_files),
+        "gold_symbols": list(comparison.gold_symbols),
+        "winner": comparison.winner,
+        "repo_map": {
+            "context_character_count": comparison.repo_map.context_character_count,
+            "gold_file_coverage": comparison.repo_map.gold_file_coverage,
+            "gold_symbol_coverage": comparison.repo_map.gold_symbol_coverage,
+            "useful_context_ratio": comparison.repo_map.useful_context_ratio,
+            "missing_gold_files": list(comparison.repo_map.missing_gold_files),
+            "missing_gold_symbols": list(comparison.repo_map.missing_gold_symbols),
+            "extra_selected_files": list(comparison.repo_map.extra_selected_files),
+            "extra_selected_symbols": list(comparison.repo_map.extra_selected_symbols),
+        },
+        "lexical_context_pack": {
+            "context_character_count": comparison.lexical_context_pack.context_character_count,
+            "gold_file_coverage": comparison.lexical_context_pack.gold_file_coverage,
+            "gold_symbol_coverage": comparison.lexical_context_pack.gold_symbol_coverage,
+            "useful_context_ratio": comparison.lexical_context_pack.useful_context_ratio,
+            "missing_gold_files": list(comparison.lexical_context_pack.missing_gold_files),
+            "missing_gold_symbols": list(comparison.lexical_context_pack.missing_gold_symbols),
+            "extra_selected_files": list(comparison.lexical_context_pack.extra_selected_files),
+            "extra_selected_symbols": list(comparison.lexical_context_pack.extra_selected_symbols),
         },
     }
 

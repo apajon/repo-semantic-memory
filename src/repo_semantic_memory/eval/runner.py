@@ -1,6 +1,6 @@
-"""Deterministic lexical retrieval benchmark runner.
+"""Deterministic benchmark runners.
 
-Matching policy in this MVP:
+Retrieval benchmark matching policy in this MVP:
 - gold files are matched against ``Entity.source_range.path``
 - gold symbols are matched against ``Entity.qualified_name``
 """
@@ -10,14 +10,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import mean
 
+from repo_semantic_memory.eval.baselines import TaskBaselineComparison, evaluate_task_baselines
 from repo_semantic_memory.eval.datasets import RetrievalTask, load_retrieval_dataset
 from repo_semantic_memory.eval.metrics import (
     BenchmarkMetrics,
     RetrievalOutcome,
     compute_benchmark_metrics,
 )
-from repo_semantic_memory.model import Entity
+from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.store import SQLiteStore
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
@@ -35,6 +37,29 @@ class RetrievalBenchmarkResult:
     k_values: tuple[int, ...]
     outcomes: tuple[RetrievalOutcome, ...]
     metrics: BenchmarkMetrics
+
+
+@dataclass(frozen=True)
+class CompareAggregate:
+    """Aggregate compare metrics across all tasks."""
+
+    average_context_character_count: dict[str, float]
+    average_gold_file_coverage: dict[str, float]
+    average_gold_symbol_coverage: dict[str, float]
+    average_useful_context_ratio: dict[str, float]
+    wins: dict[str, int]
+    major_misses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BaselineComparisonResult:
+    """Task-level and aggregate baseline comparison payload."""
+
+    dataset_path: str
+    db_path: str
+    budget: int
+    outcomes: tuple[TaskBaselineComparison, ...]
+    aggregate: CompareAggregate
 
 
 def run_retrieval_benchmark(
@@ -65,6 +90,98 @@ def run_retrieval_benchmark(
     )
 
 
+def run_baseline_comparison(
+    *,
+    db_path: Path | str,
+    dataset_path: Path | str,
+    budget_chars: int,
+) -> BaselineComparisonResult:
+    """Compare repo-map vs lexical context-pack retrieval context under one budget."""
+    if budget_chars < 1:
+        raise ValueError("budget_chars must be >= 1")
+    dataset = load_retrieval_dataset(dataset_path)
+    entities, relations = _load_index(db_path)
+
+    outcomes = tuple(
+        evaluate_task_baselines(
+            task=task,
+            entities=entities,
+            relations=relations,
+            budget_chars=budget_chars,
+        )
+        for task in dataset.tasks
+    )
+    aggregate = _compute_compare_aggregate(outcomes)
+    return BaselineComparisonResult(
+        dataset_path=str(Path(dataset_path)),
+        db_path=str(Path(db_path)),
+        budget=budget_chars,
+        outcomes=outcomes,
+        aggregate=aggregate,
+    )
+
+
+def _compute_compare_aggregate(outcomes: tuple[TaskBaselineComparison, ...]) -> CompareAggregate:
+    if not outcomes:
+        raise ValueError("Comparison run produced no task outcomes")
+
+    average_context_character_count = {
+        "repo_map": mean(task.repo_map.context_character_count for task in outcomes),
+        "lexical_context_pack": mean(
+            task.lexical_context_pack.context_character_count for task in outcomes
+        ),
+    }
+    average_gold_file_coverage = {
+        "repo_map": mean(task.repo_map.gold_file_coverage for task in outcomes),
+        "lexical_context_pack": mean(task.lexical_context_pack.gold_file_coverage for task in outcomes),
+    }
+    average_gold_symbol_coverage = {
+        "repo_map": mean(task.repo_map.gold_symbol_coverage for task in outcomes),
+        "lexical_context_pack": mean(
+            task.lexical_context_pack.gold_symbol_coverage for task in outcomes
+        ),
+    }
+    average_useful_context_ratio = {
+        "repo_map": mean(task.repo_map.useful_context_ratio for task in outcomes),
+        "lexical_context_pack": mean(
+            task.lexical_context_pack.useful_context_ratio for task in outcomes
+        ),
+    }
+    wins = {
+        "repo_map": sum(1 for task in outcomes if task.winner == "repo_map"),
+        "lexical_context_pack": sum(1 for task in outcomes if task.winner == "lexical_context_pack"),
+        "tie": sum(1 for task in outcomes if task.winner == "tie"),
+        "inconclusive": sum(1 for task in outcomes if task.winner == "inconclusive"),
+    }
+
+    miss_counts: dict[str, int] = {}
+    for task in outcomes:
+        for file_path in sorted(
+            set(task.repo_map.missing_gold_files) | set(task.lexical_context_pack.missing_gold_files)
+        ):
+            miss_counts[f"file:{file_path}"] = miss_counts.get(f"file:{file_path}", 0) + 1
+        for symbol in sorted(
+            set(task.repo_map.missing_gold_symbols)
+            | set(task.lexical_context_pack.missing_gold_symbols)
+        ):
+            miss_counts[f"symbol:{symbol}"] = miss_counts.get(f"symbol:{symbol}", 0) + 1
+
+    major_misses = tuple(
+        key
+        for key, count in sorted(miss_counts.items(), key=lambda item: (-item[1], item[0]))
+        if count >= 2
+    )
+
+    return CompareAggregate(
+        average_context_character_count=average_context_character_count,
+        average_gold_file_coverage=average_gold_file_coverage,
+        average_gold_symbol_coverage=average_gold_symbol_coverage,
+        average_useful_context_ratio=average_useful_context_ratio,
+        wins=wins,
+        major_misses=major_misses,
+    )
+
+
 def _load_entities(db_path: Path | str) -> tuple[Entity, ...]:
     store = SQLiteStore(db_path)
     try:
@@ -73,6 +190,17 @@ def _load_entities(db_path: Path | str) -> tuple[Entity, ...]:
     finally:
         store.close()
     return tuple(entities)
+
+
+def _load_index(db_path: Path | str) -> tuple[tuple[Entity, ...], tuple[Relation, ...]]:
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        entities = tuple(store.list_entities())
+        relations = tuple(store.list_relations())
+    finally:
+        store.close()
+    return entities, relations
 
 
 def _run_task(
