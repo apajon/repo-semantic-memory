@@ -237,6 +237,111 @@ def test_eval_retrieval_empty_dataset_fails_clearly(
     assert "contains no tasks" in capsys.readouterr().err
 
 
+def test_eval_compare_command_json_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: compare_001",
+                "    category: code_localization",
+                '    prompt: "Where is DerivedThing defined?"',
+                "    gold:",
+                "      files:",
+                "        - src/python_symbols.py",
+                "      symbols:",
+                "        - python_symbols.DerivedThing",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "compare",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--budget",
+            "4000",
+            "--json",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dataset_path"] == str(dataset_path)
+    assert payload["db_path"] == str(db_path)
+    assert payload["budget"] == 4000
+    assert payload["tasks"][0]["task_id"] == "compare_001"
+    assert payload["tasks"][0]["winner"] in {
+        "repo_map",
+        "lexical_context_pack",
+        "tie",
+        "inconclusive",
+    }
+
+
+def test_eval_compare_command_markdown_report(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    report_path = tmp_path / "compare_report.md"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: compare_002",
+                "    category: code_localization",
+                '    prompt: "Where is DerivedThing defined?"',
+                "    gold:",
+                "      files:",
+                "        - src/python_symbols.py",
+                "      symbols:",
+                "        - python_symbols.DerivedThing",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "compare",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--budget",
+            "4000",
+            "--markdown-report",
+            str(report_path),
+        ]
+    )
+    assert exit_code == 0
+    assert report_path.exists()
+    report = report_path.read_text(encoding="utf-8")
+    assert "# Baseline comparison report" in report
+    assert "## Aggregate results" in report
+
+
 def test_pack_command_markdown_output(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
     db_path = tmp_path / ".rsm" / "index.sqlite"

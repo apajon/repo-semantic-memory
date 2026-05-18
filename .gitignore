@@ -29,3 +29,6 @@ dist/
 # Local env
 .env
 .env.*
+
+# Local index artifacts
+.rsm/

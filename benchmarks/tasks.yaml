@@ -1,11 +1,29 @@
 tasks:
-  - id: example_001
+  - id: context_pack_selection_impl
     category: code_localization
-    prompt: "Where is inactive publish gating enforced?"
+    prompt: "Find where context pack selection is implemented."
     gold:
       files:
-        - src/example.py
+        - src/repo_semantic_memory/context/pack_builder.py
       symbols:
-        - example.Symbol
-      invariants:
-        - inactive_outgoing_calls_forbidden
+        - repo_semantic_memory.context.pack_builder.build_context_pack
+        - repo_semantic_memory.context.pack_builder._rank_entities
+  - id: repo_map_generation_impl
+    category: code_localization
+    prompt: "Find where compact repo map generation is implemented."
+    gold:
+      files:
+        - src/repo_semantic_memory/context/repo_map.py
+      symbols:
+        - repo_semantic_memory.context.repo_map.build_repo_map_markdown
+        - repo_semantic_memory.context.repo_map._build_module_sections
+  - id: sqlite_persistence_impl
+    category: code_localization
+    prompt: "Find where entities and relations are persisted in SQLite."
+    gold:
+      files:
+        - src/repo_semantic_memory/store/sqlite_store.py
+      symbols:
+        - repo_semantic_memory.store.sqlite_store.SQLiteStore.persist_index
+        - repo_semantic_memory.store.sqlite_store.SQLiteStore._upsert_entities
+        - repo_semantic_memory.store.sqlite_store.SQLiteStore._upsert_relations
