@@ -65,6 +65,18 @@ def test_rejected_claim_preserves_rejection_note() -> None:
     assert "Rejected" in claim.note
 
 
+def test_rejected_claim_without_note_is_invalid() -> None:
+    with pytest.raises(ValueError, match="Rejected claim requires a note"):
+        Claim(
+            id="claim:rejected-no-note",
+            subject="python:pkg:module",
+            predicate="is_runtime_singleton",
+            object="concept:singleton",
+            status="rejected",
+            confidence=0.1,
+        )
+
+
 def test_active_invariant_requires_evidence_or_origin_note() -> None:
     with pytest.raises(ValueError, match="requires evidence or origin_note"):
         Invariant(
@@ -75,6 +87,27 @@ def test_active_invariant_requires_evidence_or_origin_note() -> None:
             severity="warning",
             status="active",
         )
+
+
+def test_draft_and_deprecated_invariants_allow_missing_provenance() -> None:
+    draft = Invariant(
+        id="invariant:draft",
+        name="DraftRule",
+        description="Rule under discussion.",
+        scope="repository",
+        severity="info",
+        status="draft",
+    )
+    deprecated = Invariant(
+        id="invariant:deprecated",
+        name="DeprecatedRule",
+        description="Deprecated compatibility rule.",
+        scope="repository",
+        severity="warning",
+        status="deprecated",
+    )
+    assert draft.evidence == ()
+    assert deprecated.evidence == ()
 
 
 def test_invariant_yaml_friendly_serialization() -> None:

@@ -464,6 +464,9 @@ def test_invariants_export_import_commands_work(
     export_out = capsys.readouterr().out
     assert "exported invariants document" in export_out
     assert invariants_path.exists()
+    exported_payload = json.loads(invariants_path.read_text(encoding="utf-8"))
+    assert exported_payload["claims"] == []
+    assert exported_payload["invariants"] == []
 
     import_exit = main(["invariants", "import", "--db", str(db_path), str(invariants_path)])
     assert import_exit == 0
