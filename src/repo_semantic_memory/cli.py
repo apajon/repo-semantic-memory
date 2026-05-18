@@ -197,8 +197,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--db",
         default=".rsm/index.sqlite",
         help=(
-            "SQLite database file path used only to validate index availability/schema; "
-            "claims/invariants are not persisted yet."
+            "SQLite database file path checked for index availability/schema compatibility only; "
+            "claim/invariant data currently lives in standalone YAML files."
         ),
     )
     invariants_export_parser.add_argument(
@@ -214,8 +214,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--db",
         default=".rsm/index.sqlite",
         help=(
-            "SQLite database file path used only to validate index availability/schema; "
-            "claims/invariants are not persisted yet."
+            "SQLite database file path checked for index availability/schema compatibility only; "
+            "claim/invariant data currently lives in standalone YAML files."
         ),
     )
     invariants_import_parser.add_argument(
