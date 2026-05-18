@@ -86,13 +86,13 @@ def build_context_pack(
     task_tokens = _tokenize(task)
     is_code_task = _is_code_task(task_tokens)
     task_hints = _task_hints(task_tokens)
-    semantic_components = infer_semantic_components(
+    inferred_components = infer_semantic_components(
         entities=normalized_entities,
         relations=normalized_relations,
     )
     public_api_entity_ids = {
         component.entity_id.value
-        for component in semantic_components
+        for component in inferred_components
         if component.component_type == "PublicAPI"
     }
 
@@ -316,7 +316,9 @@ def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
 
 def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     hints: set[str] = set()
-    if any(token in _CODE_TASK_TOKENS or token in _IMPLEMENTATION_TASK_TOKENS for token in task_tokens):
+    if any(
+        token in _CODE_TASK_TOKENS or token in _IMPLEMENTATION_TASK_TOKENS for token in task_tokens
+    ):
         hints.add("implementation")
     if any(token in _TEST_TASK_TOKENS for token in task_tokens):
         hints.add("tests")

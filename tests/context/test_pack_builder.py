@@ -308,4 +308,4 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
     selected_paths = {entity.source_range.path for entity in pack.selected_entities}
 
     assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
-    assert "tests/test_public_api.py" in selected_paths
+    assert "tests/public_api_checks.py" in selected_paths
