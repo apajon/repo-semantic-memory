@@ -457,6 +457,12 @@ def test_invariants_export_import_commands_work(
     assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
     capsys.readouterr()
 
+    components_exit = main(["components", "infer", "--db", str(db_path), "--json"])
+    assert components_exit == 0
+    components_payload = json.loads(capsys.readouterr().out)
+    assert isinstance(components_payload, list)
+    assert all(item["status"] != "confirmed" for item in components_payload)
+
     export_exit = main(
         ["invariants", "export", "--db", str(db_path), "--out", str(invariants_path)]
     )
@@ -467,6 +473,9 @@ def test_invariants_export_import_commands_work(
     exported_payload = json.loads(invariants_path.read_text(encoding="utf-8"))
     assert exported_payload["claims"] == []
     assert exported_payload["invariants"] == []
+    assert (
+        exported_payload["note"] == "No claims or invariants are inferred automatically by default."
+    )
 
     import_exit = main(["invariants", "import", "--db", str(db_path), str(invariants_path)])
     assert import_exit == 0

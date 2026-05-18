@@ -191,7 +191,7 @@ def build_parser() -> argparse.ArgumentParser:
     invariants_subparsers = invariants_parser.add_subparsers(dest="invariants_target")
     invariants_export_parser = invariants_subparsers.add_parser(
         "export",
-        help="Export claims/invariants to YAML-compatible output.",
+        help="Export claims/invariants to JSON-style YAML 1.2-compatible output.",
     )
     invariants_export_parser.add_argument(
         "--db",

@@ -21,15 +21,25 @@ class InvariantsDocument:
 
     claims: tuple[Claim, ...] = ()
     invariants: tuple[Invariant, ...] = ()
+    note: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         """Serialize document to deterministic dictionary payload."""
         ordered_claims = sorted(self.claims, key=lambda claim: claim.id)
         ordered_invariants = sorted(self.invariants, key=lambda invariant: invariant.id)
-        return {
+        payload: dict[str, object] = {
             "claims": [claim.to_dict() for claim in ordered_claims],
             "invariants": [invariant.to_dict() for invariant in ordered_invariants],
         }
+        if not ordered_claims and not ordered_invariants:
+            payload["note"] = (
+                self.note
+                if self.note is not None
+                else "No claims or invariants are inferred automatically by default."
+            )
+        elif self.note is not None:
+            payload["note"] = self.note
+        return payload
 
     def to_yaml(self) -> str:
         """Render document as deterministic JSON-formatted YAML 1.2-compatible output."""
@@ -57,7 +67,9 @@ class InvariantsDocument:
                 raise ValueError("Invariant items must be dictionaries")
             invariants.append(Invariant.from_dict(item))
 
-        return cls(claims=tuple(claims), invariants=tuple(invariants))
+        note_payload = payload.get("note")
+        note = str(note_payload) if note_payload is not None else None
+        return cls(claims=tuple(claims), invariants=tuple(invariants), note=note)
 
 
 def export_invariants_yaml(

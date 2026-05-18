@@ -66,3 +66,4 @@ def test_export_default_document_has_no_hardcoded_invariants(tmp_path: Path) -> 
     payload = json.loads(target.read_text(encoding="utf-8"))
     assert payload["claims"] == []
     assert payload["invariants"] == []
+    assert payload["note"] == "No claims or invariants are inferred automatically by default."

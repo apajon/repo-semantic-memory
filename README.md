@@ -331,9 +331,10 @@ Claims and invariants now have explicit typed models with evidence and uncertain
 
 Current persistence decision:
 
-- claims/invariants are exported and imported as standalone YAML-compatible files
+- claims/invariants are exported and imported as standalone JSON-style YAML 1.2-compatible files
 - SQLite schema is unchanged for this phase (no claim/invariant tables yet)
 - `SCHEMA_VERSION` is intentionally unchanged because persisted DB schema did not change
+- `--db` is used only for index/schema compatibility checks; claim/invariant payloads are not read from SQLite
 
 Use:
 
@@ -343,6 +344,8 @@ uv run rsm invariants import --db .rsm/index.sqlite invariants.yaml
 ```
 
 `rsm invariants import` currently validates the payload only and does not persist claims/invariants to SQLite.
+`rsm invariants export` writes an explicit empty document note when no claims/invariants are provided:
+`No claims or invariants are inferred automatically by default.`
 
 ## Retrieval benchmarks
 
