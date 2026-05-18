@@ -2,6 +2,40 @@
 
 <!-- version list -->
 
+## v0.6.0 (2026-05-18)
+
+### Bug Fixes
+
+- Polish retrieval eval typing and reporting
+  ([`60fc717`](https://github.com/apajon/repo-semantic-memory/commit/60fc7178adcc70eb8ce191395520fdbc3800cea8))
+
+### Chores
+
+- Plan retrieval benchmark harness
+  ([`5fa2ba6`](https://github.com/apajon/repo-semantic-memory/commit/5fa2ba633e9dabcea0f51262f883d1189aa4d11f))
+
+### Documentation
+
+- Clarify retrieval benchmark matching and ranking policy
+  ([`3269e05`](https://github.com/apajon/repo-semantic-memory/commit/3269e058410150e677ea766f4e676c43c893cfb1))
+
+### Features
+
+- Add deterministic retrieval benchmark harness
+  ([`055ad93`](https://github.com/apajon/repo-semantic-memory/commit/055ad930e3b9ff34e444e5ac86e03f1a5aa4b4c7))
+
+### Testing
+
+- Assert pyproject version key exists in version consistency test
+  ([`e8f4d2a`](https://github.com/apajon/repo-semantic-memory/commit/e8f4d2a5eef26175fe5f146fb0a4beed4c8aaaae))
+
+- Make version constant test track pyproject package version
+  ([`66b249c`](https://github.com/apajon/repo-semantic-memory/commit/66b249c2116b600e6daf8ed329ce84505a9a7243))
+
+- Refine retrieval benchmark feedback fixes
+  ([`1510685`](https://github.com/apajon/repo-semantic-memory/commit/15106858350ce95fa799ac41f8aef1b75167ac97))
+
+
 ## v0.5.0 (2026-05-18)
 
 ### Bug Fixes
