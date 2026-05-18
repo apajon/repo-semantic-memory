@@ -54,11 +54,11 @@ Implemented:
 - Python AST symbol extraction
 - SQLite local index
 - compact repo map generation
+- task-specific context pack generation
 - local retrieval benchmark harness
 
 Not implemented yet:
 
-- task-specific context pack builder
 - repo-map vs context-pack benchmark comparison
 - ECS-style semantic components
 - claims and invariants
@@ -104,6 +104,21 @@ Generate a compact repo map:
 
 uv run rsm repo-map --db .rsm/index.sqlite --budget 4000
 
+Generate a task-specific context pack in Markdown:
+
+uv run rsm pack \
+  --task "Update DerivedThing imports in src/python_symbols.py" \
+  --db .rsm/index.sqlite \
+  --budget 4000
+
+Generate a task-specific context pack in YAML-compatible structured output:
+
+uv run rsm pack \
+  --task "Update DerivedThing imports in src/python_symbols.py" \
+  --db .rsm/index.sqlite \
+  --budget 4000 \
+  --format yaml
+
 Or generate a repo map directly from a path without leaving persistent artifacts:
 
 uv run rsm repo-map --path /path/to/repo --budget 4000
@@ -138,6 +153,7 @@ rsm inspect entities --db .rsm/index.sqlite [--json]
 rsm inspect relations --db .rsm/index.sqlite [--json]
 rsm repo-map --db .rsm/index.sqlite --budget 4000
 rsm repo-map --path <path> --budget 4000
+rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml]
 rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
 
 ## Data model
@@ -263,6 +279,26 @@ Imports:
 - `pathlib.Path` static
 
 The --budget option is currently an approximate character budget, not a tokenizer-based token budget.
+
+## Context pack
+
+The context pack is a compact task-specific output generated from indexed entities and relations.
+
+Selection behavior in the MVP:
+
+- lexical matching across entity names, qualified names, source paths, stable IDs, and string-like metadata
+- direct graph-neighbor expansion from selected entities
+- deterministic ranking and deterministic tie-break by stable ID
+- conservative handling of unresolved import/inheritance edges with explicit uncertainty
+- no source bodies and no full docstring content in output
+
+`--format yaml` emits a JSON-formatted payload that is YAML 1.2-compatible.
+
+Budget semantics:
+
+- budget is character-based (not tokenizer-based)
+- budget is applied during context-pack construction and final Markdown rendering
+- selected files are deduplicated, deterministic, and bounded by the budget-constrained selected entities
 
 ## Retrieval benchmarks
 

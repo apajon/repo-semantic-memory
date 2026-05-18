@@ -179,3 +179,34 @@ def test_pack_output_excludes_source_bodies_and_docstrings() -> None:
 
     assert '"""A class with a docstring."""' not in markdown
     assert "return str(value)" not in markdown
+
+
+def test_suggested_files_are_deduplicated_deterministic_and_bounded() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    full_pack = build_context_pack(
+        task="python_symbols app imports",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    tight_pack = build_context_pack(
+        task="python_symbols app imports",
+        entities=entities,
+        relations=relations,
+        budget_chars=220,
+    )
+    second_full_pack = build_context_pack(
+        task="python_symbols app imports",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+
+    full_files = full_pack.suggested_files_to_inspect
+    tight_files = tight_pack.suggested_files_to_inspect
+    second_full_files = second_full_pack.suggested_files_to_inspect
+
+    assert len(full_files) == len(set(full_files))
+    assert full_files == second_full_files
+    assert len(tight_files) <= len(full_files)
