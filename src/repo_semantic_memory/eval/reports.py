@@ -37,7 +37,7 @@ def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, objec
                 sorted(result.aggregate.average_gold_symbol_coverage.items())
             ),
             "average_approx_useful_item_ratio": dict(
-                sorted(result.aggregate.average_useful_context_ratio.items())
+                sorted(result.aggregate.average_approx_useful_item_ratio.items())
             ),
             "average_useful_context_ratio": dict(
                 sorted(result.aggregate.average_useful_context_ratio.items())
@@ -217,9 +217,9 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         ),
         (
             f"- average_approx_useful_item_ratio: repo_map="
-            f"`{aggregate.average_useful_context_ratio['repo_map']:.6f}`, "
+            f"`{aggregate.average_approx_useful_item_ratio['repo_map']:.6f}`, "
             f"lexical_context_pack="
-            f"`{aggregate.average_useful_context_ratio['lexical_context_pack']:.6f}`"
+            f"`{aggregate.average_approx_useful_item_ratio['lexical_context_pack']:.6f}`"
         ),
         (
             f"- wins: repo_map=`{aggregate.wins['repo_map']}`, "

@@ -41,7 +41,7 @@ class BaselineTaskResult:
 
     @property
     def approx_useful_item_ratio(self) -> float:
-        """Approximate item-level useful-context ratio (not token-level semantic usefulness)."""
+        """Alias of useful_context_ratio for item-level approximation clarity in reports."""
         return self.useful_context_ratio
 
 

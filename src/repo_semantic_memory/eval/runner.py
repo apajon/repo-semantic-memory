@@ -50,6 +50,11 @@ class CompareAggregate:
     wins: dict[str, int]
     major_misses: tuple[str, ...]
 
+    @property
+    def average_approx_useful_item_ratio(self) -> dict[str, float]:
+        """Alias of average_useful_context_ratio for report-facing naming clarity."""
+        return self.average_useful_context_ratio
+
 
 @dataclass(frozen=True)
 class BaselineComparisonResult:
