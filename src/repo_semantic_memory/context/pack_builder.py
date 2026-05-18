@@ -30,7 +30,10 @@ _CODE_TASK_TOKENS = frozenset(
     }
 )
 _FORBIDDEN_ASSUMPTIONS = (
-    "Do not assume inheritance targets are resolved unless relation metadata says `resolved: true`.",
+    (
+        "Do not assume inheritance targets are resolved unless relation metadata says "
+        "`resolved: true`."
+    ),
     "Do not assume imports are resolved unless relation metadata says `resolved: true`.",
 )
 
@@ -106,7 +109,9 @@ def build_context_pack(
             )
             queue.append(neighbor_id)
 
-    selected_entities = [entity_by_id[entity_id] for entity_id in selected_entity_ids if entity_id in entity_by_id]
+    selected_entities = [
+        entity_by_id[entity_id] for entity_id in selected_entity_ids if entity_id in entity_by_id
+    ]
     selected_relations = sorted(
         selected_relations,
         key=lambda relation: (
@@ -173,7 +178,9 @@ def _rank_entities(
     return sorted(ranked, key=lambda item: (-item[1], item[0].id.value))
 
 
-def _score_entity(entity: Entity, task_tokens: tuple[str, ...], *, is_code_task: bool) -> tuple[int, tuple[str, ...]]:
+def _score_entity(
+    entity: Entity, task_tokens: tuple[str, ...], *, is_code_task: bool
+) -> tuple[int, tuple[str, ...]]:
     name = entity.name.lower()
     qualified_name = entity.qualified_name.lower()
     source_path = entity.source_range.path.replace("\\", "/").lower()
@@ -273,14 +280,17 @@ def _truncate_to_budget(
         kept_entity_ids.add(entity.id.value)
         used += estimate
 
+    ordered_relations = sorted(selected_relations, key=_relation_budget_priority)
     kept_relations: list[Relation] = []
-    for relation in selected_relations:
+    for relation in ordered_relations:
         if (
             relation.source_entity_id.value not in kept_entity_ids
             and relation.target_entity_id.value not in kept_entity_ids
         ):
             continue
-        estimate = _estimate_relation_chars(relation, reasons_by_key.get(relation_key(relation), ()))
+        estimate = _estimate_relation_chars(
+            relation, reasons_by_key.get(relation_key(relation), ())
+        )
         if used + estimate > budget_chars:
             truncated = True
             break
@@ -288,6 +298,18 @@ def _truncate_to_budget(
         used += estimate
 
     return kept_entities, kept_relations, truncated
+
+
+def _relation_budget_priority(relation: Relation) -> tuple[int, str, str, str]:
+    resolved = relation.metadata.get("resolved") is True
+    unresolved_import_or_inherits = relation.kind in {"imports", "inherits"} and not resolved
+    priority = 0 if unresolved_import_or_inherits else 1
+    return (
+        priority,
+        relation.kind,
+        relation.source_entity_id.value,
+        relation.target_entity_id.value,
+    )
 
 
 def _estimate_entity_chars(entity: Entity, reasons: Sequence[str]) -> int:
@@ -330,9 +352,7 @@ def _collect_uncertainties(
         target_id = relation.target_entity_id.value
         resolved = relation.metadata.get("resolved")
         if relation.kind in {"imports", "inherits"} and resolved is not True:
-            uncertainties.add(
-                f"Relation {relation.kind} {source_id} -> {target_id} is unresolved"
-            )
+            uncertainties.add(f"Relation {relation.kind} {source_id} -> {target_id} is unresolved")
         if target_id not in entity_by_id:
             uncertainties.add(f"Relation target not indexed in entities: {target_id}")
     return sorted(uncertainties)

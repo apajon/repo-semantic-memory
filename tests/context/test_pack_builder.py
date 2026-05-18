@@ -153,7 +153,7 @@ def test_unresolved_imports_and_inherits_are_marked_uncertain() -> None:
     entities, relations = _indexed_entities_and_relations()
 
     pack = build_context_pack(
-        task="imports inherits",
+        task="DerivedThing imports inherits",
         entities=entities,
         relations=relations,
         budget_chars=4000,

@@ -223,7 +223,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "repo-map":
         return _run_repo_map_command(path=args.path, db=args.db, budget=args.budget)
     if args.command == "pack":
-        return _run_pack_command(task=args.task, db=args.db, budget=args.budget, output_format=args.format)
+        return _run_pack_command(
+            task=args.task, db=args.db, budget=args.budget, output_format=args.format
+        )
     if args.command == "eval":
         if args.eval_target == "retrieval":
             return _run_eval_retrieval_command(

@@ -69,7 +69,9 @@ class ContextPack:
             "task": self.task,
             "budget": self.budget,
             "selected_entities": [_entity_payload(entity) for entity in self.selected_entities],
-            "selected_relations": [_relation_payload(relation) for relation in self.selected_relations],
+            "selected_relations": [
+                _relation_payload(relation) for relation in self.selected_relations
+            ],
             "source_citations": [citation.to_dict() for citation in self.source_citations],
             "why_selected": {
                 key: list(self.why_selected[key]) for key in sorted(self.why_selected.keys())
