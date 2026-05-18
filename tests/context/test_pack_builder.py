@@ -7,7 +7,7 @@ from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
-from repo_semantic_memory.model import Entity, Relation
+from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
 
 def _fixture_root() -> Path:
@@ -210,3 +210,52 @@ def test_suggested_files_are_deduplicated_deterministic_and_bounded() -> None:
     assert len(full_files) == len(set(full_files))
     assert full_files == second_full_files
     assert len(tight_files) <= len(full_files)
+
+
+def test_pack_includes_compact_semantic_component_labels_when_available() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="test top_level_function behavior",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    payload = pack.to_dict()
+    semantic_components = payload["semantic_components"]
+
+    assert isinstance(semantic_components, list)
+    if semantic_components:
+        first = semantic_components[0]
+        assert set(first.keys()) == {"component_type", "entity_id", "status"}
+
+
+def test_semantic_component_labels_do_not_displace_markdown_symbols_or_citations() -> None:
+    entities = [
+        Entity(
+            id=StableId("python:module:tests.sample"),
+            kind="module",
+            name="sample",
+            qualified_name="tests.sample",
+            source_range=SourceRange(path="tests/sample.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId("python:function:tests.sample.test_behavior"),
+            kind="function",
+            name="test_behavior",
+            qualified_name="tests.sample.test_behavior",
+            source_range=SourceRange(path="tests/sample.py", start_line=3, end_line=4),
+        ),
+    ]
+    pack = build_context_pack(
+        task="test behavior",
+        entities=entities,
+        relations=[],
+        budget_chars=4000,
+    )
+    markdown = render_context_pack_markdown(pack)
+
+    assert pack.semantic_components
+    assert "tests.sample.test_behavior" in markdown
+    assert "## Source citations" in markdown
+    assert "## Semantic components" not in markdown

@@ -56,11 +56,11 @@ Implemented:
 - compact repo map generation
 - task-specific context pack generation
 - local retrieval benchmark harness
+- ECS-style semantic component inference (derived, non-persisted)
+- repo-map vs lexical context-pack baseline comparison
 
 Not implemented yet:
 
-- repo-map vs context-pack benchmark comparison
-- ECS-style semantic components
 - claims and invariants
 - `.ai/` export
 - JSONL import/export
@@ -158,9 +158,11 @@ rsm inspect relations --db .rsm/index.sqlite [--json]
 rsm repo-map --db .rsm/index.sqlite --budget 4000
 rsm repo-map --path <path> --budget 4000
 rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml]
+rsm components infer --db .rsm/index.sqlite [--json]
+rsm components list --db .rsm/index.sqlite [--json]
 rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
+rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 [--json]
 ```
-
 
 ## Data model
 
@@ -305,6 +307,22 @@ Budget semantics:
 - budget is character-based (not tokenizer-based)
 - budget is applied during context-pack construction and final Markdown rendering
 - selected files are deduplicated, deterministic, and bounded by the budget-constrained selected entities
+- semantic component labels are compact and currently emitted only in structured context-pack payloads
+  (not in Markdown), so they do not consume Markdown budget or displace cited symbols
+
+## Semantic components
+
+Semantic components are currently derived from indexed entities/relations at query time and are not
+persisted in SQLite schema tables.
+
+Use:
+
+```bash
+uv run rsm components infer --db .rsm/index.sqlite --json
+uv run rsm components list --db .rsm/index.sqlite --json
+```
+
+`components list` recomputes and returns the same derived view as `components infer`.
 
 ## Retrieval benchmarks
 
