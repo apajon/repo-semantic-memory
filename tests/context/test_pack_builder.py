@@ -25,6 +25,21 @@ def _indexed_entities_and_relations() -> tuple[list[Entity], list[Relation]]:
     return [*filesystem_entities, *python_entities], python_relations
 
 
+def _ranking_fixture_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "fixtures" / "ranking_repo"
+
+
+def _ranking_fixture_entities_and_relations() -> tuple[list[Entity], list[Relation]]:
+    fixture_root = _ranking_fixture_root()
+    filesystem_entities = [
+        entity
+        for entity in extract_filesystem_entities(fixture_root)
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
+    python_entities, python_relations = index_python_path(fixture_root)
+    return [*filesystem_entities, *python_entities], python_relations
+
+
 def test_pack_selects_symbol_by_name() -> None:
     entities, relations = _indexed_entities_and_relations()
 
@@ -259,3 +274,38 @@ def test_semantic_component_labels_do_not_displace_markdown_symbols_or_citations
     assert "tests.sample.test_behavior" in markdown
     assert "## Source citations" in markdown
     assert "## Semantic components" not in markdown
+
+
+def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+    )
+    selected_paths = [entity.source_range.path for entity in pack.selected_entities]
+
+    assert any(path.endswith("src/lifecore_ros2/__init__.py") for path in selected_paths)
+    assert any(
+        "lifecore_ros2.components.lifecycle_component.LifecycleComponent" == entity.qualified_name
+        for entity in pack.selected_entities
+    )
+    assert all(not path.startswith("docs/_build/") for path in selected_paths)
+    assert all(".egg-info/" not in path for path in selected_paths)
+
+
+def test_implementation_cleanup_task_includes_src_components_and_tests() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Find lifecycle component ownership and cleanup rules",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+    )
+    selected_paths = {entity.source_range.path for entity in pack.selected_entities}
+
+    assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
+    assert "tests/test_public_api.py" in selected_paths

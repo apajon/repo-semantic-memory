@@ -79,3 +79,61 @@ def test_repo_map_source_citations_are_posix_paths() -> None:
 
     assert "## src/pkg/module.py" in output
     assert "- module `pkg.module` src/pkg/module.py:3-6" in output
+
+
+def test_repo_map_prioritizes_src_tests_examples_docs_github_then_other_paths() -> None:
+    entities = [
+        Entity(
+            id=StableId.from_parts(["file", "misc/last.py"]),
+            kind="module",
+            name="last",
+            qualified_name="misc.last",
+            source_range=SourceRange(path="misc/last.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", ".github/workflows/ci.py"]),
+            kind="module",
+            name="ci",
+            qualified_name="github.ci",
+            source_range=SourceRange(path=".github/workflows/ci.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", "docs/guide.py"]),
+            kind="module",
+            name="guide",
+            qualified_name="docs.guide",
+            source_range=SourceRange(path="docs/guide.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", "examples/example.py"]),
+            kind="module",
+            name="example",
+            qualified_name="examples.example",
+            source_range=SourceRange(path="examples/example.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", "tests/test_feature.py"]),
+            kind="module",
+            name="test_feature",
+            qualified_name="tests.test_feature",
+            source_range=SourceRange(path="tests/test_feature.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", "src/core.py"]),
+            kind="module",
+            name="core",
+            qualified_name="src.core",
+            source_range=SourceRange(path="src/core.py", start_line=1, end_line=1),
+        ),
+    ]
+
+    output = build_repo_map_markdown(entities, [], budget_chars=4000)
+
+    src_idx = output.index("## src/core.py")
+    tests_idx = output.index("## tests/test_feature.py")
+    examples_idx = output.index("## examples/example.py")
+    docs_idx = output.index("## docs/guide.py")
+    github_idx = output.index("## .github/workflows/ci.py")
+    misc_idx = output.index("## misc/last.py")
+
+    assert src_idx < tests_idx < examples_idx < docs_idx < github_idx < misc_idx
