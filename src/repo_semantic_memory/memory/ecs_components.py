@@ -19,23 +19,11 @@ from repo_semantic_memory.model import (
 _HEURISTIC_EXTRACTOR = "ecs_heuristic"
 _INFERRED_CONFIDENCE = 0.6
 _ROS_LIKE_TOKENS = ("publisher", "subscriber", "service", "client", "timer")
-_MEANINGFUL_METHOD_NAMES = frozenset(
-    {
-        "publish",
-        "on_message",
-        "on_tick",
-        "call",
-        "call_async",
-        "wait_for_service",
-        "start",
-        "stop",
-        "reset",
-        "_release_resources",
-        "_on_configure",
-    }
-)
 _ROS_LIKE_METHOD_NAMES = frozenset(
     {"publish", "on_message", "on_tick", "call", "call_async", "wait_for_service"}
+)
+_MEANINGFUL_METHOD_NAMES = frozenset(
+    _ROS_LIKE_METHOD_NAMES | {"start", "stop", "reset", "_release_resources", "_on_configure"}
 )
 
 CompactComponentStatus = Literal["confirmed", "inferred", "needs_review"]

@@ -233,7 +233,9 @@ def test_method_level_integration_keeps_semantically_meaningful_method_names() -
         entities=[meaningful_method, lifecycle_method],
         relations=[],
     )
-    by_pair = {(component.entity_id.value, component.component_type) for component in components}
+    component_pairs = {
+        (component.entity_id.value, component.component_type) for component in components
+    }
 
-    assert (meaningful_method.id.value, "ROSLikeIntegration") in by_pair
-    assert (lifecycle_method.id.value, "ExternalIntegration") in by_pair
+    assert (meaningful_method.id.value, "ROSLikeIntegration") in component_pairs
+    assert (lifecycle_method.id.value, "ExternalIntegration") in component_pairs

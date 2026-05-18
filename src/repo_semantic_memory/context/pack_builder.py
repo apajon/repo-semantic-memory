@@ -60,6 +60,17 @@ _IMPLEMENTATION_PATH_BONUS = 20
 _TEST_PATH_BONUS = 20
 _PUBLIC_API_HINT_BONUS = 24
 _GENERATED_ARTIFACT_PENALTY = -80
+_GENERATED_ARTIFACT_PATTERNS = (
+    "/docs/_build/",
+    "/_build/",
+    "/dist/",
+    "/build/",
+    "/htmlcov/",
+    "/.pytest_cache/",
+    "/.mypy_cache/",
+    "/.ruff_cache/",
+    ".egg-info/",
+)
 
 
 def build_context_pack(
@@ -328,19 +339,8 @@ def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
 
 
 def _is_generated_artifact_path(path: str) -> bool:
-    generated_tokens = (
-        "/docs/_build/",
-        "/_build/",
-        "/dist/",
-        "/build/",
-        "/htmlcov/",
-        "/.pytest_cache/",
-        "/.mypy_cache/",
-        "/.ruff_cache/",
-        ".egg-info/",
-    )
     normalized = f"/{path.strip('/')}/"
-    return any(token in normalized for token in generated_tokens)
+    return any(token in normalized for token in _GENERATED_ARTIFACT_PATTERNS)
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:

@@ -1,12 +1,12 @@
 class LifecycleComponent:
     def start(self) -> None:
-        return None
+        pass
 
     def stop(self) -> None:
-        return None
+        pass
 
     def helper(self) -> None:
-        return None
+        pass
 
 
 def build_component() -> LifecycleComponent:

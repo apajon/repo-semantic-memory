@@ -10,6 +10,14 @@ from pathlib import Path
 from repo_semantic_memory.context.budget import CharacterBudget
 from repo_semantic_memory.model import Entity, Relation
 
+_REPO_MAP_PATH_PRIORITIES: tuple[tuple[str, int], ...] = (
+    ("src/", 0),
+    ("tests/", 1),
+    ("examples/", 2),
+    ("docs/", 3),
+    (".github/", 4),
+)
+
 
 @dataclass(frozen=True)
 class ModuleSection:
@@ -192,14 +200,7 @@ def _module_section_sort_key(entity: Entity) -> tuple[int, str, int, int, str, s
 
 def _repo_map_path_priority(path: str) -> int:
     normalized = _to_posix_path(path)
-    priorities = (
-        ("src/", 0),
-        ("tests/", 1),
-        ("examples/", 2),
-        ("docs/", 3),
-        (".github/", 4),
-    )
-    for prefix, priority in priorities:
+    for prefix, priority in _REPO_MAP_PATH_PRIORITIES:
         if normalized.startswith(prefix):
             return priority
     return 5

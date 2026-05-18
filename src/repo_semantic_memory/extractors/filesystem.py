@@ -42,6 +42,7 @@ IGNORED_FILES: frozenset[str] = frozenset(
     }
 )
 BINARY_SAMPLE_BYTES = 8192
+_IGNORED_PATH_PREFIXES: tuple[str, ...] = ("docs/_build/",)
 
 
 def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
@@ -130,4 +131,4 @@ def _should_ignore_directory_name(name: str) -> bool:
 
 def _should_ignore_directory_path(path: Path, root: Path) -> bool:
     relative = path.relative_to(root).as_posix()
-    return relative.startswith("docs/_build/")
+    return any(relative.startswith(prefix) for prefix in _IGNORED_PATH_PREFIXES)
