@@ -36,6 +36,20 @@ _FORBIDDEN_ASSUMPTIONS = (
     ),
     "Do not assume imports are resolved unless relation metadata says `resolved: true`.",
 )
+# Approximate output scaffold overhead for:
+# - title/task lines
+# - fixed section headings
+# - uncertainty/forbidden-assumptions labels
+# - minimum list-marker punctuation across sections
+_PACK_FIXED_OVERHEAD_CHARS = 300
+_CODE_PATH_SUFFIXES = (".py",)
+_EXACT_TOKEN_WEIGHT = 12
+_SUBSTRING_TOKEN_WEIGHT = 4
+_SOURCE_CITATION_BONUS = 2
+_AST_BACKED_BONUS = 10
+_CODE_ENTITY_KIND_BONUS = 6
+_COARSE_ENTITY_PENALTY = -6
+_CITATION_RANGE_OVERHEAD_CHARS = 24
 
 
 def build_context_pack(
@@ -213,16 +227,16 @@ def _score_entity(
                 substring_hits += 1
                 break
 
-    score = exact_hits * 12 + substring_hits * 4
-    score += 2 if entity.source_range.path else 0
+    score = exact_hits * _EXACT_TOKEN_WEIGHT + substring_hits * _SUBSTRING_TOKEN_WEIGHT
+    score += _SOURCE_CITATION_BONUS if entity.source_range.path else 0
 
     if is_code_task:
         if entity.id.value.startswith("python:"):
-            score += 10
+            score += _AST_BACKED_BONUS
         if entity.kind in _CODE_ENTITY_KINDS:
-            score += 6
+            score += _CODE_ENTITY_KIND_BONUS
         if entity.kind in _COARSE_ENTITY_KINDS:
-            score -= 6
+            score += _COARSE_ENTITY_PENALTY
 
     if not reasons and score > 0:
         reasons.append("lexical baseline relevance")
@@ -230,11 +244,15 @@ def _score_entity(
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
-    return tuple(sorted({token.lower() for token in _TOKEN_PATTERN.findall(text)}))
+    ordered_tokens = dict.fromkeys(token.lower() for token in _TOKEN_PATTERN.findall(text))
+    return tuple(ordered_tokens.keys())
 
 
 def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
-    return any(token in _CODE_TASK_TOKENS or token.endswith(".py") for token in task_tokens)
+    return any(
+        token in _CODE_TASK_TOKENS or any(token.endswith(suffix) for suffix in _CODE_PATH_SUFFIXES)
+        for token in task_tokens
+    )
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:
@@ -266,7 +284,8 @@ def _truncate_to_budget(
     selected_relations: Sequence[Relation],
     reasons_by_key: dict[str, list[str]],
 ) -> tuple[list[Entity], list[Relation], bool]:
-    used = len(task) + 300
+    # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
+    used = len(task) + _PACK_FIXED_OVERHEAD_CHARS
     kept_entities: list[Entity] = []
     kept_entity_ids: set[str] = set()
     truncated = False
@@ -313,7 +332,7 @@ def _relation_budget_priority(relation: Relation) -> tuple[int, str, str, str]:
 
 
 def _estimate_entity_chars(entity: Entity, reasons: Sequence[str]) -> int:
-    citation_len = len(entity.source_range.path) + 24
+    citation_len = len(entity.source_range.path) + _CITATION_RANGE_OVERHEAD_CHARS
     reason_len = sum(len(reason) for reason in reasons)
     return 40 + len(entity.qualified_name) + citation_len + reason_len
 

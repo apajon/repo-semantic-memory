@@ -78,6 +78,7 @@ def _append_selected_symbols(
         ):
             return False
         reasons = why_selected.get(entity.id.value, ())
+        # Keep output compact by showing only the first deterministic reason.
         if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
             return False
     return _append_or_truncate(budget, "")
@@ -113,6 +114,7 @@ def _append_related_symbols(
             f"{relation.kind}:{relation.source_entity_id.value}->{relation.target_entity_id.value}"
         )
         reasons = why_selected.get(key, ())
+        # Keep output compact by showing only the first deterministic reason.
         if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
             return False
     return _append_or_truncate(budget, "")

@@ -283,6 +283,9 @@ def test_pack_command_yaml_output(tmp_path: Path, capsys: pytest.CaptureFixture[
     )
     assert exit_code == 0
 
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["task"] == "DerivedThing"
-    assert payload["selected_entities"]
+    # Output is JSON-formatted for deterministic YAML 1.2-compatible serialization.
+    parsed_yaml = json.loads(capsys.readouterr().out)
+    assert parsed_yaml["task"] == "DerivedThing"
+    assert parsed_yaml["selected_entities"]
+    selected_qnames = {entity["qualified_name"] for entity in parsed_yaml["selected_entities"]}
+    assert "python_symbols.DerivedThing" in selected_qnames
