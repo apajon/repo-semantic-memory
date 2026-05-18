@@ -100,7 +100,11 @@ def _infer_test_components(
                 _build_inferred_component(
                     entity=entity,
                     component_type="TestFile",
-                    properties={"heuristic": "module_path_contains_tests"},
+                    properties={
+                        "heuristic": "module_path_contains_tests",
+                        "inference_basis": "lexical_heuristic",
+                    },
+                    inference_note="Derived from static name/path lexical heuristics only.",
                 ),
             )
         if entity.kind != "module" and (starts_with_test or in_tests_path):
@@ -112,7 +116,8 @@ def _infer_test_components(
                 _build_inferred_component(
                     entity=entity,
                     component_type="TestTarget",
-                    properties={"heuristic": reason},
+                    properties={"heuristic": reason, "inference_basis": "lexical_heuristic"},
+                    inference_note="Derived from static name/path lexical heuristics only.",
                 ),
             )
 
@@ -130,7 +135,11 @@ def _infer_lifecycle_components(
             _build_inferred_component(
                 entity=entity,
                 component_type="LifecycleManaged",
-                properties={"heuristic": "class_name_contains_lifecycle"},
+                properties={
+                    "heuristic": "class_name_contains_lifecycle",
+                    "inference_basis": "lexical_heuristic",
+                },
+                inference_note="Derived from static name/path lexical heuristics only.",
             ),
         )
 
@@ -157,7 +166,11 @@ def _infer_integration_components(
             _build_inferred_component(
                 entity=entity,
                 component_type="ROSLikeIntegration" if is_ros_like else "ExternalIntegration",
-                properties={"heuristic": f"name_contains_{matched_token}"},
+                properties={
+                    "heuristic": f"name_contains_{matched_token}",
+                    "inference_basis": "lexical_heuristic",
+                },
+                inference_note="Derived from static name/path lexical heuristics only.",
             ),
         )
 
@@ -184,6 +197,7 @@ def _infer_public_api_components(
         target_entity = entity_by_id.get(target_id)
         if target_entity is None or target_entity.kind in {"repository", "package", "module"}:
             continue
+        # Only boolean True is treated as resolved evidence in this heuristic.
         if relation.kind == "imports" and relation.metadata.get("resolved") is not True:
             continue
         if relation.kind not in {"contains", "imports"}:

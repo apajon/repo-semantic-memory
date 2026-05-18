@@ -167,7 +167,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     components_list_parser = components_subparsers.add_parser(
         "list",
-        help="List inferred semantic components.",
+        help="List derived semantic components (recomputed from entities/relations).",
     )
     components_list_parser.add_argument(
         "--db",
@@ -495,6 +495,7 @@ def _run_components_infer_command(*, db: str, emit_json: bool) -> int:
 
 
 def _run_components_list_command(*, db: str, emit_json: bool) -> int:
+    """List the same derived component view as infer (components are not persisted)."""
     return _run_components_infer_command(db=db, emit_json=emit_json)
 
 

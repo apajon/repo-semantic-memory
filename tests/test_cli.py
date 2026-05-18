@@ -428,3 +428,20 @@ def test_components_list_command_is_deterministic(
     assert main(["components", "list", "--db", str(db_path), "--json"]) == 0
     second = json.loads(capsys.readouterr().out)
     assert first == second
+
+
+def test_components_list_matches_infer_derived_view(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    assert main(["components", "infer", "--db", str(db_path), "--json"]) == 0
+    inferred = json.loads(capsys.readouterr().out)
+
+    assert main(["components", "list", "--db", str(db_path), "--json"]) == 0
+    listed = json.loads(capsys.readouterr().out)
+
+    assert listed == inferred
