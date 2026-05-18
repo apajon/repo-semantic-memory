@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import datetime, timezone
-from pathlib import Path
 from collections.abc import Sequence
+from datetime import UTC, datetime
+from pathlib import Path
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
@@ -40,7 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit extracted entities and relations as JSON.",
     )
-    index_parser = subparsers.add_parser("index", help="Extract and persist semantic data to SQLite.")
+    index_parser = subparsers.add_parser(
+        "index",
+        help="Extract and persist semantic data to SQLite.",
+    )
     index_parser.add_argument("path", help="Repository root path to index.")
     index_parser.add_argument(
         "--db",
@@ -48,9 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="SQLite database file path.",
     )
 
-    inspect_parser = subparsers.add_parser("inspect", help="Inspect stored entities or relations.")
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="Inspect stored entities or relations.",
+    )
     inspect_subparsers = inspect_parser.add_subparsers(dest="inspect_target")
-    inspect_entities_parser = inspect_subparsers.add_parser("entities", help="List stored entities.")
+    inspect_entities_parser = inspect_subparsers.add_parser(
+        "entities",
+        help="List stored entities.",
+    )
     inspect_entities_parser.add_argument(
         "--db",
         default=".rsm/index.sqlite",
@@ -61,7 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit rows as JSON.",
     )
-    inspect_relations_parser = inspect_subparsers.add_parser("relations", help="List stored relations.")
+    inspect_relations_parser = inspect_subparsers.add_parser(
+        "relations",
+        help="List stored relations.",
+    )
     inspect_relations_parser.add_argument(
         "--db",
         default=".rsm/index.sqlite",
@@ -156,7 +168,7 @@ def _run_index_command(*, path: str, db: str) -> int:
     metadata = build_default_extraction_metadata(
         repository_root=repository_root,
         extractor_names=("filesystem", "python_ast"),
-        timestamp=datetime.now(tz=timezone.utc).isoformat(),
+        timestamp=datetime.now(tz=UTC).isoformat(),
     )
     store = SQLiteStore(db_path)
     try:
@@ -209,7 +221,11 @@ def _format_relations_table(relations: Sequence[Relation]) -> str:
     rows = [("kind", "source_id", "target_id")]
     for relation in relations:
         rows.append(
-            (str(relation.kind), str(relation.source_entity_id.value), str(relation.target_entity_id.value))
+            (
+                str(relation.kind),
+                str(relation.source_entity_id.value),
+                str(relation.target_entity_id.value),
+            )
         )
     columns = zip(*rows, strict=True)
     widths = [max(len(value) for value in column) for column in columns]

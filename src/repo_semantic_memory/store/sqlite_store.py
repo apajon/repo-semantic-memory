@@ -99,7 +99,8 @@ class SQLiteStore:
         """Persist extraction metadata, entities, and relations atomically."""
         if metadata.schema_version != SCHEMA_VERSION:
             raise ValueError(
-                f"Extraction schema_version mismatch: expected {SCHEMA_VERSION}, got {metadata.schema_version}"
+                "Extraction schema_version mismatch: "
+                f"expected {SCHEMA_VERSION}, got {metadata.schema_version}"
             )
 
         with self._transaction():
@@ -110,9 +111,7 @@ class SQLiteStore:
 
     def get_metadata(self) -> dict[str, str]:
         """Return metadata rows ordered by key."""
-        rows = self._conn.execute(
-            "SELECT key, value FROM metadata ORDER BY key ASC"
-        ).fetchall()
+        rows = self._conn.execute("SELECT key, value FROM metadata ORDER BY key ASC").fetchall()
         return {key: value for key, value in rows}
 
     def list_entities(self) -> list[Entity]:
@@ -253,7 +252,11 @@ class SQLiteStore:
                     relation.source_entity_id.value,
                     relation.target_entity_id.value,
                     relation.kind,
-                    _json_dumps(relation.evidence.to_dict()) if relation.evidence is not None else None,
+                    (
+                        _json_dumps(relation.evidence.to_dict())
+                        if relation.evidence is not None
+                        else None
+                    ),
                     _json_dumps(relation.metadata),
                 )
                 for relation in ordered
