@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from repo_semantic_memory.model.evidence import Evidence
 from repo_semantic_memory.model.ids import StableId
@@ -110,14 +110,18 @@ class Invariant:
             name=str(payload["name"]),
             description=str(payload["description"]),
             scope=str(payload["scope"]),
-            severity=str(payload["severity"]),
-            status=str(payload["status"]),
+            severity=cast(InvariantSeverity, payload["severity"]),
+            status=cast(InvariantStatus, payload["status"]),
             evidence=tuple(evidence),
             validation_rule=(
-                str(payload["validation_rule"]) if payload.get("validation_rule") is not None else None
+                str(payload["validation_rule"])
+                if payload.get("validation_rule") is not None
+                else None
             ),
             related_entity_ids=related_entity_ids,
-            origin_note=str(payload["origin_note"]) if payload.get("origin_note") is not None else None,
+            origin_note=str(payload["origin_note"])
+            if payload.get("origin_note") is not None
+            else None,
         )
 
 

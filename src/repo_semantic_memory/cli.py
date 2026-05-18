@@ -27,7 +27,11 @@ from repo_semantic_memory.eval import (
 )
 from repo_semantic_memory.exporters import AiDirectoryExporter
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
-from repo_semantic_memory.memory import export_invariants_yaml, import_invariants_yaml, infer_semantic_components
+from repo_semantic_memory.memory import (
+    export_invariants_yaml,
+    import_invariants_yaml,
+    infer_semantic_components,
+)
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import get_version_info

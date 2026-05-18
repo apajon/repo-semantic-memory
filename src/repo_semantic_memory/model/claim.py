@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from repo_semantic_memory.model.evidence import Evidence
 from repo_semantic_memory.model.ids import StableId
@@ -27,8 +27,12 @@ class Claim:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _normalize_identifier(self.id, field_name="Claim id"))
-        object.__setattr__(self, "subject", _normalize_identifier(self.subject, field_name="Claim subject"))
-        object.__setattr__(self, "object", _normalize_identifier(self.object, field_name="Claim object"))
+        object.__setattr__(
+            self, "subject", _normalize_identifier(self.subject, field_name="Claim subject")
+        )
+        object.__setattr__(
+            self, "object", _normalize_identifier(self.object, field_name="Claim object")
+        )
 
         predicate = self.predicate.strip()
         if not predicate:
@@ -44,9 +48,9 @@ class Claim:
 
         _validate_claim_provenance(self)
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize claim into deterministic JSON-friendly payload."""
-        payload: dict[str, object] = {
+        payload: dict[str, Any] = {
             "id": self.id,
             "subject": self.subject,
             "predicate": self.predicate,
@@ -77,7 +81,7 @@ class Claim:
             subject=payload["subject"],
             predicate=str(payload["predicate"]),
             object=payload["object"],
-            status=str(payload["status"]),
+            status=cast(ClaimStatus, payload["status"]),
             evidence=tuple(evidence),
             confidence=float(payload.get("confidence", 0.0)),
             note=str(payload["note"]) if payload.get("note") is not None else None,

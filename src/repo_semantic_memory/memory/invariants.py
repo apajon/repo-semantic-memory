@@ -10,7 +10,7 @@ from typing import Any
 from repo_semantic_memory.model import Claim, Invariant
 
 try:
-    import yaml
+    import yaml  # type: ignore[import-untyped]
 except ModuleNotFoundError:  # pragma: no cover - fallback path for minimal runtime installs.
     yaml = None
 
