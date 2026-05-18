@@ -71,7 +71,9 @@ def test_attach_git_metadata_to_entities_attaches_file_metadata(
             )
         }
 
-    monkeypatch.setattr("repo_semantic_memory.memory.temporal.collect_git_file_metadata", _fake_collect)
+    monkeypatch.setattr(
+        "repo_semantic_memory.memory.temporal.collect_git_file_metadata", _fake_collect
+    )
     result = attach_git_metadata_to_entities(entities, repository_root="/repo", summary=summary)
 
     assert result.status == "attached"

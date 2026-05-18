@@ -53,7 +53,9 @@ def test_collect_git_file_metadata_parses_mocked_output(monkeypatch: pytest.Monk
         raise subprocess.CalledProcessError(returncode=128, cmd=command, stderr="unknown file")
 
     monkeypatch.setattr("repo_semantic_memory.extractors.git_history.subprocess.run", _fake_run)
-    metadata = collect_git_file_metadata(repository_root=".", relative_paths=["src/a.py", "src/missing.py"])
+    metadata = collect_git_file_metadata(
+        repository_root=".", relative_paths=["src/a.py", "src/missing.py"]
+    )
     assert list(metadata) == ["src/a.py"]
     assert metadata["src/a.py"].to_dict() == {
         "last_commit_hash": "abc123",
@@ -72,7 +74,9 @@ def test_parse_helpers_are_deterministic() -> None:
     assert _parse_commit_count("not-a-number\n") is None
 
 
-def test_run_git_uses_safe_subprocess_arguments(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_git_uses_safe_subprocess_arguments(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, object] = {}
 
     def _fake_run(

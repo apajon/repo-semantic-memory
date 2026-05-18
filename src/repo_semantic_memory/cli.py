@@ -514,7 +514,10 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
     finally:
         store.close()
     if with_git:
-        print(f"entities={len(all_entities)} relations={len(python_relations)} git_metadata={git_status}")
+        print(
+            f"entities={len(all_entities)} relations={len(python_relations)} "
+            f"git_metadata={git_status}"
+        )
         return 0
     print(f"entities={len(all_entities)} relations={len(python_relations)}")
     return 0
