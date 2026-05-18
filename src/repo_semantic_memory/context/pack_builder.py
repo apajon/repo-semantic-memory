@@ -30,6 +30,11 @@ _CODE_TASK_TOKENS = frozenset(
         "src",
     }
 )
+_IMPLEMENTATION_TASK_TOKENS = frozenset(
+    {"implementation", "source", "ownership", "component", "cleanup"}
+)
+_TEST_TASK_TOKENS = frozenset({"test", "tests", "behavior", "coverage", "pytest"})
+_PUBLIC_API_TASK_TOKENS = frozenset({"public", "api", "export", "exports", "__init__", "init"})
 _FORBIDDEN_ASSUMPTIONS = (
     (
         "Do not assume inheritance targets are resolved unless relation metadata says "
@@ -51,6 +56,10 @@ _AST_BACKED_BONUS = 10
 _CODE_ENTITY_KIND_BONUS = 6
 _COARSE_ENTITY_PENALTY = -6
 _CITATION_RANGE_OVERHEAD_CHARS = 24
+_IMPLEMENTATION_PATH_BONUS = 20
+_TEST_PATH_BONUS = 20
+_PUBLIC_API_HINT_BONUS = 24
+_GENERATED_ARTIFACT_PENALTY = -80
 
 
 def build_context_pack(
@@ -76,11 +85,23 @@ def build_context_pack(
     entity_by_id = {entity.id.value: entity for entity in normalized_entities}
     task_tokens = _tokenize(task)
     is_code_task = _is_code_task(task_tokens)
+    task_hints = _task_hints(task_tokens)
+    semantic_components = infer_semantic_components(
+        entities=normalized_entities,
+        relations=normalized_relations,
+    )
+    public_api_entity_ids = {
+        component.entity_id.value
+        for component in semantic_components
+        if component.component_type == "PublicAPI"
+    }
 
     ranked = _rank_entities(
         entities=normalized_entities,
         task_tokens=task_tokens,
         is_code_task=is_code_task,
+        task_hints=task_hints,
+        public_api_entity_ids=public_api_entity_ids,
     )
 
     selected_entity_ids: list[str] = []
@@ -187,10 +208,18 @@ def _rank_entities(
     entities: Sequence[Entity],
     task_tokens: tuple[str, ...],
     is_code_task: bool,
+    task_hints: set[str],
+    public_api_entity_ids: set[str],
 ) -> list[tuple[Entity, int, tuple[str, ...]]]:
     ranked: list[tuple[Entity, int, tuple[str, ...]]] = []
     for entity in entities:
-        score, reasons = _score_entity(entity, task_tokens, is_code_task=is_code_task)
+        score, reasons = _score_entity(
+            entity,
+            task_tokens,
+            is_code_task=is_code_task,
+            task_hints=task_hints,
+            public_api_entity_ids=public_api_entity_ids,
+        )
         if score < 1:
             continue
         ranked.append((entity, score, reasons))
@@ -198,7 +227,12 @@ def _rank_entities(
 
 
 def _score_entity(
-    entity: Entity, task_tokens: tuple[str, ...], *, is_code_task: bool
+    entity: Entity,
+    task_tokens: tuple[str, ...],
+    *,
+    is_code_task: bool,
+    task_hints: set[str],
+    public_api_entity_ids: set[str],
 ) -> tuple[int, tuple[str, ...]]:
     name = entity.name.lower()
     qualified_name = entity.qualified_name.lower()
@@ -243,6 +277,26 @@ def _score_entity(
         if entity.kind in _COARSE_ENTITY_KINDS:
             score += _COARSE_ENTITY_PENALTY
 
+    if _is_generated_artifact_path(source_path):
+        score += _GENERATED_ARTIFACT_PENALTY
+        reasons.append("generated/build artifact downrank")
+
+    if "implementation" in task_hints and source_path.startswith("src/"):
+        score += _IMPLEMENTATION_PATH_BONUS
+        reasons.append('implementation task hint -> boosted "src/"')
+
+    if "tests" in task_hints and source_path.startswith("tests/"):
+        score += _TEST_PATH_BONUS
+        reasons.append('test task hint -> boosted "tests/"')
+
+    if "public_api" in task_hints:
+        if source_path.endswith("/__init__.py") or source_path == "__init__.py":
+            score += _PUBLIC_API_HINT_BONUS
+            reasons.append('public API task hint -> boosted "__init__.py"')
+        if entity.id.value in public_api_entity_ids:
+            score += _PUBLIC_API_HINT_BONUS
+            reasons.append("public API task hint -> boosted PublicAPI component entity")
+
     if not reasons and score > 0:
         reasons.append("lexical baseline relevance")
     return score, tuple(dict.fromkeys(reasons))
@@ -258,6 +312,33 @@ def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
         token in _CODE_TASK_TOKENS or any(token.endswith(suffix) for suffix in _CODE_PATH_SUFFIXES)
         for token in task_tokens
     )
+
+
+def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
+    hints: set[str] = set()
+    if any(token in _CODE_TASK_TOKENS or token in _IMPLEMENTATION_TASK_TOKENS for token in task_tokens):
+        hints.add("implementation")
+    if any(token in _TEST_TASK_TOKENS for token in task_tokens):
+        hints.add("tests")
+    if any(token in _PUBLIC_API_TASK_TOKENS for token in task_tokens):
+        hints.add("public_api")
+    return hints
+
+
+def _is_generated_artifact_path(path: str) -> bool:
+    generated_tokens = (
+        "/docs/_build/",
+        "/_build/",
+        "/dist/",
+        "/build/",
+        "/htmlcov/",
+        "/.pytest_cache/",
+        "/.mypy_cache/",
+        "/.ruff_cache/",
+        ".egg-info/",
+    )
+    normalized = f"/{path.strip('/')}/"
+    return any(token in normalized for token in generated_tokens)
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:

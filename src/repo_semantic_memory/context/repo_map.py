@@ -93,7 +93,7 @@ def _build_module_sections(
             )
         )
 
-    return sorted(sections, key=lambda section: _entity_sort_key(section.module))
+    return sorted(sections, key=lambda section: _module_section_sort_key(section.module))
 
 
 def _preferred_module_entities(entities: Sequence[Entity]) -> list[Entity]:
@@ -177,6 +177,32 @@ def _entity_sort_key(entity: Entity) -> tuple[str, int, int, str, str]:
         entity.kind,
         entity.id.value,
     )
+
+
+def _module_section_sort_key(entity: Entity) -> tuple[int, str, int, int, str, str]:
+    return (
+        _repo_map_path_priority(entity.source_range.path),
+        entity.source_range.path,
+        entity.source_range.start_line,
+        entity.source_range.start_col or 0,
+        entity.kind,
+        entity.id.value,
+    )
+
+
+def _repo_map_path_priority(path: str) -> int:
+    normalized = _to_posix_path(path)
+    priorities = (
+        ("src/", 0),
+        ("tests/", 1),
+        ("examples/", 2),
+        ("docs/", 3),
+        (".github/", 4),
+    )
+    for prefix, priority in priorities:
+        if normalized.startswith(prefix):
+            return priority
+    return 5
 
 
 def _sort_entities(entities: Sequence[Entity]) -> list[Entity]:

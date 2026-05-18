@@ -7,7 +7,10 @@ import os
 from pathlib import Path
 from typing import Literal, cast
 
-from repo_semantic_memory.extractors.filesystem import IGNORED_DIRECTORIES
+from repo_semantic_memory.extractors.filesystem import (
+    _should_ignore_directory_name,
+    _should_ignore_directory_path,
+)
 from repo_semantic_memory.model import Entity, JsonValue, Relation, SourceRange, StableId
 
 DefinitionNode = ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef
@@ -147,7 +150,13 @@ def index_python_path(path: Path | str) -> tuple[list[Entity], list[Relation]]:
 def _iter_python_files(root: Path) -> list[Path]:
     discovered: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-        dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRECTORIES)
+        current_dir = Path(dirpath)
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if not _should_ignore_directory_name(name)
+            and not _should_ignore_directory_path(current_dir / name, root)
+        )
         for filename in sorted(filenames):
             file_path = Path(dirpath) / filename
             if file_path.suffix.lower() == ".py":
