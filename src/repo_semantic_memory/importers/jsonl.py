@@ -7,9 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from repo_semantic_memory.exporters.jsonl import EXPORT_FORMAT, EXPORT_FORMAT_VERSION
 from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.store import ExtractionMetadata, SQLiteStore
-from repo_semantic_memory.version import PACKAGE_VERSION, SCHEMA_VERSION
+from repo_semantic_memory.version import SCHEMA_VERSION
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class JsonlImportResult:
     db_path: Path
     entity_count: int
     relation_count: int
+    components_snapshot_ignored: bool
 
 
 def import_jsonl_directory(*, input_dir: Path | str, db_path: Path | str) -> JsonlImportResult:
@@ -28,8 +30,10 @@ def import_jsonl_directory(*, input_dir: Path | str, db_path: Path | str) -> Jso
     entities = _read_entities(source_dir / "entities.jsonl")
     relations = _read_relations(source_dir / "relations.jsonl")
     metadata_payload = _read_metadata(source_dir / "metadata.json")
+    _validate_export_format(metadata_payload)
     _validate_schema_version(metadata_payload)
-    metadata = _extract_extraction_metadata(payload=metadata_payload, source_dir=source_dir)
+    metadata = _extract_extraction_metadata(payload=metadata_payload)
+    components_snapshot_ignored = (source_dir / "components.jsonl").exists()
 
     db = SQLiteStore(db_path)
     try:
@@ -42,6 +46,7 @@ def import_jsonl_directory(*, input_dir: Path | str, db_path: Path | str) -> Jso
         db_path=Path(db_path),
         entity_count=len(entities),
         relation_count=len(relations),
+        components_snapshot_ignored=components_snapshot_ignored,
     )
 
 
@@ -108,18 +113,44 @@ def _validate_schema_version(metadata_payload: dict[str, Any]) -> None:
         )
 
 
-def _extract_extraction_metadata(
-    *, payload: dict[str, Any], source_dir: Path
-) -> ExtractionMetadata:
+def _validate_export_format(metadata_payload: dict[str, Any]) -> None:
+    export_format = metadata_payload.get("export_format")
+    if not isinstance(export_format, str):
+        raise ValueError("metadata.json: export_format must be a string")
+    if export_format != EXPORT_FORMAT:
+        raise ValueError(
+            f"metadata.json: unsupported export_format: {export_format} (expected {EXPORT_FORMAT})"
+        )
+
+    export_format_version = metadata_payload.get("export_format_version")
+    if not isinstance(export_format_version, str):
+        raise ValueError("metadata.json: export_format_version must be a string")
+    if export_format_version != EXPORT_FORMAT_VERSION:
+        raise ValueError(
+            "metadata.json: unsupported export_format_version: "
+            f"{export_format_version} (expected {EXPORT_FORMAT_VERSION})"
+        )
+
+
+def _extract_extraction_metadata(*, payload: dict[str, Any]) -> ExtractionMetadata:
     extraction_payload = payload.get("extraction_metadata", {})
     if extraction_payload is None:
         extraction_payload = {}
     if not isinstance(extraction_payload, dict):
         raise ValueError("metadata.json: extraction_metadata must be an object when provided")
 
-    repository_root = str(extraction_payload.get("repository_root") or str(source_dir.resolve()))
-    package_version = str(extraction_payload.get("package_version") or PACKAGE_VERSION)
-    timestamp = str(extraction_payload.get("timestamp") or payload.get("generated_at") or "")
+    repository_root = _coerce_optional_str(
+        extraction_payload.get("repository_root"),
+        field_name="metadata.json: extraction_metadata.repository_root",
+    )
+    package_version = _coerce_optional_str(
+        extraction_payload.get("package_version"),
+        field_name="metadata.json: extraction_metadata.package_version",
+    )
+    timestamp = _coerce_optional_str(
+        extraction_payload.get("timestamp"),
+        field_name="metadata.json: extraction_metadata.timestamp",
+    )
     extractor_names = _coerce_extractor_names(extraction_payload.get("extractor_names"))
 
     return ExtractionMetadata(
@@ -141,7 +172,9 @@ def _coerce_extractor_names(value: Any) -> tuple[str, ...]:
         try:
             loaded = json.loads(stripped)
         except json.JSONDecodeError:
-            return (stripped,)
+            raise ValueError(
+                "metadata.json: extraction_metadata.extractor_names string must contain JSON array"
+            ) from None
         if isinstance(loaded, list) and all(isinstance(item, str) for item in loaded):
             return tuple(sorted(loaded))
         raise ValueError(
@@ -152,3 +185,11 @@ def _coerce_extractor_names(value: Any) -> tuple[str, ...]:
     raise ValueError(
         "metadata.json: extraction_metadata.extractor_names must be list[str] or string"
     )
+
+
+def _coerce_optional_str(value: Any, *, field_name: str) -> str:
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string when provided")
+    return value

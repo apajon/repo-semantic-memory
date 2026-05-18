@@ -7,6 +7,7 @@ from pathlib import Path
 
 from repo_semantic_memory.cli import main
 from repo_semantic_memory.exporters import export_jsonl_directory
+from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.store import SQLiteStore
 
 FIXTURE_ROOT = Path(__file__).resolve().parent.parent / "fixtures" / "simple_repo"
@@ -71,6 +72,8 @@ def test_export_jsonl_lines_parse(tmp_path: Path) -> None:
         assert isinstance(payload, dict)
         assert "source_entity_id" in payload
         assert "target_entity_id" in payload
+    assert metadata_payload["export_format"] == "rsm-jsonl"
+    assert metadata_payload["export_format_version"] == "1.0"
     assert metadata_payload["schema_version"] == "0.1.0"
 
 
@@ -92,4 +95,34 @@ def test_export_jsonl_is_deterministic(tmp_path: Path) -> None:
     ).read_text(encoding="utf-8")
     assert (out_1 / "relations.jsonl").read_text(encoding="utf-8") == (
         out_2 / "relations.jsonl"
+    ).read_text(encoding="utf-8")
+
+
+def test_roundtrip_export_import_export_preserves_entities_relations(tmp_path: Path) -> None:
+    db_path = _build_db(tmp_path)
+    entities, relations, metadata = _load_index(db_path)
+    first_export_dir = tmp_path / "export_1"
+    imported_db_path = tmp_path / ".rsm" / "imported.sqlite"
+    second_export_dir = tmp_path / "export_2"
+
+    export_jsonl_directory(
+        output_dir=first_export_dir,
+        entities=entities,
+        relations=relations,
+        metadata=metadata,
+    )
+    import_jsonl_directory(input_dir=first_export_dir, db_path=imported_db_path)
+    imported_entities, imported_relations, imported_metadata = _load_index(imported_db_path)
+    export_jsonl_directory(
+        output_dir=second_export_dir,
+        entities=imported_entities,
+        relations=imported_relations,
+        metadata=imported_metadata,
+    )
+
+    assert (first_export_dir / "entities.jsonl").read_text(encoding="utf-8") == (
+        second_export_dir / "entities.jsonl"
+    ).read_text(encoding="utf-8")
+    assert (first_export_dir / "relations.jsonl").read_text(encoding="utf-8") == (
+        second_export_dir / "relations.jsonl"
     ).read_text(encoding="utf-8")

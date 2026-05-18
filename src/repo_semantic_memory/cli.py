@@ -696,6 +696,12 @@ def _run_import_jsonl_command(*, input_dir: str, db: str) -> int:
         f"imported jsonl from {result.input_dir} "
         f"entities={result.entity_count} relations={result.relation_count} db={result.db_path}"
     )
+    if result.components_snapshot_ignored:
+        print(
+            "ignored components.jsonl: semantic components are derived snapshots and "
+            "component import is not supported in the current schema",
+            file=sys.stderr,
+        )
     return 0
 
 

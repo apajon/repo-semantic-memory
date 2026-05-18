@@ -88,6 +88,45 @@ def test_import_jsonl_invalid_schema_version_fails_clearly(tmp_path: Path) -> No
         import_jsonl_directory(input_dir=export_dir, db_path=tmp_path / "imported.sqlite")
 
 
+def test_import_jsonl_invalid_export_format_fails_clearly(tmp_path: Path) -> None:
+    db_path = _build_db(tmp_path)
+    entities, relations, metadata = _load_index(db_path)
+    export_dir = tmp_path / ".rsm" / "export"
+    export_jsonl_directory(
+        output_dir=export_dir, entities=entities, relations=relations, metadata=metadata
+    )
+
+    metadata_path = export_dir / "metadata.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload["export_format"] = "unknown-format"
+    metadata_path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported export_format"):
+        import_jsonl_directory(input_dir=export_dir, db_path=tmp_path / "imported.sqlite")
+
+
+def test_import_jsonl_missing_extraction_metadata_does_not_invent_facts(tmp_path: Path) -> None:
+    db_path = _build_db(tmp_path)
+    entities, relations, metadata = _load_index(db_path)
+    export_dir = tmp_path / ".rsm" / "export"
+    imported_db = tmp_path / ".rsm" / "imported.sqlite"
+    export_jsonl_directory(
+        output_dir=export_dir, entities=entities, relations=relations, metadata=metadata
+    )
+
+    metadata_path = export_dir / "metadata.json"
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    payload.pop("extraction_metadata")
+    metadata_path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+
+    import_jsonl_directory(input_dir=export_dir, db_path=imported_db)
+    _, _, imported_metadata = _load_index(imported_db)
+    assert imported_metadata["repository_root"] == ""
+    assert imported_metadata["package_version"] == ""
+    assert imported_metadata["timestamp"] == ""
+    assert imported_metadata["extractor_names"] == "[]"
+
+
 def test_import_jsonl_malformed_line_fails_clearly(tmp_path: Path) -> None:
     db_path = _build_db(tmp_path)
     entities, relations, metadata = _load_index(db_path)

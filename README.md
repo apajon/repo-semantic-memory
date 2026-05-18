@@ -172,6 +172,13 @@ Machine-facing graph portability is available via JSONL import/export.
 `export-jsonl` emits deterministic `entities.jsonl`, `relations.jsonl`, and `metadata.json`
 (`components.jsonl` is included only when inferred components are available).
 
+Notes:
+
+- `components.jsonl` is a **derived snapshot** (not persisted SQLite facts).
+- `import-jsonl` ignores `components.jsonl` and imports entities/relations only in the current schema.
+- `metadata.json` includes `export_format` and `export_format_version` so interchange can evolve
+  independently from SQLite `SCHEMA_VERSION`.
+
 ## Data model
 
 The MVP data model is intentionally small.

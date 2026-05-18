@@ -11,6 +11,9 @@ from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.version import PACKAGE_VERSION, SCHEMA_VERSION
 
+EXPORT_FORMAT = "rsm-jsonl"
+EXPORT_FORMAT_VERSION = "1.0"
+
 
 @dataclass(frozen=True)
 class JsonlExportResult:
@@ -86,6 +89,8 @@ class JsonlExporter:
 
     def _write_metadata(self) -> None:
         payload = {
+            "export_format": EXPORT_FORMAT,
+            "export_format_version": EXPORT_FORMAT_VERSION,
             "schema_version": SCHEMA_VERSION,
             "package_version": PACKAGE_VERSION,
             "generated_at": self.generated_at,

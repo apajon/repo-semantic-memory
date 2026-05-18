@@ -512,11 +512,14 @@ def test_import_jsonl_command_reconstructs_db(
     capsys.readouterr()
     assert main(["export-jsonl", "--db", str(source_db_path), "--out", str(export_dir)]) == 0
     capsys.readouterr()
+    (export_dir / "components.jsonl").write_text('{"derived":true}\n', encoding="utf-8")
 
     exit_code = main(["import-jsonl", "--in", str(export_dir), "--db", str(imported_db_path)])
     assert exit_code == 0
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert "imported jsonl from" in out
+    assert "ignored components.jsonl" in captured.err
 
     inspect_exit = main(["inspect", "entities", "--db", str(imported_db_path), "--json"])
     assert inspect_exit == 0
