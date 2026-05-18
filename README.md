@@ -29,6 +29,19 @@ This initial scaffold provides a typed Python CLI, explicit artifact versioning,
 - `--budget` is currently an approximate **character** budget (not tokenizer-based token counting yet).
 - Import lines are static extracted names and are labeled unresolved; cross-file import resolution is not implemented in this phase.
 
+## Retrieval benchmark MVP
+
+- `rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml` runs deterministic lexical retrieval evaluation.
+- `--json` emits full machine-readable benchmark output.
+- `--markdown-report out.md` writes a markdown report with aggregate and per-task details.
+- Dataset files are YAML with top-level `tasks`, each containing `id`, `category`, `prompt`, and `gold` lists for `files`, `symbols`, and `invariants`.
+- Gold `files` must be repository-relative POSIX paths and are matched against indexed `Entity.source_range.path`.
+- Gold `symbols` are matched against indexed `Entity.qualified_name` in this MVP (matching against `name` or `id` is not implemented yet).
+- Lexical ranking is deterministic and tie-breaks by entity stable ID.
+- MRR is reciprocal rank of the first ranked item that matches any gold target.
+- `context_character_estimate` is an approximate character-based estimate and is not tokenizer-based.
+- Gold `invariants` can be present in datasets for forward compatibility, but invariant evaluation/coverage is not implemented in this MVP.
+
 ## Quick start
 
 ```bash
