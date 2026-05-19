@@ -33,7 +33,9 @@ class BM25Config:
 
     k1: float = 1.2
     b: float = 0.75
-    field_weights: Mapping[str, float] = field(default_factory=lambda: dict(DEFAULT_FIELD_WEIGHTS))
+    field_weights: Mapping[str, float] = field(
+        default_factory=lambda: MappingProxyType(dict(DEFAULT_FIELD_WEIGHTS))
+    )
 
     def __post_init__(self) -> None:
         if self.k1 <= 0:
