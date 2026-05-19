@@ -7,12 +7,16 @@ from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
 from repo_semantic_memory.context.pack_builder import (
+    _build_bm25_index,
+    _component_labels_by_entity,
     _is_code_task,
+    _relation_labels_by_entity,
     _score_entity,
     _task_hints,
     _tokenize,
 )
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
 
@@ -304,7 +308,7 @@ def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> 
     assert all(".egg-info/" not in path for path in selected_paths)
 
 
-def test_implementation_cleanup_task_includes_src_components_and_tests() -> None:
+def test_implementation_cleanup_task_excludes_test_files() -> None:
     entities, relations = _ranking_fixture_entities_and_relations()
 
     pack = build_context_pack(
@@ -317,7 +321,7 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
 
     assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
     assert "lifecore_state/state_component.py" in selected_paths
-    assert "tests/public_api_checks.py" in selected_paths
+    assert "tests/public_api_checks.py" not in selected_paths
 
 
 def test_build_filtering_is_path_segment_aware() -> None:
@@ -414,9 +418,16 @@ def test_generated_artifact_penalty_appears_in_breakdown() -> None:
         source_range=SourceRange(path="docs/_build/generated.py", start_line=1, end_line=1),
     )
     task_tokens = _tokenize("generated api docs")
+    components = infer_semantic_components(entities=[generated_entity], relations=[])
+    bm25_index = _build_bm25_index(
+        entities=[generated_entity],
+        component_labels_by_entity=_component_labels_by_entity(components),
+        relation_labels_by_entity=_relation_labels_by_entity([]),
+    )
     breakdown = _score_entity(
         generated_entity,
         task_tokens,
+        bm25_index=bm25_index,
         is_code_task=_is_code_task(task_tokens),
         task_hints=_task_hints(task_tokens),
         public_api_entity_ids=set(),
