@@ -10,6 +10,7 @@ from repo_semantic_memory.context.pack_builder import (
     _build_bm25_index,
     _component_labels_by_entity,
     _is_code_task,
+    _is_graph_seed_eligible,
     _relation_labels_by_entity,
     _score_entity,
     _task_hints,
@@ -522,3 +523,146 @@ def test_explain_markdown_includes_ranking_summary_lines() -> None:
     markdown = render_context_pack_markdown(pack, explain_ranking=True)
 
     assert "Score: total=" in markdown
+
+
+# ---------------------------------------------------------------------------
+# Graph seed eligibility and graph-scored neighbors
+# ---------------------------------------------------------------------------
+
+
+def test_citation_only_entity_is_not_a_graph_seed() -> None:
+    """An entity whose only signal is the source-citation bonus must not be a graph seed."""
+    # Build a score for an entity that has no BM25 match, no path-role boost, no task-intent.
+    citation_only_entity = Entity(
+        id=StableId("python:module:unrelated"),
+        kind="module",
+        name="unrelated",
+        qualified_name="unrelated",
+        source_range=SourceRange(path="src/unrelated.py", start_line=1, end_line=1),
+    )
+    task_tokens = _tokenize("DerivedThing")
+    bm25_index = _build_bm25_index(
+        entities=[citation_only_entity],
+        component_labels_by_entity=_component_labels_by_entity([]),
+        relation_labels_by_entity=_relation_labels_by_entity([]),
+    )
+    breakdown = _score_entity(
+        citation_only_entity,
+        task_tokens,
+        bm25_index=bm25_index,
+        is_code_task=_is_code_task(task_tokens),
+        task_hints=_task_hints(task_tokens),
+        public_api_entity_ids=set(),
+        source_roots=("src",),
+    )
+
+    assert not _is_graph_seed_eligible(breakdown)
+
+
+def test_graph_seed_threshold_is_strictly_above_citation_bonus() -> None:
+    """Lexical score exactly equal to _SOURCE_CITATION_BONUS (2) is not a seed.
+
+    This verifies the > (not >=) boundary: the floor contributed by holding any
+    source path must not be sufficient on its own to qualify as a graph seed.
+    """
+    from repo_semantic_memory.context.pack_builder import _SOURCE_CITATION_BONUS
+    from repo_semantic_memory.context.ranking import build_breakdown
+
+    at_floor = build_breakdown(
+        lexical=float(_SOURCE_CITATION_BONUS),
+        path_role=0,
+        task_intent=0,
+        component=0,
+        graph=0,
+        penalty=0,
+        matched_terms=(),
+        matched_fields=(),
+        reasons=(),
+    )
+    above_floor = build_breakdown(
+        lexical=float(_SOURCE_CITATION_BONUS) + 0.01,
+        path_role=0,
+        task_intent=0,
+        component=0,
+        graph=0,
+        penalty=0,
+        matched_terms=(),
+        matched_fields=(),
+        reasons=(),
+    )
+    assert not _is_graph_seed_eligible(at_floor)
+    assert _is_graph_seed_eligible(above_floor)
+
+    """An entity with a BM25 match on task tokens qualifies as a graph seed."""
+    matched_entity = Entity(
+        id=StableId("python:class:python_symbols.DerivedThing"),
+        kind="class",
+        name="DerivedThing",
+        qualified_name="python_symbols.DerivedThing",
+        source_range=SourceRange(path="src/python_symbols.py", start_line=18, end_line=28),
+    )
+    task_tokens = _tokenize("DerivedThing")
+    bm25_index = _build_bm25_index(
+        entities=[matched_entity],
+        component_labels_by_entity=_component_labels_by_entity([]),
+        relation_labels_by_entity=_relation_labels_by_entity([]),
+    )
+    breakdown = _score_entity(
+        matched_entity,
+        task_tokens,
+        bm25_index=bm25_index,
+        is_code_task=_is_code_task(task_tokens),
+        task_hints=_task_hints(task_tokens),
+        public_api_entity_ids=set(),
+        source_roots=("src",),
+    )
+
+    assert _is_graph_seed_eligible(breakdown)
+
+
+def test_graph_selector_adds_contains_neighbor_from_true_seed() -> None:
+    """Graph selection adds contains-related neighbors that are not task seeds."""
+    entities, relations = _indexed_entities_and_relations()
+
+    # Task "DerivedThing": only the DerivedThing class has a direct BM25 match.
+    # The parent module has no BM25 match → not a graph seed, but IS a contains-parent.
+    pack = build_context_pack(
+        task="DerivedThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        explain_ranking=True,
+    )
+
+    selected_names = {e.qualified_name for e in pack.selected_entities}
+    # DerivedThing is the lexical seed.
+    assert "python_symbols.DerivedThing" in selected_names
+    # The parent module should be reachable as a graph neighbor (contains parent).
+    assert "python_symbols" in selected_names
+    # At least one entity in the pack must carry a non-zero graph score.
+    assert any(bd.graph > 0 for bd in pack.ranking_breakdowns.values())
+
+
+def test_graph_scored_neighbor_has_nonzero_graph_in_breakdown() -> None:
+    """An entity selected as a graph neighbor has graph > 0 in its ranking breakdown."""
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="DerivedThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        explain_ranking=True,
+    )
+
+    # python_symbols module is the contains-parent of DerivedThing.
+    module_entity = next(
+        (e for e in pack.selected_entities if e.qualified_name == "python_symbols"), None
+    )
+    assert module_entity is not None, "python_symbols module must be selected"
+    breakdown = pack.ranking_breakdowns.get(module_entity.id.value)
+    assert breakdown is not None, "ranking breakdown must exist for python_symbols in explain mode"
+    assert breakdown.graph > 0, (
+        f"python_symbols graph score should be > 0 (got {breakdown.graph}); "
+        "it should be selected as a graph neighbor of DerivedThing via contains"
+    )

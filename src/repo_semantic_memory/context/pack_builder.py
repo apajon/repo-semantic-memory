@@ -7,6 +7,10 @@ from collections.abc import Sequence
 
 from repo_semantic_memory.context.bm25 import FieldedBM25Index, FieldedDocument, tokenize_text
 from repo_semantic_memory.context.context_pack import ContextPack, SourceCitation, relation_key
+from repo_semantic_memory.context.graph_selection import (
+    GraphSelectionConfig,
+    select_graph_neighbors,
+)
 from repo_semantic_memory.context.path_roles import (
     SOURCE_ROLE,
     classify_path_role,
@@ -130,6 +134,8 @@ def build_context_pack(
 
     selected_entity_ids: list[str] = []
     selected_entity_set: set[str] = set()
+    # List (not set) to preserve deterministic insertion order for graph seed_ids.
+    graph_seed_ids: list[str] = []
     reasons_by_key: dict[str, list[str]] = defaultdict(list)
     ranking_breakdowns_by_id: dict[str, RankingBreakdown] = {}
     for entity, breakdown in ranked:
@@ -139,11 +145,14 @@ def build_context_pack(
             reasons_by_key[entity.id.value].extend(reason_messages)
             if explain_ranking:
                 ranking_breakdowns_by_id[entity.id.value] = breakdown
+            if _is_graph_seed_eligible(breakdown):
+                graph_seed_ids.append(entity.id.value)
 
     if not selected_entity_ids and normalized_entities:
         fallback = normalized_entities[0]
         _add_entity(fallback.id.value, selected_entity_ids, selected_entity_set)
         reasons_by_key[fallback.id.value].append("fallback deterministic seed")
+        graph_seed_ids.append(fallback.id.value)
         if explain_ranking:
             ranking_breakdowns_by_id[fallback.id.value] = build_breakdown(
                 lexical=0,
@@ -157,13 +166,74 @@ def build_context_pack(
                 reasons=(dedupe_stable_reasons((("graph", "fallback deterministic seed", 0.0),))),
             )
 
+    # Weighted graph neighbor selection using only task-relevant seeds.
+    # exclude_ids is scoped to graph seeds (not all selected) so that entities which
+    # passed the inclusion threshold via structural bonuses alone can still be
+    # discovered as graph-scored neighbors of genuinely task-relevant seeds.
+    graph_result = select_graph_neighbors(
+        seed_ids=tuple(graph_seed_ids),
+        entity_id_set=frozenset(entity_by_id.keys()),
+        relations=normalized_relations,
+        config=GraphSelectionConfig(),
+        exclude_ids=frozenset(graph_seed_ids),
+    )
+    for neighbor_id in graph_result.selected_ids:
+        is_new = _add_entity(neighbor_id, selected_entity_ids, selected_entity_set)
+        graph_score = graph_result.scores_by_id[neighbor_id]
+        neighbor_reasons = graph_result.reasons_by_id.get(neighbor_id, ())
+        # Only add graph reasons to reasons_by_key for newly selected entities.
+        # Already-selected entities already have lexical/structural reasons; adding
+        # graph reasons would inflate their estimated character cost in the output
+        # (reasons are rendered verbatim), consuming budget that would otherwise
+        # accommodate more entities and relations.
+        if is_new:
+            for reason_msg in neighbor_reasons:
+                reasons_by_key[neighbor_id].append(reason_msg)
+        if explain_ranking:
+            reason_tuples: tuple[tuple[RankingCategory, str, float], ...]
+            if neighbor_reasons:
+                reason_tuples = tuple(("graph", msg, graph_score) for msg in neighbor_reasons)
+            else:
+                reason_tuples = (
+                    ("graph", f"graph neighbor (score={graph_score:.3f})", graph_score),
+                )
+            if neighbor_id not in ranking_breakdowns_by_id:
+                ranking_breakdowns_by_id[neighbor_id] = build_breakdown(
+                    lexical=0,
+                    path_role=0,
+                    task_intent=0,
+                    component=0,
+                    graph=graph_score,
+                    penalty=0,
+                    matched_terms=(),
+                    matched_fields=(),
+                    reasons=dedupe_stable_reasons(reason_tuples),
+                )
+            elif graph_score > ranking_breakdowns_by_id[neighbor_id].graph:
+                # Entity was already selected via structural bonuses; update its
+                # breakdown to reflect the graph contribution from this expansion.
+                existing = ranking_breakdowns_by_id[neighbor_id]
+                existing_reason_tuples = tuple(
+                    (r.category, r.message, r.score_delta) for r in existing.reasons
+                )
+                ranking_breakdowns_by_id[neighbor_id] = build_breakdown(
+                    lexical=existing.lexical,
+                    path_role=existing.path_role,
+                    task_intent=existing.task_intent,
+                    component=existing.component,
+                    graph=graph_score,
+                    penalty=existing.penalty,
+                    matched_terms=existing.matched_terms,
+                    matched_fields=existing.matched_fields,
+                    reasons=dedupe_stable_reasons(existing_reason_tuples + reason_tuples),
+                )
+
+    # Collect all relations incident to any selected entity.
     relations_by_entity_id = _relations_by_entity_id(normalized_relations)
     selected_relations: list[Relation] = []
     selected_relation_keys: set[tuple[str, str, str]] = set()
-    queue = list(selected_entity_ids)
-    while queue:
-        current_id = queue.pop(0)
-        for relation in relations_by_entity_id.get(current_id, ()):
+    for entity_id in selected_entity_ids:
+        for relation in relations_by_entity_id.get(entity_id, ()):
             relation_tuple = (
                 relation.source_entity_id.value,
                 relation.target_entity_id.value,
@@ -173,39 +243,7 @@ def build_context_pack(
                 continue
             selected_relation_keys.add(relation_tuple)
             selected_relations.append(relation)
-            reasons_by_key[relation_key(relation)].append("direct graph neighbor")
-
-            neighbor_id = _other_endpoint(current_id=current_id, relation=relation)
-            neighbor = entity_by_id.get(neighbor_id)
-            if neighbor is None or neighbor_id in selected_entity_set:
-                continue
-            _add_entity(neighbor_id, selected_entity_ids, selected_entity_set)
-            reasons_by_key[neighbor_id].append(
-                f"direct neighbor via {relation.kind} from {current_id}"
-            )
-            if explain_ranking and neighbor_id not in ranking_breakdowns_by_id:
-                ranking_breakdowns_by_id[neighbor_id] = build_breakdown(
-                    lexical=0,
-                    path_role=0,
-                    task_intent=0,
-                    component=0,
-                    graph=1,
-                    penalty=0,
-                    matched_terms=(),
-                    matched_fields=(),
-                    reasons=(
-                        dedupe_stable_reasons(
-                            (
-                                (
-                                    "graph",
-                                    f"direct neighbor via {relation.kind} from {current_id}",
-                                    1.0,
-                                ),
-                            )
-                        )
-                    ),
-                )
-            queue.append(neighbor_id)
+            reasons_by_key[relation_key(relation)].append("incident to selected entity")
 
     selected_entities = [
         entity_by_id[entity_id] for entity_id in selected_entity_ids if entity_id in entity_by_id
@@ -506,17 +544,33 @@ def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Re
     return {key: tuple(value) for key, value in grouped.items()}
 
 
-def _other_endpoint(*, current_id: str, relation: Relation) -> str:
-    source = relation.source_entity_id.value
-    target = relation.target_entity_id.value
-    return target if source == current_id else source
-
-
-def _add_entity(entity_id: str, selected_ids: list[str], selected_set: set[str]) -> None:
+def _add_entity(entity_id: str, selected_ids: list[str], selected_set: set[str]) -> bool:
+    """Add entity_id to selection; return True if newly added, False if already present."""
     if entity_id in selected_set:
-        return
+        return False
     selected_ids.append(entity_id)
     selected_set.add(entity_id)
+    return True
+
+
+def _is_graph_seed_eligible(breakdown: RankingBreakdown) -> bool:
+    """True when the entity has task-relevant signal beyond structural bonuses.
+
+    The source-citation bonus (_SOURCE_CITATION_BONUS = 2, awarded to every entity
+    with a source path) must NOT be the sole reason an entity is treated as a graph
+    seed, or the seed set becomes the entire index and graph expansion produces no
+    new neighbors.
+
+    An entity qualifies as a seed when it has at least one of:
+    - Lexical score above the citation-bonus floor (BM25 match or exact token hit)
+    - A path-role boost (e.g. source/test/init file matched a task hint)
+    - A task-intent boost (task hint matched this entity's role or component)
+    """
+    return (
+        breakdown.lexical > _SOURCE_CITATION_BONUS
+        or breakdown.path_role > 0
+        or breakdown.task_intent > 0
+    )
 
 
 def _truncate_to_budget(
