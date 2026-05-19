@@ -9,20 +9,24 @@ from repo_semantic_memory.model import Entity
 
 PathRole = Literal[
     "source",
-    "tests",
-    "examples",
-    "docs",
-    "ci_config",
-    "tools_scripts",
+    "test",
+    "example",
+    "doc",
+    "ci",
+    "tool",
+    "config",
+    "generated",
     "other",
 ]
 
 SOURCE_ROLE: PathRole = "source"
-TESTS_ROLE: PathRole = "tests"
-EXAMPLES_ROLE: PathRole = "examples"
-DOCS_ROLE: PathRole = "docs"
-CI_CONFIG_ROLE: PathRole = "ci_config"
-TOOLS_SCRIPTS_ROLE: PathRole = "tools_scripts"
+TEST_ROLE: PathRole = "test"
+EXAMPLE_ROLE: PathRole = "example"
+DOC_ROLE: PathRole = "doc"
+CI_ROLE: PathRole = "ci"
+TOOL_ROLE: PathRole = "tool"
+CONFIG_ROLE: PathRole = "config"
+GENERATED_ROLE: PathRole = "generated"
 OTHER_ROLE: PathRole = "other"
 
 _COMMON_SOURCE_ROOT_NAMES = (
@@ -35,11 +39,12 @@ _COMMON_SOURCE_ROOT_NAMES = (
 )
 # Package markers spanning Python and ROS 2 ecosystems.
 _MARKER_FILENAMES = {"pyproject.toml", "package.xml", "setup.py", "setup.cfg"}
-_TESTS_PREFIXES = ("tests/", "test/")
-_EXAMPLES_PREFIXES = ("examples/", "example/")
-_DOCS_PREFIXES = ("docs/", "doc/")
-_CI_CONFIG_PREFIXES = (".github/", ".gitlab/", ".circleci/", ".buildkite/", "ci/", "config/")
-_TOOLS_SCRIPTS_PREFIXES = ("tools/", "scripts/")
+_TEST_PREFIXES = ("tests/", "test/")
+_EXAMPLE_PREFIXES = ("examples/", "example/")
+_DOC_PREFIXES = ("docs/", "doc/")
+_CI_PREFIXES = (".github/", ".gitlab/", ".circleci/", ".buildkite/", "ci/")
+_TOOL_PREFIXES = ("tools/", "scripts/")
+_CONFIG_PREFIXES = ("config/",)
 _NON_SOURCE_DIR_NAMES = {
     "tests",
     "test",
@@ -54,20 +59,38 @@ _NON_SOURCE_DIR_NAMES = {
     "config",
 }
 
+# Generated/build/cache path segments.  Detection is segment-aware so that
+# legitimate paths like "src/build_tools.py" are NOT classified as generated.
+_GENERATED_ARTIFACT_PATTERNS = (
+    "/docs/_build/",
+    "/_build/",
+    "/dist/",
+    "/build/",
+    "/htmlcov/",
+    "/.pytest_cache/",
+    "/.mypy_cache/",
+    "/.ruff_cache/",
+    ".egg-info/",
+)
+
 
 def classify_path_role(*, path: str, source_roots: Sequence[str]) -> PathRole:
     """Classify a repository-relative path into a deterministic role bucket."""
     normalized = _normalize(path)
-    if normalized.startswith(_TESTS_PREFIXES):
-        return TESTS_ROLE
-    if normalized.startswith(_EXAMPLES_PREFIXES):
-        return EXAMPLES_ROLE
-    if normalized.startswith(_DOCS_PREFIXES):
-        return DOCS_ROLE
-    if normalized.startswith(_CI_CONFIG_PREFIXES):
-        return CI_CONFIG_ROLE
-    if normalized.startswith(_TOOLS_SCRIPTS_PREFIXES):
-        return TOOLS_SCRIPTS_ROLE
+    if is_generated_artifact_path(normalized):
+        return GENERATED_ROLE
+    if normalized.startswith(_TEST_PREFIXES):
+        return TEST_ROLE
+    if normalized.startswith(_EXAMPLE_PREFIXES):
+        return EXAMPLE_ROLE
+    if normalized.startswith(_DOC_PREFIXES):
+        return DOC_ROLE
+    if normalized.startswith(_CI_PREFIXES):
+        return CI_ROLE
+    if normalized.startswith(_TOOL_PREFIXES):
+        return TOOL_ROLE
+    if normalized.startswith(_CONFIG_PREFIXES):
+        return CONFIG_ROLE
     if _is_source_path(normalized, source_roots):
         return SOURCE_ROLE
     return OTHER_ROLE
@@ -94,6 +117,18 @@ def infer_source_roots(entities: Iterable[Entity]) -> tuple[str, ...]:
             roots.add(parent)
 
     return tuple(sorted(roots))
+
+
+def is_generated_artifact_path(path: str) -> bool:
+    """Return True if *path* points into a generated/build/cache directory.
+
+    Detection is segment-aware: a bare filename or path component that merely
+    *contains* a build-related word (e.g. ``src/build_tools.py``) is not
+    classified as generated.  Only paths whose segments match a known
+    generated-artifact prefix are affected.
+    """
+    normalized = f"/{_normalize(path)}/"
+    return any(pattern in normalized for pattern in _GENERATED_ARTIFACT_PATTERNS)
 
 
 def _is_source_path(path: str, source_roots: Sequence[str]) -> bool:
