@@ -7,6 +7,11 @@ from collections import defaultdict
 from collections.abc import Sequence
 
 from repo_semantic_memory.context.context_pack import ContextPack, SourceCitation, relation_key
+from repo_semantic_memory.context.path_roles import (
+    SOURCE_ROLE,
+    classify_path_role,
+    infer_source_roots,
+)
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation
 
@@ -101,6 +106,7 @@ def build_context_pack(
         entities=normalized_entities,
         relations=normalized_relations,
     )
+    source_roots = infer_source_roots(normalized_entities)
     public_api_entity_ids = {
         component.entity_id.value
         for component in inferred_components
@@ -113,6 +119,7 @@ def build_context_pack(
         is_code_task=is_code_task,
         task_hints=task_hints,
         public_api_entity_ids=public_api_entity_ids,
+        source_roots=source_roots,
     )
 
     selected_entity_ids: list[str] = []
@@ -221,6 +228,7 @@ def _rank_entities(
     is_code_task: bool,
     task_hints: set[str],
     public_api_entity_ids: set[str],
+    source_roots: Sequence[str],
 ) -> list[tuple[Entity, int, tuple[str, ...]]]:
     ranked: list[tuple[Entity, int, tuple[str, ...]]] = []
     for entity in entities:
@@ -230,6 +238,7 @@ def _rank_entities(
             is_code_task=is_code_task,
             task_hints=task_hints,
             public_api_entity_ids=public_api_entity_ids,
+            source_roots=source_roots,
         )
         if score < 1:
             continue
@@ -244,10 +253,12 @@ def _score_entity(
     is_code_task: bool,
     task_hints: set[str],
     public_api_entity_ids: set[str],
+    source_roots: Sequence[str],
 ) -> tuple[int, tuple[str, ...]]:
     name = entity.name.lower()
     qualified_name = entity.qualified_name.lower()
     source_path = entity.source_range.path.replace("\\", "/").lower()
+    path_role = classify_path_role(path=source_path, source_roots=source_roots)
     entity_id = entity.id.value.lower()
     metadata_strings = [value.lower() for value in _metadata_strings(entity.metadata)]
     haystacks = [name, qualified_name, source_path, entity_id, *metadata_strings]
@@ -292,9 +303,9 @@ def _score_entity(
         score += _GENERATED_ARTIFACT_PENALTY
         reasons.append("generated/build artifact downrank")
 
-    if "implementation" in task_hints and source_path.startswith("src/"):
+    if "implementation" in task_hints and path_role == SOURCE_ROLE:
         score += _IMPLEMENTATION_PATH_BONUS
-        reasons.append('implementation task hint -> boosted "src/"')
+        reasons.append("implementation task hint -> boosted source/package root")
 
     if "tests" in task_hints and source_path.startswith("tests/"):
         score += _TEST_PATH_BONUS

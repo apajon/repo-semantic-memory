@@ -8,15 +8,28 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from repo_semantic_memory.context.budget import CharacterBudget
+from repo_semantic_memory.context.path_roles import (
+    CI_CONFIG_ROLE,
+    DOCS_ROLE,
+    EXAMPLES_ROLE,
+    OTHER_ROLE,
+    SOURCE_ROLE,
+    TESTS_ROLE,
+    TOOLS_SCRIPTS_ROLE,
+    classify_path_role,
+    infer_source_roots,
+)
 from repo_semantic_memory.model import Entity, Relation
 
-_REPO_MAP_PATH_PRIORITIES: tuple[tuple[str, int], ...] = (
-    ("src/", 0),
-    ("tests/", 1),
-    ("examples/", 2),
-    ("docs/", 3),
-    (".github/", 4),
-)
+_REPO_MAP_ROLE_PRIORITY: dict[str, int] = {
+    SOURCE_ROLE: 0,
+    TESTS_ROLE: 1,
+    EXAMPLES_ROLE: 2,
+    DOCS_ROLE: 3,
+    CI_CONFIG_ROLE: 4,
+    TOOLS_SCRIPTS_ROLE: 5,
+    OTHER_ROLE: 6,
+}
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,7 @@ def _build_module_sections(
             if isinstance(imported_name, str):
                 import_names_by_module_id[relation.source_entity_id.value].add(imported_name)
 
+    source_roots = infer_source_roots(entities)
     modules = _preferred_module_entities(entities)
     sections: list[ModuleSection] = []
     for module in modules:
@@ -101,7 +115,9 @@ def _build_module_sections(
             )
         )
 
-    return sorted(sections, key=lambda section: _module_section_sort_key(section.module))
+    return sorted(
+        sections, key=lambda section: _module_section_sort_key(section.module, source_roots)
+    )
 
 
 def _preferred_module_entities(entities: Sequence[Entity]) -> list[Entity]:
@@ -187,9 +203,11 @@ def _entity_sort_key(entity: Entity) -> tuple[str, int, int, str, str]:
     )
 
 
-def _module_section_sort_key(entity: Entity) -> tuple[int, str, int, int, str, str]:
+def _module_section_sort_key(
+    entity: Entity, source_roots: Sequence[str]
+) -> tuple[int, str, int, int, str, str]:
     return (
-        _repo_map_path_priority(entity.source_range.path),
+        _repo_map_path_priority(entity.source_range.path, source_roots),
         entity.source_range.path,
         entity.source_range.start_line,
         entity.source_range.start_col or 0,
@@ -198,12 +216,9 @@ def _module_section_sort_key(entity: Entity) -> tuple[int, str, int, int, str, s
     )
 
 
-def _repo_map_path_priority(path: str) -> int:
-    normalized = _to_posix_path(path)
-    for prefix, priority in _REPO_MAP_PATH_PRIORITIES:
-        if normalized.startswith(prefix):
-            return priority
-    return 5
+def _repo_map_path_priority(path: str, source_roots: Sequence[str]) -> int:
+    role = classify_path_role(path=path, source_roots=source_roots)
+    return _REPO_MAP_ROLE_PRIORITY[role]
 
 
 def _sort_entities(entities: Sequence[Entity]) -> list[Entity]:

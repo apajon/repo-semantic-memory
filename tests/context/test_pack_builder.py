@@ -288,6 +288,7 @@ def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> 
     selected_paths = [entity.source_range.path for entity in pack.selected_entities]
 
     assert any(path.endswith("src/lifecore_ros2/__init__.py") for path in selected_paths)
+    assert any(path.endswith("lifecore_state/__init__.py") for path in selected_paths)
     assert any(
         "lifecore_ros2.components.lifecycle_component.LifecycleComponent" == entity.qualified_name
         for entity in pack.selected_entities
@@ -309,6 +310,7 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
     selected_paths = {entity.source_range.path for entity in pack.selected_entities}
 
     assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
+    assert "lifecore_state/state_component.py" in selected_paths
     assert "tests/public_api_checks.py" in selected_paths
 
 
@@ -340,3 +342,18 @@ def test_build_filtering_is_path_segment_aware() -> None:
 
     assert "src/build_tools.py" in selected_paths
     assert "docs/_build/generated.py" not in selected_paths
+
+
+def test_public_api_ranking_selects_non_src_package_exports() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Find package public exports and init modules",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+    )
+    selected_paths = {entity.source_range.path for entity in pack.selected_entities}
+
+    assert "lifecore_state/__init__.py" in selected_paths
+    assert "docs/_build/generated_api.py" not in selected_paths

@@ -13,6 +13,10 @@ def _fixture_root() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
 
 
+def _ranking_fixture_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "fixtures" / "ranking_repo"
+
+
 def _merged_entities() -> tuple[list[Entity], list[Relation]]:
     fixture_root = _fixture_root()
     filesystem_entities = extract_filesystem_entities(fixture_root)
@@ -81,7 +85,7 @@ def test_repo_map_source_citations_are_posix_paths() -> None:
     assert "- module `pkg.module` src/pkg/module.py:3-6" in output
 
 
-def test_repo_map_prioritizes_src_tests_examples_docs_github_then_other_paths() -> None:
+def test_repo_map_prioritizes_roles_source_tests_examples_docs_ci_tools_other() -> None:
     entities = [
         Entity(
             id=StableId.from_parts(["file", "misc/last.py"]),
@@ -96,6 +100,13 @@ def test_repo_map_prioritizes_src_tests_examples_docs_github_then_other_paths() 
             name="ci",
             qualified_name="github.ci",
             source_range=SourceRange(path=".github/workflows/ci.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", "scripts/generate.py"]),
+            kind="module",
+            name="generate",
+            qualified_name="scripts.generate",
+            source_range=SourceRange(path="scripts/generate.py", start_line=1, end_line=1),
         ),
         Entity(
             id=StableId.from_parts(["file", "docs/guide.py"]),
@@ -125,15 +136,46 @@ def test_repo_map_prioritizes_src_tests_examples_docs_github_then_other_paths() 
             qualified_name="src.core",
             source_range=SourceRange(path="src/core.py", start_line=1, end_line=1),
         ),
+        Entity(
+            id=StableId.from_parts(["file", "pkg_b/__init__.py"]),
+            kind="module",
+            name="__init__.py",
+            qualified_name="pkg_b",
+            source_range=SourceRange(path="pkg_b/__init__.py", start_line=1, end_line=1),
+        ),
     ]
 
     output = build_repo_map_markdown(entities, [], budget_chars=4000)
 
     src_idx = output.index("## src/core.py")
+    pkg_idx = output.index("## pkg_b/__init__.py")
     tests_idx = output.index("## tests/test_feature.py")
     examples_idx = output.index("## examples/example.py")
     docs_idx = output.index("## docs/guide.py")
     github_idx = output.index("## .github/workflows/ci.py")
+    scripts_idx = output.index("## scripts/generate.py")
     misc_idx = output.index("## misc/last.py")
 
-    assert src_idx < tests_idx < examples_idx < docs_idx < github_idx < misc_idx
+    assert src_idx < tests_idx
+    assert pkg_idx < tests_idx
+    assert tests_idx < examples_idx < docs_idx < github_idx < scripts_idx < misc_idx
+
+
+def test_repo_map_treats_non_src_package_root_as_source_when_markers_exist() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    output = build_repo_map_markdown(entities, relations, budget_chars=6000)
+
+    lifecore_state_idx = output.index("## lifecore_state/__init__.py")
+    examples_idx = output.index("## examples/example_usage.py")
+    tests_idx = output.index("## tests/public_api_checks.py")
+
+    assert lifecore_state_idx < examples_idx
+    assert lifecore_state_idx < tests_idx
+
+
+def _ranking_fixture_entities_and_relations() -> tuple[list[Entity], list[Relation]]:
+    fixture_root = _ranking_fixture_root()
+    filesystem_entities = extract_filesystem_entities(fixture_root)
+    python_entities, python_relations = index_python_path(fixture_root)
+    return [*filesystem_entities, *python_entities], python_relations
