@@ -301,11 +301,11 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         ),
         (
             f"- repo_map_files: "
-            f"`{_format_object_string_list(generated_false_positives['repo_map']['files'])}`"
+            f"`{_format_string_list_or_dash(generated_false_positives['repo_map']['files'])}`"
         ),
         (
             f"- lexical_context_pack_files: "
-            f"`{_format_object_string_list(generated_false_positives['lexical_context_pack']['files'])}`"
+            f"`{_format_string_list_or_dash(generated_false_positives['lexical_context_pack']['files'])}`"
         ),
         "",
         "## Per-category results",
@@ -561,7 +561,7 @@ def _format_missing(missing_files: tuple[str, ...], missing_symbols: tuple[str, 
     return ";".join(parts) if parts else "-"
 
 
-def _format_object_string_list(value: object) -> str:
+def _format_string_list_or_dash(value: object) -> str:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         return "-"
     return ", ".join(value) or "-"

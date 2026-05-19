@@ -169,6 +169,19 @@ def build_generated_artifact_false_positive_payload(
 def _build_savings_metrics_payload(
     metrics: Sequence[TokenSavingsMetrics],
 ) -> dict[str, int | float]:
+    if not metrics:
+        return {
+            "average_raw_baseline_chars": 0.0,
+            "average_selected_context_chars": 0.0,
+            "average_estimated_raw_tokens": 0.0,
+            "average_estimated_selected_tokens": 0.0,
+            "average_estimated_tokens_saved": 0.0,
+            "average_compression_ratio": 0.0,
+            "average_coverage_per_1k_tokens": 0.0,
+            "gold_file_coverage_preserved_tasks": 0,
+            "gold_symbol_coverage_preserved_tasks": 0,
+            "improvement_claim_allowed_tasks": 0,
+        }
     return {
         "average_raw_baseline_chars": mean(metric.raw_baseline_chars for metric in metrics),
         "average_selected_context_chars": mean(metric.selected_context_chars for metric in metrics),
