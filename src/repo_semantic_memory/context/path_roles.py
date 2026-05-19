@@ -88,11 +88,7 @@ def infer_source_roots(entities: Iterable[Entity]) -> tuple[str, ...]:
         parent = path.rsplit("/", maxsplit=1)[0] if "/" in path else ""
         if filename in _MARKER_FILENAMES and parent:
             roots.add(parent)
-        if (
-            filename == "__init__.py"
-            and parent
-            and not _contains_non_source_dir(parent)
-        ):
+        if filename == "__init__.py" and parent and not _contains_non_source_dir(parent):
             # Avoid promoting nested non-source trees (e.g. pkg/tests/__init__.py)
             # while still recognizing package roots such as lifecore_state/__init__.py.
             roots.add(parent)
