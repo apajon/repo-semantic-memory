@@ -136,8 +136,8 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
             "AVG",
             f"{aggregate.average_context_character_count['repo_map']:.1f}",
             f"{aggregate.average_context_character_count['lexical_context_pack']:.1f}",
-            f"{float(savings_aggregate['average_estimated_tokens_saved']):.3f}",
-            f"{float(savings_aggregate['average_compression_ratio']):.3f}",
+            f"{savings_aggregate['average_estimated_tokens_saved']:.3f}",
+            f"{savings_aggregate['average_compression_ratio']:.3f}",
             str(int(savings_aggregate["gold_file_coverage_preserved_tasks"])),
             str(int(savings_aggregate["gold_symbol_coverage_preserved_tasks"])),
             "-",
@@ -232,9 +232,9 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         "- Savings are not tokenizer-accurate and must be interpreted directionally.",
         (
             f"- average_estimated_tokens_saved: "
-            f"`{float(savings['average_estimated_tokens_saved']):.6f}`"
+            f"`{savings['average_estimated_tokens_saved']:.6f}`"
         ),
-        (f"- average_compression_ratio: `{float(savings['average_compression_ratio']):.6f}`"),
+        (f"- average_compression_ratio: `{savings['average_compression_ratio']:.6f}`"),
         (
             f"- coverage_preserved_tasks: file="
             f"`{int(savings['gold_file_coverage_preserved_tasks'])}`"
