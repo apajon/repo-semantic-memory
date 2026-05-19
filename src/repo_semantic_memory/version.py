@@ -17,7 +17,7 @@ def _resolve_package_version() -> str:
     try:
         return version(_PACKAGE_DISTRIBUTION_NAME)
     except PackageNotFoundError:
-        return "0.0.0"
+        return "0.0.0.dev0"
 
 
 PACKAGE_VERSION = _resolve_package_version()
