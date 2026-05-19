@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from repo_semantic_memory.eval.baselines import BaselineTaskResult, TaskBaselineComparison
-from repo_semantic_memory.eval.metrics import RetrievalOutcome, compute_benchmark_metrics
+from repo_semantic_memory.eval.metrics import (
+    RetrievalOutcome,
+    compute_benchmark_metrics,
+    compute_token_savings_metrics,
+)
 from repo_semantic_memory.eval.reports import (
     render_compact_table,
     render_compare_markdown_report,
@@ -98,6 +103,14 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
                 gold_symbols=("pkg.a", "pkg.missing"),
                 repo_map=repo_map,
                 lexical_context_pack=lexical,
+                token_savings_metrics=compute_token_savings_metrics(
+                    raw_baseline_chars=100,
+                    selected_context_chars=80,
+                    raw_gold_file_coverage=1.0,
+                    raw_gold_symbol_coverage=0.5,
+                    selected_gold_file_coverage=1.0,
+                    selected_gold_symbol_coverage=1.0,
+                ),
                 winner="lexical_context_pack",
             ),
         ),
@@ -115,19 +128,38 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     payload_two = to_compare_json_payload(result)
     assert payload_one == payload_two
     assert json.dumps(payload_one, sort_keys=True) == json.dumps(payload_two, sort_keys=True)
-    assert "average_approx_useful_item_ratio" in payload_one["aggregate"]
-    repo_payload = payload_one["tasks"][0]["repo_map"]
+    aggregate_payload = cast(dict[str, Any], payload_one["aggregate"])
+    assert "average_approx_useful_item_ratio" in aggregate_payload
+    assert "savings" in aggregate_payload
+    savings_aggregate = cast(dict[str, Any], aggregate_payload["savings"])
+    assert savings_aggregate["average_estimated_tokens_saved"] == 5.0
+    task_payloads = cast(list[dict[str, Any]], payload_one["tasks"])
+    first_task_payload = task_payloads[0]
+    repo_payload = cast(dict[str, Any], first_task_payload["repo_map"])
     assert repo_payload["approx_useful_item_ratio"] == 0.75
     assert repo_payload["selected_files"] == ["src/a.py"]
     assert repo_payload["selected_symbols"] == ["pkg.a"]
+    savings_payload = cast(dict[str, Any], first_task_payload["savings_metrics"])
+    assert savings_payload["raw_baseline_chars"] == 100
+    assert savings_payload["selected_context_chars"] == 80
+    assert savings_payload["estimated_raw_tokens"] == 25.0
+    assert savings_payload["estimated_selected_tokens"] == 20.0
+    assert savings_payload["estimated_tokens_saved"] == 5.0
+    assert savings_payload["compression_ratio"] == 0.8
+    assert savings_payload["gold_file_coverage_preserved"] is True
+    assert savings_payload["gold_symbol_coverage_preserved"] is True
+    assert savings_payload["improvement_claim_allowed"] is True
 
     markdown_one = render_compare_markdown_report(result)
     markdown_two = render_compare_markdown_report(result)
     assert markdown_one == markdown_two
     assert "# Baseline comparison report" in markdown_one
+    assert "## Estimated token savings (approximate)" in markdown_one
+    assert "### Savings table" in markdown_one
+    assert "estimated_tokens = chars / 4" in markdown_one
     assert "## Limitations" in markdown_one
     assert "does not claim superiority" in markdown_one
-    assert "item-level, not token-level" in markdown_one
+    assert "No superiority claim is made when" in markdown_one
     assert "not guaranteed irrelevant noise" in markdown_one
     assert "Small repositories can make generic repo-map retrieval" in markdown_one
 

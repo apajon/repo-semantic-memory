@@ -12,6 +12,7 @@ from repo_semantic_memory.context import (
     render_context_pack_markdown,
 )
 from repo_semantic_memory.eval.datasets import RetrievalTask
+from repo_semantic_memory.eval.metrics import TokenSavingsMetrics, compute_token_savings_metrics
 from repo_semantic_memory.model import Entity, Relation
 
 BaselineName = Literal["repo_map", "lexical_context_pack"]
@@ -56,6 +57,7 @@ class TaskBaselineComparison:
     gold_symbols: tuple[str, ...]
     repo_map: BaselineTaskResult
     lexical_context_pack: BaselineTaskResult
+    token_savings_metrics: TokenSavingsMetrics
     winner: WinnerName
 
 
@@ -80,6 +82,14 @@ def evaluate_task_baselines(
         budget_chars=budget_chars,
     )
     winner = decide_winner(repo_map_result, lexical_result)
+    token_savings_metrics = compute_token_savings_metrics(
+        raw_baseline_chars=repo_map_result.context_character_count,
+        selected_context_chars=lexical_result.context_character_count,
+        raw_gold_file_coverage=repo_map_result.gold_file_coverage,
+        raw_gold_symbol_coverage=repo_map_result.gold_symbol_coverage,
+        selected_gold_file_coverage=lexical_result.gold_file_coverage,
+        selected_gold_symbol_coverage=lexical_result.gold_symbol_coverage,
+    )
     return TaskBaselineComparison(
         task_id=task.id,
         category=task.category,
@@ -88,6 +98,7 @@ def evaluate_task_baselines(
         gold_symbols=task.gold.symbols,
         repo_map=repo_map_result,
         lexical_context_pack=lexical_result,
+        token_savings_metrics=token_savings_metrics,
         winner=winner,
     )
 

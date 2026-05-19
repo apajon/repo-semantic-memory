@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from repo_semantic_memory.eval.metrics import RetrievalOutcome, compute_benchmark_metrics
+from repo_semantic_memory.eval.metrics import (
+    RetrievalOutcome,
+    compute_benchmark_metrics,
+    compute_token_savings_metrics,
+    estimate_tokens_from_chars,
+    token_savings_improvement_claim_allowed,
+)
 
 
 def test_compute_benchmark_metrics_on_synthetic_data() -> None:
@@ -60,3 +66,59 @@ def test_mrr_uses_first_ranked_gold_match() -> None:
     metrics = compute_benchmark_metrics(outcomes, k_values=(1, 3))
 
     assert metrics.per_task[0].mrr_files == 1 / 3
+
+
+def test_estimate_tokens_from_chars_is_deterministic() -> None:
+    assert estimate_tokens_from_chars(0) == 0.0
+    assert estimate_tokens_from_chars(4) == 1.0
+    assert estimate_tokens_from_chars(10) == 2.5
+
+
+def test_compute_token_savings_metrics_has_expected_ratio_and_coverage_per_1k() -> None:
+    metrics = compute_token_savings_metrics(
+        raw_baseline_chars=400,
+        selected_context_chars=200,
+        raw_gold_file_coverage=0.5,
+        raw_gold_symbol_coverage=0.5,
+        selected_gold_file_coverage=0.5,
+        selected_gold_symbol_coverage=1.0,
+    )
+
+    assert metrics.estimated_raw_tokens == 100.0
+    assert metrics.estimated_selected_tokens == 50.0
+    assert metrics.estimated_tokens_saved == 50.0
+    assert metrics.compression_ratio == 0.5
+    assert metrics.coverage_per_1k_tokens == 30.0
+    assert metrics.gold_file_coverage_preserved is True
+    assert metrics.gold_symbol_coverage_preserved is True
+    assert token_savings_improvement_claim_allowed(metrics) is True
+
+
+def test_compute_token_savings_metrics_zero_division_is_safe() -> None:
+    metrics = compute_token_savings_metrics(
+        raw_baseline_chars=0,
+        selected_context_chars=0,
+        raw_gold_file_coverage=0.0,
+        raw_gold_symbol_coverage=0.0,
+        selected_gold_file_coverage=0.0,
+        selected_gold_symbol_coverage=0.0,
+    )
+
+    assert metrics.compression_ratio == 1.0
+    assert metrics.coverage_per_1k_tokens == 0.0
+    assert metrics.estimated_tokens_saved == 0.0
+
+
+def test_improvement_claim_is_blocked_when_coverage_drops_even_with_token_savings() -> None:
+    metrics = compute_token_savings_metrics(
+        raw_baseline_chars=800,
+        selected_context_chars=200,
+        raw_gold_file_coverage=1.0,
+        raw_gold_symbol_coverage=1.0,
+        selected_gold_file_coverage=0.5,
+        selected_gold_symbol_coverage=1.0,
+    )
+
+    assert metrics.estimated_tokens_saved > 0.0
+    assert metrics.gold_file_coverage_preserved is False
+    assert token_savings_improvement_claim_allowed(metrics) is False

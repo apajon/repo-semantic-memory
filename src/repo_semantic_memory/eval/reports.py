@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from statistics import mean
 
 from repo_semantic_memory.eval.baselines import TaskBaselineComparison
+from repo_semantic_memory.eval.metrics import (
+    APPROX_CHARS_PER_TOKEN,
+    token_savings_improvement_claim_allowed,
+)
 from repo_semantic_memory.eval.runner import BaselineComparisonResult, RetrievalBenchmarkResult
 
 
@@ -44,6 +49,7 @@ def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, objec
             ),
             "wins": dict(sorted(result.aggregate.wins.items())),
             "major_misses": list(result.aggregate.major_misses),
+            "savings": _build_savings_aggregate_payload(result.outcomes),
         },
         "tasks": [_compare_task_payload(task) for task in result.outcomes],
     }
@@ -102,48 +108,41 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
     rows = [
         (
             "task_id",
-            "repo_map approx_useful",
-            "pack approx_useful",
-            "repo_map gold_cov",
-            "pack gold_cov",
             "repo_map chars",
             "pack chars",
+            "saved tok~",
+            "compr",
+            "file_cov_ok",
+            "symbol_cov_ok",
             "winner",
         )
     ]
     for task in result.outcomes:
+        savings = task.token_savings_metrics
         rows.append(
             (
                 task.task_id,
-                f"{task.repo_map.approx_useful_item_ratio:.3f}",
-                f"{task.lexical_context_pack.approx_useful_item_ratio:.3f}",
-                f"{task.repo_map.gold_file_coverage:.3f}/{task.repo_map.gold_symbol_coverage:.3f}",
-                (
-                    f"{task.lexical_context_pack.gold_file_coverage:.3f}/"
-                    f"{task.lexical_context_pack.gold_symbol_coverage:.3f}"
-                ),
                 str(task.repo_map.context_character_count),
                 str(task.lexical_context_pack.context_character_count),
+                f"{savings.estimated_tokens_saved:.3f}",
+                f"{savings.compression_ratio:.3f}",
+                str(savings.gold_file_coverage_preserved),
+                str(savings.gold_symbol_coverage_preserved),
                 task.winner,
             )
         )
 
     aggregate = result.aggregate
+    savings_aggregate = _build_savings_aggregate_payload(result.outcomes)
     rows.append(
         (
             "AVG",
-            f"{aggregate.average_useful_context_ratio['repo_map']:.3f}",
-            f"{aggregate.average_useful_context_ratio['lexical_context_pack']:.3f}",
-            (
-                f"{aggregate.average_gold_file_coverage['repo_map']:.3f}/"
-                f"{aggregate.average_gold_symbol_coverage['repo_map']:.3f}"
-            ),
-            (
-                f"{aggregate.average_gold_file_coverage['lexical_context_pack']:.3f}/"
-                f"{aggregate.average_gold_symbol_coverage['lexical_context_pack']:.3f}"
-            ),
             f"{aggregate.average_context_character_count['repo_map']:.1f}",
             f"{aggregate.average_context_character_count['lexical_context_pack']:.1f}",
+            f"{savings_aggregate['average_estimated_tokens_saved']:.3f}",
+            f"{savings_aggregate['average_compression_ratio']:.3f}",
+            str(int(savings_aggregate["gold_file_coverage_preserved_tasks"])),
+            str(int(savings_aggregate["gold_symbol_coverage_preserved_tasks"])),
             "-",
         )
     )
@@ -187,6 +186,7 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
 def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
     """Render markdown report for repo-map vs lexical-context-pack comparison."""
     aggregate = result.aggregate
+    savings = _build_savings_aggregate_payload(result.outcomes)
     lines = [
         "# Baseline comparison report",
         "",
@@ -229,15 +229,62 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         ),
         f"- major_misses: `{', '.join(aggregate.major_misses) or '-'}`",
         "",
-        "## Per-task results",
+        "## Estimated token savings (approximate)",
         "",
         (
-            "| task_id | winner | repo_map approx_useful_item_ratio | "
-            "pack approx_useful_item_ratio | "
-            "repo_map missing | pack missing |"
+            "- Token estimates are approximate and deterministic: "
+            f"`estimated_tokens = chars / {APPROX_CHARS_PER_TOKEN:g}`."
         ),
-        "|---|---|---|---|---|---|",
+        "- Savings are not tokenizer-accurate and must be interpreted directionally.",
+        (f"- average_estimated_tokens_saved: `{savings['average_estimated_tokens_saved']:.6f}`"),
+        (f"- average_compression_ratio: `{savings['average_compression_ratio']:.6f}`"),
+        (
+            f"- coverage_preserved_tasks: file="
+            f"`{int(savings['gold_file_coverage_preserved_tasks'])}`"
+            f", symbol="
+            f"`{int(savings['gold_symbol_coverage_preserved_tasks'])}`"
+        ),
+        (
+            f"- improvement_claim_allowed_tasks: "
+            f"`{int(savings['improvement_claim_allowed_tasks'])}`/"
+            f"`{len(result.outcomes)}`"
+        ),
+        "",
+        "### Savings table",
+        "",
+        (
+            "| task_id | raw_baseline_chars | selected_context_chars | "
+            "estimated_raw_tokens | estimated_selected_tokens | "
+            "estimated_tokens_saved | compression_ratio | "
+            "gold_file_coverage_preserved | gold_symbol_coverage_preserved | "
+            "coverage_per_1k_tokens | improvement_claim_allowed |"
+        ),
+        "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
+    for task in result.outcomes:
+        metrics = task.token_savings_metrics
+        lines.append(
+            f"| {task.task_id} | {metrics.raw_baseline_chars} | {metrics.selected_context_chars} | "
+            f"{metrics.estimated_raw_tokens:.6f} | {metrics.estimated_selected_tokens:.6f} | "
+            f"{metrics.estimated_tokens_saved:.6f} | {metrics.compression_ratio:.6f} | "
+            f"{metrics.gold_file_coverage_preserved} | {metrics.gold_symbol_coverage_preserved} | "
+            f"{metrics.coverage_per_1k_tokens:.6f} | "
+            f"{token_savings_improvement_claim_allowed(metrics)} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Per-task results",
+            "",
+            (
+                "| task_id | winner | repo_map approx_useful_item_ratio | "
+                "pack approx_useful_item_ratio | "
+                "repo_map missing | pack missing |"
+            ),
+            "|---|---|---|---|---|---|",
+        ]
+    )
     for task in result.outcomes:
         repo_missing = _format_missing(
             task.repo_map.missing_gold_files, task.repo_map.missing_gold_symbols
@@ -264,7 +311,16 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
                 "identifiers (item-level, not token-level) and does not "
                 "measure semantic correctness."
             ),
-            "- Character budget is character-based and not tokenizer-based.",
+            (
+                "- Token estimates are approximate "
+                f"(`chars / {APPROX_CHARS_PER_TOKEN:g}`) and are not tokenizer-accurate."
+            ),
+            (
+                "- No superiority claim is made when "
+                "`gold_file_coverage_preserved` or "
+                "`gold_symbol_coverage_preserved` is false, even if "
+                "`estimated_tokens_saved` is positive."
+            ),
             (
                 "- `extra_selected_files` and `extra_selected_symbols` are "
                 "non-gold selections, not guaranteed irrelevant noise."
@@ -345,6 +401,7 @@ def _task_payload(result: RetrievalBenchmarkResult, index: int) -> dict[str, obj
 
 
 def _compare_task_payload(comparison: TaskBaselineComparison) -> dict[str, object]:
+    savings_metrics = _token_savings_payload(comparison)
     return {
         "task_id": comparison.task_id,
         "category": comparison.category,
@@ -352,6 +409,7 @@ def _compare_task_payload(comparison: TaskBaselineComparison) -> dict[str, objec
         "gold_files": list(comparison.gold_files),
         "gold_symbols": list(comparison.gold_symbols),
         "winner": comparison.winner,
+        "savings_metrics": savings_metrics,
         "repo_map": {
             "context_character_count": comparison.repo_map.context_character_count,
             "gold_file_coverage": comparison.repo_map.gold_file_coverage,
@@ -378,6 +436,65 @@ def _compare_task_payload(comparison: TaskBaselineComparison) -> dict[str, objec
             "extra_selected_files": list(comparison.lexical_context_pack.extra_selected_files),
             "extra_selected_symbols": list(comparison.lexical_context_pack.extra_selected_symbols),
         },
+    }
+
+
+def _token_savings_payload(comparison: TaskBaselineComparison) -> dict[str, object]:
+    metrics = comparison.token_savings_metrics
+    payload: dict[str, object] = {
+        "raw_baseline_chars": metrics.raw_baseline_chars,
+        "selected_context_chars": metrics.selected_context_chars,
+        "estimated_raw_tokens": metrics.estimated_raw_tokens,
+        "estimated_selected_tokens": metrics.estimated_selected_tokens,
+        "estimated_tokens_saved": metrics.estimated_tokens_saved,
+        "compression_ratio": metrics.compression_ratio,
+        "gold_file_coverage_preserved": metrics.gold_file_coverage_preserved,
+        "gold_symbol_coverage_preserved": metrics.gold_symbol_coverage_preserved,
+        "coverage_per_1k_tokens": metrics.coverage_per_1k_tokens,
+        "improvement_claim_allowed": token_savings_improvement_claim_allowed(metrics),
+    }
+    if metrics.context_noise_ratio is not None:
+        payload["context_noise_ratio"] = metrics.context_noise_ratio
+    return payload
+
+
+def _build_savings_aggregate_payload(
+    outcomes: Sequence[TaskBaselineComparison],
+) -> dict[str, int | float]:
+    if not outcomes:
+        return {
+            "average_raw_baseline_chars": 0.0,
+            "average_selected_context_chars": 0.0,
+            "average_estimated_raw_tokens": 0.0,
+            "average_estimated_selected_tokens": 0.0,
+            "average_estimated_tokens_saved": 0.0,
+            "average_compression_ratio": 0.0,
+            "average_coverage_per_1k_tokens": 0.0,
+            "gold_file_coverage_preserved_tasks": 0,
+            "gold_symbol_coverage_preserved_tasks": 0,
+            "improvement_claim_allowed_tasks": 0,
+        }
+
+    metrics = [outcome.token_savings_metrics for outcome in outcomes]
+    return {
+        "average_raw_baseline_chars": mean(metric.raw_baseline_chars for metric in metrics),
+        "average_selected_context_chars": mean(metric.selected_context_chars for metric in metrics),
+        "average_estimated_raw_tokens": mean(metric.estimated_raw_tokens for metric in metrics),
+        "average_estimated_selected_tokens": mean(
+            metric.estimated_selected_tokens for metric in metrics
+        ),
+        "average_estimated_tokens_saved": mean(metric.estimated_tokens_saved for metric in metrics),
+        "average_compression_ratio": mean(metric.compression_ratio for metric in metrics),
+        "average_coverage_per_1k_tokens": mean(metric.coverage_per_1k_tokens for metric in metrics),
+        "gold_file_coverage_preserved_tasks": sum(
+            1 for metric in metrics if metric.gold_file_coverage_preserved
+        ),
+        "gold_symbol_coverage_preserved_tasks": sum(
+            1 for metric in metrics if metric.gold_symbol_coverage_preserved
+        ),
+        "improvement_claim_allowed_tasks": sum(
+            1 for metric in metrics if token_savings_improvement_claim_allowed(metric)
+        ),
     }
 
 
