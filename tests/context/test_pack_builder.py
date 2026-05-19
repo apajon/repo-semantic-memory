@@ -559,7 +559,40 @@ def test_citation_only_entity_is_not_a_graph_seed() -> None:
     assert not _is_graph_seed_eligible(breakdown)
 
 
-def test_bm25_matched_entity_is_a_graph_seed() -> None:
+def test_graph_seed_threshold_is_strictly_above_citation_bonus() -> None:
+    """Lexical score exactly equal to _SOURCE_CITATION_BONUS (2) is not a seed.
+
+    This verifies the > (not >=) boundary: the floor contributed by holding any
+    source path must not be sufficient on its own to qualify as a graph seed.
+    """
+    from repo_semantic_memory.context.pack_builder import _SOURCE_CITATION_BONUS
+    from repo_semantic_memory.context.ranking import build_breakdown
+
+    at_floor = build_breakdown(
+        lexical=float(_SOURCE_CITATION_BONUS),
+        path_role=0,
+        task_intent=0,
+        component=0,
+        graph=0,
+        penalty=0,
+        matched_terms=(),
+        matched_fields=(),
+        reasons=(),
+    )
+    above_floor = build_breakdown(
+        lexical=float(_SOURCE_CITATION_BONUS) + 0.01,
+        path_role=0,
+        task_intent=0,
+        component=0,
+        graph=0,
+        penalty=0,
+        matched_terms=(),
+        matched_fields=(),
+        reasons=(),
+    )
+    assert not _is_graph_seed_eligible(at_floor)
+    assert _is_graph_seed_eligible(above_floor)
+
     """An entity with a BM25 match on task tokens qualifies as a graph seed."""
     matched_entity = Entity(
         id=StableId("python:class:python_symbols.DerivedThing"),

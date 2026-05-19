@@ -134,6 +134,7 @@ def build_context_pack(
 
     selected_entity_ids: list[str] = []
     selected_entity_set: set[str] = set()
+    # List (not set) to preserve deterministic insertion order for graph seed_ids.
     graph_seed_ids: list[str] = []
     reasons_by_key: dict[str, list[str]] = defaultdict(list)
     ranking_breakdowns_by_id: dict[str, RankingBreakdown] = {}
@@ -182,7 +183,9 @@ def build_context_pack(
         neighbor_reasons = graph_result.reasons_by_id.get(neighbor_id, ())
         # Only add graph reasons to reasons_by_key for newly selected entities.
         # Already-selected entities already have lexical/structural reasons; adding
-        # graph reasons would inflate budget estimates and push out other content.
+        # graph reasons would inflate their estimated character cost in the output
+        # (reasons are rendered verbatim), consuming budget that would otherwise
+        # accommodate more entities and relations.
         if is_new:
             for reason_msg in neighbor_reasons:
                 reasons_by_key[neighbor_id].append(reason_msg)
@@ -553,9 +556,10 @@ def _add_entity(entity_id: str, selected_ids: list[str], selected_set: set[str])
 def _is_graph_seed_eligible(breakdown: RankingBreakdown) -> bool:
     """True when the entity has task-relevant signal beyond structural bonuses.
 
-    The source-citation bonus (awarded to every entity with a source path) must NOT
-    be the sole reason an entity is treated as a graph seed, or the seed set becomes
-    the entire index and graph expansion produces no new neighbors.
+    The source-citation bonus (_SOURCE_CITATION_BONUS = 2, awarded to every entity
+    with a source path) must NOT be the sole reason an entity is treated as a graph
+    seed, or the seed set becomes the entire index and graph expansion produces no
+    new neighbors.
 
     An entity qualifies as a seed when it has at least one of:
     - Lexical score above the citation-bonus floor (BM25 match or exact token hit)
