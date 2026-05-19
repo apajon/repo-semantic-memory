@@ -226,6 +226,24 @@ def test_repo_map_command_with_path(capsys: pytest.CaptureFixture[str]) -> None:
     assert "- module `python_symbols`" in output
 
 
+def test_repo_map_command_accepts_profile(capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    repo_map_exit = main(
+        [
+            "repo-map",
+            "--path",
+            str(fixture_root),
+            "--budget",
+            "4000",
+            "--profile",
+            "agent_brief",
+        ]
+    )
+    assert repo_map_exit == 0
+    output = capsys.readouterr().out
+    assert output.startswith("# Repo map")
+
+
 def test_repo_map_command_with_path_creates_no_persistent_artifacts(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -517,6 +535,39 @@ def test_pack_command_markdown_explain_ranking_includes_score_lines(
     output = capsys.readouterr().out
     assert "Score: total=" in output
     assert "Reason:" in output
+
+
+def test_pack_command_agent_debug_profile_includes_ranking_without_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "pack",
+            "--task",
+            "DerivedThing implementation",
+            "--db",
+            str(db_path),
+            "--budget",
+            "4000",
+            "--profile",
+            "agent_debug",
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Score: total=" in output
+
+
+def test_pack_command_invalid_profile_fails_clearly(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        main(["pack", "--task", "x", "--profile", "unknown_profile"])
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
 
 
 def test_components_infer_command_json_output(

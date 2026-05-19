@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from repo_semantic_memory.context.compression import resolve_profile
 from repo_semantic_memory.context.repo_map import build_repo_map_markdown
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
@@ -205,3 +206,15 @@ def _ranking_fixture_entities_and_relations() -> tuple[list[Entity], list[Relati
     filesystem_entities = extract_filesystem_entities(fixture_root)
     python_entities, python_relations = index_python_path(fixture_root)
     return [*filesystem_entities, *python_entities], python_relations
+
+
+def test_repo_map_profile_brief_suppresses_unresolved_imports() -> None:
+    entities, relations = _merged_entities()
+    brief = resolve_profile("agent_brief")
+    debug = resolve_profile("agent_debug")
+
+    brief_output = build_repo_map_markdown(entities, relations, budget_chars=4000, profile=brief)
+    debug_output = build_repo_map_markdown(entities, relations, budget_chars=4000, profile=debug)
+
+    assert "Static imports (unresolved):" not in brief_output
+    assert "Static imports (unresolved):" in debug_output

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
+from repo_semantic_memory.context.compression import available_profile_names, resolve_profile
 from repo_semantic_memory.context.pack_builder import (
     _build_bm25_index,
     _component_labels_by_entity,
@@ -666,3 +667,138 @@ def test_graph_scored_neighbor_has_nonzero_graph_in_breakdown() -> None:
         f"python_symbols graph score should be > 0 (got {breakdown.graph}); "
         "it should be selected as a graph neighbor of DerivedThing via contains"
     )
+
+
+def test_profile_registry_is_deterministic() -> None:
+    first = available_profile_names()
+    second = available_profile_names()
+    assert first == second
+    assert first == (
+        "agent_brief",
+        "agent_standard",
+        "agent_debug",
+        "human_review",
+        "ci_summary",
+        "full",
+    )
+
+
+def test_agent_brief_profile_output_is_smaller_than_agent_debug() -> None:
+    entities, relations = _indexed_entities_and_relations()
+    brief_profile = resolve_profile("agent_brief")
+    debug_profile = resolve_profile("agent_debug")
+
+    brief_pack = build_context_pack(
+        task="DerivedThing implementation imports inherits",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        profile=brief_profile,
+    )
+    debug_pack = build_context_pack(
+        task="DerivedThing implementation imports inherits",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        profile=debug_profile,
+    )
+    brief_markdown = render_context_pack_markdown(brief_pack, explain_ranking=False)
+    debug_markdown = render_context_pack_markdown(
+        debug_pack, explain_ranking=debug_profile.include_ranking_breakdown
+    )
+    assert len(brief_markdown) < len(debug_markdown)
+
+
+def test_compact_profile_preserves_direct_task_match_symbols() -> None:
+    entities, relations = _indexed_entities_and_relations()
+    pack = build_context_pack(
+        task="Update DerivedThing behavior",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        profile="agent_brief",
+    )
+    selected_names = {entity.qualified_name for entity in pack.selected_entities}
+    assert "python_symbols.DerivedThing" in selected_names
+
+
+def test_ranking_explanation_is_enabled_by_debug_profile_only() -> None:
+    entities, relations = _indexed_entities_and_relations()
+    standard_pack = build_context_pack(
+        task="DerivedThing implementation",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        profile="agent_standard",
+    )
+    debug_profile = resolve_profile("agent_debug")
+    debug_pack = build_context_pack(
+        task="DerivedThing implementation",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        profile=debug_profile,
+    )
+
+    standard_markdown = render_context_pack_markdown(standard_pack, explain_ranking=False)
+    debug_markdown = render_context_pack_markdown(
+        debug_pack, explain_ranking=debug_profile.include_ranking_breakdown
+    )
+    assert "Score: total=" not in standard_markdown
+    assert "Score: total=" in debug_markdown
+
+
+def test_full_profile_is_at_least_as_verbose_as_standard_and_debug() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+    full_profile = resolve_profile("full")
+    standard_profile = resolve_profile("agent_standard")
+    debug_profile = resolve_profile("agent_debug")
+
+    standard_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        profile=standard_profile,
+    )
+    debug_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        profile=debug_profile,
+    )
+    full_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        profile=full_profile,
+    )
+
+    standard_markdown = render_context_pack_markdown(
+        standard_pack, explain_ranking=standard_profile.include_ranking_breakdown
+    )
+    debug_markdown = render_context_pack_markdown(
+        debug_pack, explain_ranking=debug_profile.include_ranking_breakdown
+    )
+    full_markdown = render_context_pack_markdown(
+        full_pack, explain_ranking=full_profile.include_ranking_breakdown
+    )
+
+    assert len(full_markdown) >= len(standard_markdown)
+    assert len(full_markdown) >= len(debug_markdown)
+
+
+def test_generated_artifacts_remain_suppressed_under_compact_profiles() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+    pack = build_context_pack(
+        task="Find package public exports and init modules",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        profile="agent_brief",
+    )
+    selected_paths = {entity.source_range.path for entity in pack.selected_entities}
+    assert all(not path.startswith("docs/_build/") for path in selected_paths)
+    assert all(".egg-info/" not in path for path in selected_paths)

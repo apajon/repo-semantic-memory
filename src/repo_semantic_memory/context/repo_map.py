@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Final
 
 from repo_semantic_memory.context.budget import CharacterBudget
+from repo_semantic_memory.context.compression import (
+    CompressionProfile,
+    resolve_profile,
+    trim_import_names,
+)
 from repo_semantic_memory.context.path_roles import (
     CI_ROLE,
     CONFIG_ROLE,
@@ -55,10 +60,12 @@ def build_repo_map_markdown(
     relations: Sequence[Relation],
     *,
     budget_chars: int,
+    profile: CompressionProfile | str | None = None,
 ) -> str:
     """Build a compact Markdown repository map constrained by an approximate character budget."""
+    resolved_profile = resolve_profile(profile)
     budget = CharacterBudget(max_chars=budget_chars)
-    module_sections = _build_module_sections(entities, relations)
+    module_sections = _build_module_sections(entities, relations, profile=resolved_profile)
 
     if not budget.append_line("# Repo map"):
         return "# Repo map"[:budget_chars]
@@ -77,7 +84,10 @@ def build_repo_map_markdown(
 
 
 def _build_module_sections(
-    entities: Sequence[Entity], relations: Sequence[Relation]
+    entities: Sequence[Entity],
+    relations: Sequence[Relation],
+    *,
+    profile: CompressionProfile,
 ) -> list[ModuleSection]:
     entity_by_id = {entity.id.value: entity for entity in entities}
     contains_targets: dict[str, list[Entity]] = defaultdict(list)
@@ -90,6 +100,9 @@ def _build_module_sections(
                 contains_targets[relation.source_entity_id.value].append(target)
             continue
         if relation.kind == "imports":
+            relation_resolved = relation.metadata.get("resolved") is True
+            if not profile.include_unresolved_imports and not relation_resolved:
+                continue
             imported_name = relation.metadata.get("imported_name")
             if isinstance(imported_name, str):
                 import_names_by_module_id[relation.source_entity_id.value].add(imported_name)
@@ -111,7 +124,10 @@ def _build_module_sections(
             )
             for class_entity in classes
         }
-        imports = tuple(sorted(import_names_by_module_id.get(module.id.value, set())))
+        imports = trim_import_names(
+            tuple(sorted(import_names_by_module_id.get(module.id.value, set()))),
+            profile=profile,
+        )
         sections.append(
             ModuleSection(
                 module=module,

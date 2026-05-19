@@ -102,14 +102,15 @@ uv run rsm inspect relations --db .rsm/index.sqlite
 ```
 Generate a compact repo map:
 ```bash
-uv run rsm repo-map --db .rsm/index.sqlite --budget 4000
+uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
 ```
 Generate a task-specific context pack in Markdown:
 ```bash
 uv run rsm pack \
   --task "Update DerivedThing imports in src/python_symbols.py" \
   --db .rsm/index.sqlite \
-  --budget 4000
+  --budget 4000 \
+  --profile agent_standard
 ```
 Generate a task-specific context pack in YAML-compatible structured output:
 ```bash
@@ -117,11 +118,12 @@ uv run rsm pack \
   --task "Update DerivedThing imports in src/python_symbols.py" \
   --db .rsm/index.sqlite \
   --budget 4000 \
-  --format yaml
+  --format yaml \
+  --profile agent_standard
 ```
 Or generate a repo map directly from a path without leaving persistent artifacts:
 ```bash
-uv run rsm repo-map --path /path/to/repo --budget 4000
+uv run rsm repo-map --path /path/to/repo --budget 4000 --profile agent_standard
 ```
 Run a retrieval benchmark:
 ```bash
@@ -154,9 +156,9 @@ rsm index <path> --db .rsm/index.sqlite [--with-git]
 rsm git summary <path> [--json]
 rsm inspect entities --db .rsm/index.sqlite [--json]
 rsm inspect relations --db .rsm/index.sqlite [--json]
-rsm repo-map --db .rsm/index.sqlite --budget 4000
-rsm repo-map --path <path> --budget 4000
-rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml]
+rsm repo-map --db .rsm/index.sqlite --budget 4000 [--profile agent_brief|agent_standard|agent_debug|human_review|ci_summary|full]
+rsm repo-map --path <path> --budget 4000 [--profile agent_brief|agent_standard|agent_debug|human_review|ci_summary|full]
+rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml] [--explain-ranking] [--profile agent_brief|agent_standard|agent_debug|human_review|ci_summary|full]
 rsm components infer --db .rsm/index.sqlite [--json]
 rsm components list --db .rsm/index.sqlite [--json]
 rsm invariants export --db .rsm/index.sqlite --out invariants.yaml
@@ -340,6 +342,15 @@ Selection behavior in the MVP:
 - no source bodies and no full docstring content in output
 
 `--format yaml` emits a JSON-formatted payload that is YAML 1.2-compatible.
+
+Profiles:
+
+- `agent_brief`: smallest compact context
+- `agent_standard` (default): balanced compact context
+- `agent_debug`: includes ranking breakdown and compact score reasons
+- `human_review`: balanced for human review
+- `ci_summary`: compact CI-focused context
+- `full`: highest verbosity without source body dumps
 
 Budget semantics:
 
