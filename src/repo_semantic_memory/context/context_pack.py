@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from repo_semantic_memory.context.ranking import RankingBreakdown
 from repo_semantic_memory.memory import CompactSemanticComponent
 from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.version import get_version_info
@@ -51,6 +52,7 @@ class ContextPack:
     selected_relations: tuple[Relation, ...]
     source_citations: tuple[SourceCitation, ...]
     why_selected: dict[str, tuple[str, ...]]
+    ranking_breakdowns: dict[str, RankingBreakdown]
     semantic_components: tuple[CompactSemanticComponent, ...]
     uncertainties: tuple[str, ...]
     suggested_files_to_inspect: tuple[str, ...]
@@ -61,10 +63,10 @@ class ContextPack:
         if self.budget < 1:
             raise ValueError("ContextPack budget must be >= 1")
 
-    def to_dict(self) -> dict[str, object]:
+    def to_dict(self, *, include_ranking: bool = False) -> dict[str, object]:
         """Serialize context pack to deterministic payload."""
         versions = get_version_info()
-        return {
+        payload: dict[str, object] = {
             "package_version": versions.package_version,
             "schema_version": versions.schema_version,
             "context_pack_version": versions.context_pack_version,
@@ -84,13 +86,19 @@ class ContextPack:
             "forbidden_assumptions": list(self.forbidden_assumptions),
             "truncated": self.truncated,
         }
+        if include_ranking:
+            payload["ranking_breakdowns"] = {
+                key: self.ranking_breakdowns[key].to_dict()
+                for key in sorted(self.ranking_breakdowns.keys())
+            }
+        return payload
 
-    def to_yaml(self) -> str:
+    def to_yaml(self, *, include_ranking: bool = False) -> str:
         """Render as YAML-compatible output.
 
         JSON is a strict subset of YAML 1.2 and keeps deterministic ordering here.
         """
-        return json.dumps(self.to_dict(), sort_keys=True, indent=2)
+        return json.dumps(self.to_dict(include_ranking=include_ranking), sort_keys=True, indent=2)
 
 
 def relation_key(relation: Relation) -> str:

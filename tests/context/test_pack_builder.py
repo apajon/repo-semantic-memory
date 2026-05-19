@@ -6,6 +6,12 @@ import json
 from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
+from repo_semantic_memory.context.pack_builder import (
+    _is_code_task,
+    _score_entity,
+    _task_hints,
+    _tokenize,
+)
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
@@ -358,3 +364,150 @@ def test_public_api_ranking_selects_non_src_package_exports() -> None:
     assert "lifecore_state/__init__.py" in selected_paths
     assert "lifecore_state/state_component.py" in selected_paths
     assert "docs/_build/generated_api.py" not in selected_paths
+
+
+def test_ranking_breakdown_is_deterministic() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    first = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+    second = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+
+    assert first.to_dict(include_ranking=True) == second.to_dict(include_ranking=True)
+
+
+def test_selected_entity_ranking_breakdown_includes_matched_fields() -> None:
+    entities, relations = _indexed_entities_and_relations()
+
+    pack = build_context_pack(
+        task="DerivedThing implementation",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        explain_ranking=True,
+    )
+    derived = next(entity for entity in pack.selected_entities if entity.name == "DerivedThing")
+    breakdown = pack.ranking_breakdowns[derived.id.value]
+
+    assert breakdown.matched_terms
+    assert breakdown.matched_fields
+    assert "name" in breakdown.matched_fields or "qualified_name" in breakdown.matched_fields
+
+
+def test_generated_artifact_penalty_appears_in_breakdown() -> None:
+    generated_entity = Entity(
+        id=StableId("python:module:docs._build.generated"),
+        kind="module",
+        name="generated.py",
+        qualified_name="docs._build.generated",
+        source_range=SourceRange(path="docs/_build/generated.py", start_line=1, end_line=1),
+    )
+    task_tokens = _tokenize("generated api docs")
+    breakdown = _score_entity(
+        generated_entity,
+        task_tokens,
+        is_code_task=_is_code_task(task_tokens),
+        task_hints=_task_hints(task_tokens),
+        public_api_entity_ids=set(),
+        source_roots=("src",),
+    )
+
+    assert breakdown.penalty < 0
+    assert any(
+        reason.message == "generated/build artifact downrank" for reason in breakdown.reasons
+    )
+
+
+def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+    public_api_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+    implementation_pack = build_context_pack(
+        task="Find lifecycle component ownership and cleanup rules",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+    test_pack = build_context_pack(
+        task="Find tests for lifecycle component behavior",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+
+    assert any(
+        'public API task hint -> boosted "__init__.py"' in reason.message
+        for breakdown in public_api_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        reason.category == "task_intent" and "public API task intent boost" in reason.message
+        for breakdown in public_api_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        "implementation task hint -> boosted source/package root" in reason.message
+        for breakdown in implementation_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        reason.category == "task_intent" and "implementation task intent boost" in reason.message
+        for breakdown in implementation_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        'test task hint -> boosted "tests/"' in reason.message
+        for breakdown in test_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        reason.category == "task_intent" and "test-like task intent boost" in reason.message
+        for breakdown in test_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+
+
+def test_default_markdown_output_remains_compact_without_explain_lines() -> None:
+    entities, relations = _indexed_entities_and_relations()
+    pack = build_context_pack(
+        task="DerivedThing",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    markdown = render_context_pack_markdown(pack)
+
+    assert "Score: total=" not in markdown
+    assert "  Reason:" not in markdown
+
+
+def test_explain_markdown_includes_ranking_summary_lines() -> None:
+    entities, relations = _indexed_entities_and_relations()
+    pack = build_context_pack(
+        task="DerivedThing implementation",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        explain_ranking=True,
+    )
+    markdown = render_context_pack_markdown(pack, explain_ranking=True)
+
+    assert "Score: total=" in markdown
