@@ -292,6 +292,7 @@ def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> 
         "lifecore_ros2.components.lifecycle_component.LifecycleComponent" == entity.qualified_name
         for entity in pack.selected_entities
     )
+    assert "tests/public_api_checks.py" in selected_paths
     assert all(not path.startswith("docs/_build/") for path in selected_paths)
     assert all(".egg-info/" not in path for path in selected_paths)
 
@@ -309,3 +310,33 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
 
     assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
     assert "tests/public_api_checks.py" in selected_paths
+
+
+def test_generated_artifact_filtering_is_path_segment_aware_for_build_named_modules() -> None:
+    entities = [
+        Entity(
+            id=StableId("python:module:src.build_tools"),
+            kind="module",
+            name="build_tools.py",
+            qualified_name="src.build_tools",
+            source_range=SourceRange(path="src/build_tools.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId("python:module:docs._build.generated"),
+            kind="module",
+            name="generated.py",
+            qualified_name="docs._build.generated",
+            source_range=SourceRange(path="docs/_build/generated.py", start_line=1, end_line=1),
+        ),
+    ]
+
+    pack = build_context_pack(
+        task="Update build tools behavior",
+        entities=entities,
+        relations=[],
+        budget_chars=4000,
+    )
+    selected_paths = [entity.source_range.path for entity in pack.selected_entities]
+
+    assert "src/build_tools.py" in selected_paths
+    assert "docs/_build/generated.py" not in selected_paths

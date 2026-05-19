@@ -62,8 +62,10 @@ def test_filesystem_extractor_ignores_docs_build_and_egg_info_artifacts(tmp_path
     (repo_root / "src" / "keep.py").write_text("def keep() -> None:\n    pass\n", encoding="utf-8")
     (repo_root / "docs" / "_build").mkdir(parents=True)
     (repo_root / "docs" / "_build" / "generated.py").write_text("x = 1\n", encoding="utf-8")
-    (repo_root / "pkg.egg-info").mkdir()
-    (repo_root / "pkg.egg-info" / "generated.py").write_text("x = 1\n", encoding="utf-8")
+    (repo_root / "src" / "lifecore_ros2.egg-info").mkdir(parents=True)
+    (repo_root / "src" / "lifecore_ros2.egg-info" / "generated.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
 
     entities = extract_filesystem_entities(repo_root)
     paths = [entity.source_range.path for entity in entities]

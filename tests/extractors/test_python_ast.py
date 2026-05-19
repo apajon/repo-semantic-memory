@@ -139,8 +139,8 @@ def test_index_python_path_directory_ignores_docs_build_and_egg_info(tmp_path: P
     (repo_root / "docs" / "_build" / "generated.py").write_text(
         "def generated() -> None:\n    pass\n", encoding="utf-8"
     )
-    (repo_root / "pkg.egg-info").mkdir()
-    (repo_root / "pkg.egg-info" / "generated.py").write_text(
+    (repo_root / "src" / "lifecore_ros2.egg-info").mkdir(parents=True)
+    (repo_root / "src" / "lifecore_ros2.egg-info" / "generated.py").write_text(
         "def generated() -> None:\n    pass\n", encoding="utf-8"
     )
 

@@ -23,7 +23,17 @@ _ROS_LIKE_METHOD_NAMES = frozenset(
     {"publish", "on_message", "on_tick", "call", "call_async", "wait_for_service"}
 )
 _LIFECYCLE_METHOD_NAMES = frozenset({"start", "stop", "reset"})
-_INTERNAL_CLEANUP_METHOD_NAMES = frozenset({"_release_resources", "_on_configure"})
+_INTERNAL_CLEANUP_METHOD_NAMES = frozenset(
+    {
+        "_release_resources",
+        "_on_configure",
+        "_on_activate",
+        "_on_deactivate",
+        "_on_cleanup",
+        "_on_error",
+        "_on_shutdown",
+    }
+)
 _MEANINGFUL_METHOD_NAMES = frozenset(
     _ROS_LIKE_METHOD_NAMES | _LIFECYCLE_METHOD_NAMES | _INTERNAL_CLEANUP_METHOD_NAMES
 )

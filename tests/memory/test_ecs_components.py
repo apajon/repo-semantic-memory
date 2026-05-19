@@ -239,3 +239,29 @@ def test_method_level_integration_keeps_semantically_meaningful_method_names() -
 
     assert (meaningful_method.id.value, "ROSLikeIntegration") in component_pairs
     assert (lifecycle_method.id.value, "ExternalIntegration") in component_pairs
+
+
+def test_lifecycle_hook_method_names_remain_eligible_for_method_level_labels() -> None:
+    hook_names = (
+        "_on_configure",
+        "_on_activate",
+        "_on_deactivate",
+        "_on_cleanup",
+        "_on_error",
+        "_on_shutdown",
+    )
+    methods = [
+        _entity(
+            identifier=f"python:method:pkg.lifecycle.node.{hook_name}",
+            kind="method",
+            name=hook_name,
+            qualified_name=f"pkg.lifecycle.Node.{hook_name}",
+            path="pkg/lifecycle_node.py",
+        )
+        for hook_name in hook_names
+    ]
+
+    components = infer_semantic_components(entities=methods, relations=[])
+    labeled_method_ids = {component.entity_id.value for component in components}
+
+    assert labeled_method_ids == {method.id.value for method in methods}
