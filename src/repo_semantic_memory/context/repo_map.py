@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
 from repo_semantic_memory.context.budget import CharacterBudget
 from repo_semantic_memory.context.path_roles import (
@@ -21,7 +22,7 @@ from repo_semantic_memory.context.path_roles import (
 )
 from repo_semantic_memory.model import Entity, Relation
 
-_REPO_MAP_ROLE_PRIORITY: dict[str, int] = {
+_REPO_MAP_ROLE_PRIORITY: Final[dict[str, int]] = {
     # Lower number means higher priority in rendered module ordering.
     # We prioritize likely implementation/package code first, then supporting contexts.
     SOURCE_ROLE: 0,

@@ -287,8 +287,8 @@ def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> 
     )
     selected_paths = [entity.source_range.path for entity in pack.selected_entities]
 
-    assert any(path.endswith("src/lifecore_ros2/__init__.py") for path in selected_paths)
-    assert any(path.endswith("lifecore_state/__init__.py") for path in selected_paths)
+    assert "src/lifecore_ros2/__init__.py" in selected_paths
+    assert "lifecore_state/__init__.py" in selected_paths
     assert any(
         "lifecore_ros2.components.lifecycle_component.LifecycleComponent" == entity.qualified_name
         for entity in pack.selected_entities

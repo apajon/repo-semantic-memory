@@ -85,7 +85,7 @@ def test_repo_map_source_citations_are_posix_paths() -> None:
     assert "- module `pkg.module` src/pkg/module.py:3-6" in output
 
 
-def test_repo_map_prioritizes_roles_source_tests_examples_docs_ci_tools_other() -> None:
+def test_repo_map_respects_role_priority_ordering() -> None:
     entities = [
         Entity(
             id=StableId.from_parts(["file", "misc/last.py"]),
