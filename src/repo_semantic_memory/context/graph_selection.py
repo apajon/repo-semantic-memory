@@ -239,6 +239,7 @@ def select_graph_neighbors(
     return GraphSelectionResult(
         selected_ids=selected_ids,
         scores_by_id=dict(sorted_neighbors),
+        # dict.fromkeys preserves insertion order while deduplicating reason strings.
         reasons_by_id={eid: tuple(dict.fromkeys(all_reasons.get(eid, []))) for eid in selected_ids},
         uncertainty_ids=frozenset(uncertainty_ids) & final_selected,
     )

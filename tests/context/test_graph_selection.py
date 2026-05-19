@@ -280,7 +280,7 @@ def test_max_entity_count_limits_result() -> None:
     assert len(result.selected_ids) == 3
 
 
-def test_max_entity_count_selects_highest_scoring() -> None:
+def test_max_entity_count_selects_highest_scoring_with_tie_break() -> None:
     """When limited, the highest-scoring neighbors are preferred."""
     seed = _entity("seed")
     high_a = _entity("high_a")
