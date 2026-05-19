@@ -1,7 +1,6 @@
 """Tests for version metadata constants."""
 
-import tomllib
-from pathlib import Path
+from importlib.metadata import version
 
 from repo_semantic_memory.version import (
     CONTEXT_PACK_VERSION,
@@ -12,11 +11,7 @@ from repo_semantic_memory.version import (
 
 
 def test_version_constants_are_deterministic() -> None:
-    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    project = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("project", {})
-    project_version = project.get("version")
-    assert isinstance(project_version, str) and project_version
-    assert PACKAGE_VERSION == project_version
+    assert PACKAGE_VERSION == version("repo-semantic-memory")
     assert SCHEMA_VERSION == "0.1.0"
     assert CONTEXT_PACK_VERSION == "0.1.0"
 

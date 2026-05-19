@@ -1,14 +1,25 @@
 """Version constants for package and semantic artifacts.
 
-Only ``PACKAGE_VERSION`` is managed by semantic-release automation.
+``PACKAGE_VERSION`` is resolved from installed package metadata.
 ``SCHEMA_VERSION`` and ``CONTEXT_PACK_VERSION`` remain independently managed.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 
-PACKAGE_VERSION = "0.6.0"
+_PACKAGE_DISTRIBUTION_NAME = "repo-semantic-memory"
+
+
+def _resolve_package_version() -> str:
+    try:
+        return version(_PACKAGE_DISTRIBUTION_NAME)
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
+
+
+PACKAGE_VERSION = _resolve_package_version()
 SCHEMA_VERSION = "0.1.0"
 CONTEXT_PACK_VERSION = "0.1.0"
 
