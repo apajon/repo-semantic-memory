@@ -1,0 +1,100 @@
+name: Release Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+jobs:
+  release_preview:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv and Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --all-groups --locked
+
+      - name: Generate semantic-release changelog preview
+        run: |
+          set -euo pipefail
+          git checkout -B main
+          cp CHANGELOG.md /tmp/changelog_before.md
+
+          set +e
+          uv run semantic-release version --skip-build --no-commit --no-tag --no-push --no-vcs-release >/tmp/semantic_release_preview.log 2>&1
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "_Preview generation failed (exit ${status})._"
+              echo
+              echo '```text'
+              tail -n 120 /tmp/semantic_release_preview.log
+              echo '```'
+            } >/tmp/release_preview.md
+            exit 0
+          fi
+
+          if cmp -s CHANGELOG.md /tmp/changelog_before.md; then
+            printf '%s\n' "_No semantic-release changelog update would be produced for this PR._" >/tmp/release_preview.md
+            exit 0
+          fi
+
+          uv run python -c "from pathlib import Path; import re; changelog = Path('CHANGELOG.md').read_text(encoding='utf-8'); match = re.search(r'(?ms)^## [^\\n]+\\n.*?(?=^## [^\\n]+|\\Z)', changelog); print('_Unable to parse generated changelog preview._' if not match else '```markdown\\n' + match.group(0).strip() + '\\n```')" >/tmp/release_preview.md
+
+      - name: Comment preview on pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- rsm-release-preview -->";
+            const body = fs.readFileSync("/tmp/release_preview.md", "utf8").trim();
+            const commentBody = `${marker}
+            ### Semantic Release Preview
+            ${body}`;
+
+            const issue_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: commentBody,
+              });
+            }
