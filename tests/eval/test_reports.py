@@ -62,7 +62,7 @@ def test_report_generation_outputs_expected_sections() -> None:
     assert "## Task details" in markdown
     assert "context_character_estimate" in markdown
     assert "Gold invariants are dataset metadata only" in markdown
-    assert "small internal dataset" in markdown
+    assert "some categories still have very few tasks" in markdown
 
 
 def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Path) -> None:
@@ -171,6 +171,7 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     assert "## Per-category results" in markdown_one
     assert "### Savings table" in markdown_one
     assert "estimated_tokens = chars / 4" in markdown_one
+    assert "some categories still have very few tasks" in markdown_one
     assert "## Limitations" in markdown_one
     assert "does not claim superiority" in markdown_one
     assert "No superiority claim is made when" in markdown_one

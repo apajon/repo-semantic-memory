@@ -181,7 +181,10 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
         "Notes:",
         "- `context_character_estimate` is a character-based approximation, not tokenizer-based.",
         "- Gold invariants are dataset metadata only in this MVP and are not scored yet.",
-        "- This is a small internal dataset; per-category metrics are directional, not scientific.",
+        (
+            "- Category-level metrics are directional only; this remains a small internal "
+            "dataset and some categories still have very few tasks."
+        ),
         "",
         "## Per-category metrics",
         "",
@@ -309,6 +312,11 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         ),
         "",
         "## Per-category results",
+        "",
+        (
+            "- Category-level compare results are directional only; some categories still "
+            "have very few tasks."
+        ),
         "",
         (
             "| category | tasks | repo_map wins | pack wins | tie | inconclusive | "
