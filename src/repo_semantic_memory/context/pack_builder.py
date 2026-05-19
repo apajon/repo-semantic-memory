@@ -727,15 +727,14 @@ def _component_labels_by_entity(
 ) -> dict[str, tuple[str, ...]]:
     labels_by_entity: dict[str, list[str]] = defaultdict(list)
     for component in components:
-        entity_id = getattr(getattr(component, "entity_id", None), "value", None)
-        component_type = getattr(component, "component_type", None)
-        status = getattr(component, "status", None)
-        if not isinstance(entity_id, str):
+        entity_id_obj = component.entity_id
+        entity_id = entity_id_obj.value
+        component_type = component.component_type
+        status = component.status
+        if not entity_id:
             continue
-        if isinstance(component_type, str):
-            labels_by_entity[entity_id].append(component_type)
-        if isinstance(status, str):
-            labels_by_entity[entity_id].append(status)
+        labels_by_entity[entity_id].append(component_type)
+        labels_by_entity[entity_id].append(status)
     return {
         entity_id: tuple(dict.fromkeys(labels))
         for entity_id, labels in sorted(labels_by_entity.items())

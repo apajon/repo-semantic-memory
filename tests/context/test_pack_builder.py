@@ -308,7 +308,7 @@ def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> 
     assert all(".egg-info/" not in path for path in selected_paths)
 
 
-def test_implementation_cleanup_task_includes_src_components_and_tests() -> None:
+def test_implementation_cleanup_task_focuses_on_source_components() -> None:
     entities, relations = _ranking_fixture_entities_and_relations()
 
     pack = build_context_pack(
@@ -321,6 +321,7 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
 
     assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
     assert "lifecore_state/state_component.py" in selected_paths
+    assert "tests/public_api_checks.py" not in selected_paths
 
 
 def test_build_filtering_is_path_segment_aware() -> None:
