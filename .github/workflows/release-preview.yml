@@ -32,8 +32,8 @@ jobs:
       - name: Generate semantic-release changelog preview
         run: |
           set -euo pipefail
-          preview_branch="${{ github.base_ref }}"
-          release_preview_branch="preview-${preview_branch}"
+          base_branch="${{ github.base_ref }}"
+          release_preview_branch="preview-${base_branch}"
           # Balance enough diagnostic context and readable PR comments when preview generation fails.
           tail_lines=120
 
@@ -112,6 +112,8 @@ jobs:
           } >/tmp/release_preview.md
 
           git restore --worktree -- .
+          git checkout --detach >/dev/null 2>&1 || true
+          git branch -D "${release_preview_branch}" >/dev/null 2>&1 || true
 
       - name: Comment preview on pull request
         uses: actions/github-script@v7
