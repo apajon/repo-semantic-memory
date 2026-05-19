@@ -41,7 +41,7 @@ However, the project is not yet ready for a broad public announcement. The bigge
 1. **Repo-map baseline still underperforms severely on retrieval tasks**
    - In current compare run, repo-map gold file/symbol coverage is 0.0 average.
 2. **Public API context remains overly broad in real-world style tasks**
-   - Includes test/CI/docs agent-instruction noise in public API flavored prompts.
+   - Includes test/CI/docs agent-instruction noise in public-API-flavored prompts.
 3. **Cleanup/ownership retrieval still misses concrete implementation files in some scenarios**
    - Improved but incomplete for component-level files (publisher/subscriber/timer/service client/server style targets).
 4. **ECS taxonomy remains blurry**
@@ -97,7 +97,7 @@ However, the project is not yet ready for a broad public announcement. The bigge
 
 ## Benchmark readiness review
 
-Current seed dataset result (latest run):
+Current seed dataset result (run at 2026-05-19 on commit `6be7f9e39b39ede4eb54d34233013a7612170fa6`):
 
 - Retrieval aggregate:
   - file recall@1/3/5: 0.667
