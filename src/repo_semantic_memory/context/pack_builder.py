@@ -7,6 +7,10 @@ from collections.abc import Sequence
 
 from repo_semantic_memory.context.bm25 import FieldedBM25Index, FieldedDocument, tokenize_text
 from repo_semantic_memory.context.context_pack import ContextPack, SourceCitation, relation_key
+from repo_semantic_memory.context.graph_selection import (
+    GraphSelectionConfig,
+    select_graph_neighbors,
+)
 from repo_semantic_memory.context.path_roles import (
     SOURCE_ROLE,
     classify_path_role,
@@ -157,13 +161,47 @@ def build_context_pack(
                 reasons=(dedupe_stable_reasons((("graph", "fallback deterministic seed", 0.0),))),
             )
 
+    # Weighted graph neighbor selection: replaces ad-hoc BFS with explicit,
+    # budget-aware, depth-limited expansion.
+    graph_result = select_graph_neighbors(
+        seed_ids=tuple(selected_entity_ids),
+        entity_id_set=frozenset(entity_by_id.keys()),
+        relations=normalized_relations,
+        config=GraphSelectionConfig(),
+        exclude_ids=frozenset(selected_entity_ids),
+    )
+    for neighbor_id in graph_result.selected_ids:
+        _add_entity(neighbor_id, selected_entity_ids, selected_entity_set)
+        graph_score = graph_result.scores_by_id[neighbor_id]
+        neighbor_reasons = graph_result.reasons_by_id.get(neighbor_id, ())
+        for reason_msg in neighbor_reasons:
+            reasons_by_key[neighbor_id].append(reason_msg)
+        if explain_ranking and neighbor_id not in ranking_breakdowns_by_id:
+            reason_tuples: tuple[tuple[RankingCategory, str, float], ...]
+            if neighbor_reasons:
+                reason_tuples = tuple(("graph", msg, graph_score) for msg in neighbor_reasons)
+            else:
+                reason_tuples = (
+                    ("graph", f"graph neighbor (score={graph_score:.3f})", graph_score),
+                )
+            ranking_breakdowns_by_id[neighbor_id] = build_breakdown(
+                lexical=0,
+                path_role=0,
+                task_intent=0,
+                component=0,
+                graph=graph_score,
+                penalty=0,
+                matched_terms=(),
+                matched_fields=(),
+                reasons=dedupe_stable_reasons(reason_tuples),
+            )
+
+    # Collect all relations incident to any selected entity.
     relations_by_entity_id = _relations_by_entity_id(normalized_relations)
     selected_relations: list[Relation] = []
     selected_relation_keys: set[tuple[str, str, str]] = set()
-    queue = list(selected_entity_ids)
-    while queue:
-        current_id = queue.pop(0)
-        for relation in relations_by_entity_id.get(current_id, ()):
+    for entity_id in selected_entity_ids:
+        for relation in relations_by_entity_id.get(entity_id, ()):
             relation_tuple = (
                 relation.source_entity_id.value,
                 relation.target_entity_id.value,
@@ -173,39 +211,7 @@ def build_context_pack(
                 continue
             selected_relation_keys.add(relation_tuple)
             selected_relations.append(relation)
-            reasons_by_key[relation_key(relation)].append("direct graph neighbor")
-
-            neighbor_id = _other_endpoint(current_id=current_id, relation=relation)
-            neighbor = entity_by_id.get(neighbor_id)
-            if neighbor is None or neighbor_id in selected_entity_set:
-                continue
-            _add_entity(neighbor_id, selected_entity_ids, selected_entity_set)
-            reasons_by_key[neighbor_id].append(
-                f"direct neighbor via {relation.kind} from {current_id}"
-            )
-            if explain_ranking and neighbor_id not in ranking_breakdowns_by_id:
-                ranking_breakdowns_by_id[neighbor_id] = build_breakdown(
-                    lexical=0,
-                    path_role=0,
-                    task_intent=0,
-                    component=0,
-                    graph=1,
-                    penalty=0,
-                    matched_terms=(),
-                    matched_fields=(),
-                    reasons=(
-                        dedupe_stable_reasons(
-                            (
-                                (
-                                    "graph",
-                                    f"direct neighbor via {relation.kind} from {current_id}",
-                                    1.0,
-                                ),
-                            )
-                        )
-                    ),
-                )
-            queue.append(neighbor_id)
+            reasons_by_key[relation_key(relation)].append("incident to selected entity")
 
     selected_entities = [
         entity_by_id[entity_id] for entity_id in selected_entity_ids if entity_id in entity_by_id
@@ -504,12 +510,6 @@ def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Re
         grouped[relation.source_entity_id.value].append(relation)
         grouped[relation.target_entity_id.value].append(relation)
     return {key: tuple(value) for key, value in grouped.items()}
-
-
-def _other_endpoint(*, current_id: str, relation: Relation) -> str:
-    source = relation.source_entity_id.value
-    target = relation.target_entity_id.value
-    return target if source == current_id else source
 
 
 def _add_entity(entity_id: str, selected_ids: list[str], selected_set: set[str]) -> None:
