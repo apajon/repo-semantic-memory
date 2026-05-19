@@ -1,0 +1,157 @@
+name: Release Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+jobs:
+  release_preview:
+    if: github.event.pull_request.draft == false && github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv and Python 3.12
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --all-groups --locked
+
+      - name: Generate semantic-release changelog preview
+        run: |
+          set -euo pipefail
+          base_branch="${{ github.base_ref }}"
+          release_preview_branch="preview-${base_branch}"
+          # Balance enough diagnostic context and readable PR comments when preview generation fails.
+          tail_lines=120
+
+          git checkout -B "${release_preview_branch}" HEAD
+
+          if ! awk -v preview_branch="${release_preview_branch}" '
+            BEGIN { in_section = 0; replaced = 0 }
+            /^\[tool\.semantic_release\]/ { in_section = 1; print; next }
+            /^\[/ { in_section = 0 }
+            in_section == 1 && /^branch = ".*"$/ && replaced == 0 {
+              print "branch = \"" preview_branch "\""
+              replaced = 1
+              next
+            }
+            { print }
+            END { exit(replaced == 1 ? 0 : 1) }
+          ' pyproject.toml >/tmp/semantic-release-preview.toml; then
+            echo 'Could not find semantic-release branch configuration in [tool.semantic_release] in pyproject.toml'
+            exit 1
+          fi
+          cp CHANGELOG.md /tmp/changelog_before.md
+
+          set +e
+          # Preview strategy: compute release output without creating commit/tag/push/release artifacts.
+          uv run semantic-release -c /tmp/semantic-release-preview.toml version \
+            --skip-build \
+            --no-commit \
+            --no-tag \
+            --no-push \
+            --no-vcs-release >/tmp/semantic_release_preview.log 2>&1
+          status=$?
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            {
+              echo "_Preview generation failed (exit ${status})._"
+              echo
+              echo '```text'
+              tail -n "${tail_lines}" /tmp/semantic_release_preview.log
+              echo '```'
+            } >/tmp/release_preview.md
+            exit 0
+          fi
+
+          if cmp -s CHANGELOG.md /tmp/changelog_before.md; then
+            printf '%s\n' "_No semantic-release changelog update would be produced for this PR._" >/tmp/release_preview.md
+            exit 0
+          fi
+
+          if [ ! -s CHANGELOG.md ]; then
+            printf '%s\n' "_Unable to parse generated changelog preview._" >/tmp/release_preview.md
+            exit 0
+          fi
+
+          # Extract the newest generated changelog section: from first "## v..." heading to next heading.
+          awk '
+            BEGIN { capture = 0 }
+            /^## v/ {
+              if (capture == 1) {
+                exit
+              }
+              capture = 1
+            }
+            capture == 1 { print }
+          ' CHANGELOG.md >/tmp/changelog_section.md
+
+          if [ ! -s /tmp/changelog_section.md ]; then
+            printf '%s\n' "_Unable to parse generated changelog preview._" >/tmp/release_preview.md
+            exit 0
+          fi
+
+          {
+            echo '```markdown'
+            cat /tmp/changelog_section.md
+            echo '```'
+          } >/tmp/release_preview.md
+
+          git restore --worktree -- .
+          git checkout --detach >/dev/null 2>&1 || true
+          git branch -D "${release_preview_branch}" >/dev/null 2>&1 || true
+
+      - name: Comment preview on pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- rsm-release-preview -->";
+            const body = fs.readFileSync("/tmp/release_preview.md", "utf8").trim();
+            const commentBody = `${marker}
+            ### Semantic Release Preview
+            ${body}`;
+
+            const issue_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find(
+              (comment) => comment.user?.type === "Bot" && comment.body?.includes(marker),
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body: commentBody,
+              });
+            }
