@@ -39,11 +39,21 @@ jobs:
 
           git checkout -B "${release_preview_branch}" HEAD
 
-          if ! grep -q '^branch = "main"$' pyproject.toml; then
-            echo 'Could not find semantic-release branch configuration with branch = "main" in pyproject.toml'
+          if ! awk -v preview_branch="${release_preview_branch}" '
+            BEGIN { in_section = 0; replaced = 0 }
+            /^\[tool\.semantic_release\]/ { in_section = 1; print; next }
+            /^\[/ { in_section = 0 }
+            in_section == 1 && /^branch = ".*"$/ && replaced == 0 {
+              print "branch = \"" preview_branch "\""
+              replaced = 1
+              next
+            }
+            { print }
+            END { exit(replaced == 1 ? 0 : 1) }
+          ' pyproject.toml >/tmp/semantic-release-preview.toml; then
+            echo 'Could not find semantic-release branch configuration in [tool.semantic_release] in pyproject.toml'
             exit 1
           fi
-          sed "1,/^branch = \"main\"$/s//branch = \"${release_preview_branch}\"/" pyproject.toml >/tmp/semantic-release-preview.toml
           cp CHANGELOG.md /tmp/changelog_before.md
 
           set +e
@@ -77,10 +87,10 @@ jobs:
             exit 0
           fi
 
-          # Extract the newest generated changelog section: from first heading to next heading.
+          # Extract the newest generated changelog section: from first "## v..." heading to next heading.
           awk '
             BEGIN { capture = 0 }
-            /^## / {
+            /^## v/ {
               if (capture == 1) {
                 exit
               }
@@ -99,6 +109,8 @@ jobs:
             cat /tmp/changelog_section.md
             echo '```'
           } >/tmp/release_preview.md
+
+          git checkout -- CHANGELOG.md pyproject.toml
 
       - name: Comment preview on pull request
         uses: actions/github-script@v7
