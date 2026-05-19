@@ -305,7 +305,7 @@ def build_context_pack(
             if not reasons_by_key[key]:
                 continue
             unique_reasons = tuple(dict.fromkeys(reasons_by_key[key]))
-            why_selected[key] = unique_reasons[:1]
+            why_selected[key] = unique_reasons
     include_ranking_breakdown = explain_ranking or resolved_profile.include_ranking_breakdown
 
     return ContextPack(

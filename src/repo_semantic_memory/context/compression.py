@@ -237,7 +237,9 @@ def filter_semantic_components(
     return tuple(kept)
 
 
-def trim_import_names(import_names: Sequence[str], *, profile: CompressionProfile) -> tuple[str, ...]:
+def trim_import_names(
+    import_names: Sequence[str], *, profile: CompressionProfile
+) -> tuple[str, ...]:
     """Apply deterministic import-list trimming for repo-map rendering."""
     if profile.max_imports_per_module is None:
         return tuple(import_names)

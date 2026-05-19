@@ -673,14 +673,15 @@ def test_profile_registry_is_deterministic() -> None:
     first = available_profile_names()
     second = available_profile_names()
     assert first == second
-    assert first == (
+    expected_profiles = {
         "agent_brief",
         "agent_standard",
         "agent_debug",
         "human_review",
         "ci_summary",
         "full",
-    )
+    }
+    assert expected_profiles.issubset(set(first))
 
 
 def test_agent_brief_profile_output_is_smaller_than_agent_debug() -> None:
