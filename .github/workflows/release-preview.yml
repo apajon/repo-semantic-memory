@@ -10,7 +10,7 @@ on:
 
 jobs:
   release_preview:
-    if: github.event.pull_request.draft == false
+    if: github.event.pull_request.draft == false && github.base_ref == 'main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -32,7 +32,10 @@ jobs:
       - name: Generate semantic-release changelog preview
         run: |
           set -euo pipefail
-          git checkout -B main HEAD
+          preview_branch="${{ github.base_ref }}"
+          tail_lines=120
+
+          git checkout -B "${preview_branch}" HEAD
           cp CHANGELOG.md /tmp/changelog_before.md
 
           set +e
@@ -45,7 +48,7 @@ jobs:
               echo "_Preview generation failed (exit ${status})._"
               echo
               echo '```text'
-              tail -n 120 /tmp/semantic_release_preview.log
+              tail -n "${tail_lines}" /tmp/semantic_release_preview.log
               echo '```'
             } >/tmp/release_preview.md
             exit 0
