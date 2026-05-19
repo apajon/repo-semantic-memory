@@ -7,21 +7,24 @@ import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 
 _TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:-]*")
 _DELIMITER_PATTERN = re.compile(r"[._/:\-\\]+")
 _CAMEL_PATTERN = re.compile(r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+")
 
-DEFAULT_FIELD_WEIGHTS: dict[str, float] = {
-    "qualified_name": 3.0,
-    "name": 2.5,
-    "source_path": 2.0,
-    "kind": 1.5,
-    "semantic_components": 1.25,
-    "relation_labels": 1.0,
-    "metadata": 0.75,
-    "id": 0.5,
-}
+DEFAULT_FIELD_WEIGHTS: Mapping[str, float] = MappingProxyType(
+    {
+        "qualified_name": 3.0,
+        "name": 2.5,
+        "source_path": 2.0,
+        "kind": 1.5,
+        "semantic_components": 1.25,
+        "relation_labels": 1.0,
+        "metadata": 0.75,
+        "id": 0.5,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,7 @@ class BM25Config:
 
     k1: float = 1.2
     b: float = 0.75
-    field_weights: Mapping[str, float] = field(default_factory=lambda: DEFAULT_FIELD_WEIGHTS.copy())
+    field_weights: Mapping[str, float] = field(default_factory=lambda: dict(DEFAULT_FIELD_WEIGHTS))
 
     def __post_init__(self) -> None:
         if self.k1 <= 0:

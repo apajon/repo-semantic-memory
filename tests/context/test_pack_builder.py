@@ -308,7 +308,7 @@ def test_public_api_task_prioritizes_init_exports_over_generated_artifacts() -> 
     assert all(".egg-info/" not in path for path in selected_paths)
 
 
-def test_implementation_cleanup_task_focuses_on_source_components() -> None:
+def test_implementation_cleanup_task_excludes_test_files() -> None:
     entities, relations = _ranking_fixture_entities_and_relations()
 
     pack = build_context_pack(
