@@ -13,10 +13,11 @@ _PACKAGE_DISTRIBUTION_NAME = "repo-semantic-memory"
 
 
 def _resolve_package_version() -> str:
+    """Resolve installed distribution version with a development-safe fallback."""
     try:
         return version(_PACKAGE_DISTRIBUTION_NAME)
     except PackageNotFoundError:
-        return "0.0.0+unknown"
+        return "0.0.0"
 
 
 PACKAGE_VERSION = _resolve_package_version()

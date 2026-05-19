@@ -36,7 +36,7 @@ jobs:
       - name: Pytest
         run: uv run pytest
 
-      - name: Semantic release
+      - name: Semantic release (tag-only on protected main)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: uv run semantic-release version --skip-build --no-commit --no-changelog --push --vcs-release
