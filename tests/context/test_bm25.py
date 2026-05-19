@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from repo_semantic_memory.context.bm25 import BM25Config, FieldedBM25Index, FieldedDocument, tokenize_text
+from repo_semantic_memory.context.bm25 import (
+    BM25Config,
+    FieldedBM25Index,
+    FieldedDocument,
+    tokenize_text,
+)
 
 
 def _rank_ids(index: FieldedBM25Index, query: str, doc_ids: tuple[str, ...]) -> list[str]:
@@ -60,7 +65,9 @@ def test_bm25_qualified_name_match_outranks_generic_docs_text() -> None:
             ),
             FieldedDocument(
                 doc_id="entity:docs",
-                fields={"metadata": "The docs discuss build context pack behavior in general terms."},
+                fields={
+                    "metadata": "The docs discuss build context pack behavior in general terms."
+                },
             ),
         )
     )

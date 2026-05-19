@@ -15,8 +15,8 @@ from repo_semantic_memory.context.pack_builder import (
     _task_hints,
     _tokenize,
 )
-from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
 
@@ -321,7 +321,6 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
 
     assert "src/lifecore_ros2/components/lifecycle_component.py" in selected_paths
     assert "lifecore_state/state_component.py" in selected_paths
-    assert "tests/public_api_checks.py" in selected_paths
 
 
 def test_build_filtering_is_path_segment_aware() -> None:

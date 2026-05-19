@@ -710,7 +710,9 @@ def _build_bm25_index(
                 "qualified_name": entity.qualified_name,
                 "source_path": entity.source_range.path.replace("\\", "/"),
                 "kind": entity.kind,
-                "semantic_components": " ".join(component_labels_by_entity.get(entity.id.value, ())),
+                "semantic_components": " ".join(
+                    component_labels_by_entity.get(entity.id.value, ())
+                ),
                 "relation_labels": " ".join(relation_labels_by_entity.get(entity.id.value, ())),
                 "metadata": " ".join(_metadata_strings(entity.metadata)),
             },
