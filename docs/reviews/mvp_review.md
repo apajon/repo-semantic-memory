@@ -88,7 +88,8 @@ However, the project is not yet ready for a broad public announcement. The bigge
 
 - Output remains compact and cited.
 - Hardening effectively reduced generated-doc/build pollution.
-- Source-first ordering improved and now handles non-`src/` package roots via markers and `__init__.py` heuristics.
+- Source-first ordering improved for validated cases (notably `src/lifecore_ros2`), but generic non-`src/` source-root classification is still an open gap for multi-package repositories.
+- Remaining source-root coverage to harden includes roots like `lifecore_state/`, ROS 2 package roots (`package.xml`), Python package roots declared via `pyproject.toml`/`setup.py`/`setup.cfg`, and top-level package `__init__.py` layouts.
 - Budget handling is sane and deterministic (char-based, explicit truncation marker).
 - Context packs are currently more useful than repo-map for coding-agent retrieval tasks.
 - Remaining ranking problems from lifecore-style validation:
@@ -257,11 +258,11 @@ Verdict:
 
 Exit criteria:
 
-1. Public API ranking precision improved with measurable noise reduction.
-2. Cleanup/ownership tasks recover concrete implementation files reliably.
-3. Benchmark dataset expanded with at least 8–12 diverse tasks.
-4. Compare report includes noise-oriented metrics and role-distribution diagnostics.
-5. No regressions in determinism, lint/type/test suite, and current baseline tasks.
+1. Generic source-root classifier is implemented and validated across multi-package layouts (including non-`src/` roots).
+2. Ranking output includes explainable score-breakdown reporting per selected entity.
+3. Field-weighted BM25 lexical retrieval is added as the primary ranking baseline.
+4. Deterministic graph-neighborhood selection is stabilized and benchmarked for predictable expansion behavior.
+5. Context noise and token-savings metrics are reported; benchmark dataset expansion (8–12 diverse tasks) is completed using those metrics.
 
 ## Public announcement verdict
 
@@ -290,8 +291,8 @@ Exit criteria:
 
 ## Top 5 next actions
 
-1. Add benchmark tasks for public API precision and cleanup ownership retrieval.
-2. Tighten ranking penalties/boosts to reduce non-source leakage in API tasks.
-3. Introduce lifecycle-hook-specific semantic component type.
-4. Add noise metrics to compare/eval reporting.
-5. Document and enforce `.ai/` snapshot policy (when to commit vs regenerate locally).
+1. Implement a generic source-root classifier for multi-package repositories (including non-`src/` roots).
+2. Add explainable ranking breakdown output (lexical/path-role/task-hint/component contributions).
+3. Introduce field-weighted BM25 retrieval for ranking stability and precision.
+4. Stabilize a deterministic graph-neighborhood selector for context expansion.
+5. Add context-noise and token-savings metrics, then expand benchmark tasks using those metrics.
