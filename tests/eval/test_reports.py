@@ -30,7 +30,7 @@ def test_report_generation_outputs_expected_sections() -> None:
     outcomes = (
         RetrievalOutcome(
             task_id="report_001",
-            category="code_localization",
+            category="implementation_localization",
             prompt="where is alpha",
             ranked_files=("src/a.py",),
             ranked_symbols=("pkg.alpha",),
@@ -58,9 +58,11 @@ def test_report_generation_outputs_expected_sections() -> None:
     assert "report_001" in table
     assert "# Retrieval benchmark report" in markdown
     assert "## Aggregate metrics" in markdown
+    assert "## Per-category metrics" in markdown
     assert "## Task details" in markdown
     assert "context_character_estimate" in markdown
     assert "Gold invariants are dataset metadata only" in markdown
+    assert "some categories still have very few tasks" in markdown
 
 
 def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Path) -> None:
@@ -74,7 +76,7 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
         useful_context_ratio=0.75,
         missing_gold_files=(),
         missing_gold_symbols=("pkg.missing",),
-        extra_selected_files=(),
+        extra_selected_files=("docs/_build/generated_api.py",),
         extra_selected_symbols=("pkg.extra",),
     )
     lexical = BaselineTaskResult(
@@ -97,7 +99,7 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
         outcomes=(
             TaskBaselineComparison(
                 task_id="compare_001",
-                category="code_localization",
+                category="generated_artifact_suppression",
                 prompt="where is a",
                 gold_files=("src/a.py",),
                 gold_symbols=("pkg.a", "pkg.missing"),
@@ -131,8 +133,18 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     aggregate_payload = cast(dict[str, Any], payload_one["aggregate"])
     assert "average_approx_useful_item_ratio" in aggregate_payload
     assert "savings" in aggregate_payload
+    assert "generated_artifact_false_positives" in aggregate_payload
+    assert "by_category" in aggregate_payload
     savings_aggregate = cast(dict[str, Any], aggregate_payload["savings"])
     assert savings_aggregate["average_estimated_tokens_saved"] == 5.0
+    false_positive_payload = cast(
+        dict[str, Any], aggregate_payload["generated_artifact_false_positives"]
+    )
+    assert false_positive_payload["repo_map"]["selection_count"] == 1
+    assert false_positive_payload["repo_map"]["task_count"] == 1
+    assert false_positive_payload["repo_map"]["files"] == ["docs/_build/generated_api.py"]
+    category_payload = cast(dict[str, Any], aggregate_payload["by_category"])
+    assert category_payload["generated_artifact_suppression"]["task_count"] == 1
     task_payloads = cast(list[dict[str, Any]], payload_one["tasks"])
     first_task_payload = task_payloads[0]
     repo_payload = cast(dict[str, Any], first_task_payload["repo_map"])
@@ -155,8 +167,11 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     assert markdown_one == markdown_two
     assert "# Baseline comparison report" in markdown_one
     assert "## Estimated token savings (approximate)" in markdown_one
+    assert "## Generated artifact false positives" in markdown_one
+    assert "## Per-category results" in markdown_one
     assert "### Savings table" in markdown_one
     assert "estimated_tokens = chars / 4" in markdown_one
+    assert "some categories still have very few tasks" in markdown_one
     assert "## Limitations" in markdown_one
     assert "does not claim superiority" in markdown_one
     assert "No superiority claim is made when" in markdown_one

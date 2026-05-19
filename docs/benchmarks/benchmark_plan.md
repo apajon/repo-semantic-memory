@@ -1,12 +1,75 @@
-# Benchmark Plan (Initial)
+# Benchmark Plan
 
-Benchmark implementation is intentionally deferred.
+This benchmark remains a small internal dataset, but it is no longer only a smoke
+test. The goal is to expose regressions in retrieval quality across multiple task
+shapes without claiming broad scientific superiority.
 
-Planned benchmark outcomes:
+## Current dataset scope
 
-- Context relevance quality
-- Token efficiency vs. baseline context selection
-- Agent task success/latency tradeoffs
-- Determinism/reproducibility of generated context packs
+`benchmarks/tasks.yaml` now covers these categories:
 
-This phase only establishes the repository scaffold and validation pipeline.
+- `public_api_localization`
+- `implementation_localization`
+- `test_localization`
+- `doc_localization`
+- `generated_artifact_suppression`
+- `graph_neighbor_selection`
+- `compression_quality`
+- `source_root_disambiguation`
+
+The dataset currently includes realistic repository tasks for:
+
+- context pack selection plus graph-neighbor expansion
+- repo map generation
+- SQLite persistence
+- public package exports
+- lifecycle cleanup and activation semantics
+- benchmark documentation and benchmark runner internals
+- JSONL export/import and `.ai` export
+- generated-artifact suppression in public-API-oriented ranking
+- source-root detection plus source-root regression tests
+- compression profile selection and filtering
+
+## Gold targets
+
+Tasks may use these gold fields:
+
+- `files` for repository-relative file localization
+- `symbols` for indexed qualified names
+- `invariants` when explicitly useful later
+
+`doc_sections` and `relations` remain future extensions and are not scored in this
+phase.
+
+## Report expectations
+
+Retrieval and compare reports should stay deterministic and should show:
+
+- aggregate metrics across the whole dataset
+- per-category recall and MRR so regressions are easier to localize
+- per-category compare summaries so wins/losses are visible by task type
+- token-savings summaries when compare output is available
+- generated-artifact false positives when selected non-gold files fall into known
+  generated/build/cache paths
+
+## Interpretation limits
+
+Keep these limits explicit in every discussion of results:
+
+- The dataset is small and repository-specific.
+- Category counts are uneven, so per-category numbers are directional only.
+- Results measure retrieval alignment against internal gold targets, not end-to-end
+  coding-task success.
+- Generated-artifact suppression metrics only cover artifacts detectable by current
+  path-role rules.
+- No LLM judging is used in this phase.
+
+## Near-term benchmark candidates
+
+Next dataset candidates after this expansion:
+
+- explicit relation-level gold once relation retrieval is scored
+- doc-section gold for longer design/spec documents
+- invariant and claim lookup tasks backed by authored evidence
+- cross-repository or public benchmark datasets once internal coverage stabilizes
+- patch-context sufficiency tasks aligned with future coding-agent workflows

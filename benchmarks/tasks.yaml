@@ -1,15 +1,18 @@
 tasks:
-  - id: context_pack_selection_impl
-    category: code_localization
-    prompt: "Find where context pack selection is implemented."
+  - id: context_pack_graph_selection_impl
+    category: graph_neighbor_selection
+    prompt: "Find where context pack selection expands graph neighbors around ranked seeds."
     gold:
       files:
         - src/repo_semantic_memory/context/pack_builder.py
+        - src/repo_semantic_memory/context/graph_selection.py
       symbols:
         - repo_semantic_memory.context.pack_builder.build_context_pack
         - repo_semantic_memory.context.pack_builder._rank_entities
+        - repo_semantic_memory.context.pack_builder._is_graph_seed_eligible
+        - repo_semantic_memory.context.graph_selection.select_graph_neighbors
   - id: repo_map_generation_impl
-    category: code_localization
+    category: implementation_localization
     prompt: "Find where compact repo map generation is implemented."
     gold:
       files:
@@ -18,7 +21,7 @@ tasks:
         - repo_semantic_memory.context.repo_map.build_repo_map_markdown
         - repo_semantic_memory.context.repo_map._build_module_sections
   - id: sqlite_persistence_impl
-    category: code_localization
+    category: implementation_localization
     prompt: "Find where entities and relations are persisted in SQLite."
     gold:
       files:
@@ -27,3 +30,98 @@ tasks:
         - repo_semantic_memory.store.sqlite_store.SQLiteStore.persist_index
         - repo_semantic_memory.store.sqlite_store.SQLiteStore._upsert_entities
         - repo_semantic_memory.store.sqlite_store.SQLiteStore._upsert_relations
+  - id: package_public_api_exports
+    category: public_api_localization
+    prompt: "Find the package public exports and `__init__.py` modules in the ranking fixture packages."
+    gold:
+      files:
+        - tests/fixtures/ranking_repo/src/lifecore_ros2/__init__.py
+        - tests/fixtures/ranking_repo/lifecore_state/__init__.py
+        - tests/fixtures/ranking_repo/src/lifecore_ros2/components/lifecycle_component.py
+      symbols:
+        - tests.fixtures.ranking_repo.src.lifecore_ros2
+        - tests.fixtures.ranking_repo.lifecore_state
+        - tests.fixtures.ranking_repo.src.lifecore_ros2.components.lifecycle_component.LifecycleComponent
+  - id: cleanup_and_activation_semantics
+    category: implementation_localization
+    prompt: "Find lifecycle cleanup and activation behavior used for semantic component inference."
+    gold:
+      files:
+        - src/repo_semantic_memory/memory/ecs_components.py
+      symbols:
+        - repo_semantic_memory.memory.ecs_components.infer_semantic_components
+        - repo_semantic_memory.memory.ecs_components._infer_lifecycle_components
+        - repo_semantic_memory.memory.ecs_components._infer_integration_components
+  - id: benchmark_documentation
+    category: doc_localization
+    prompt: "Where are the benchmark methodology, limitations, and expansion goals documented?"
+    gold:
+      files:
+        - docs/benchmarks/benchmark_plan.md
+        - docs/reviews/mvp_review.md
+  - id: jsonl_and_ai_export_impl
+    category: implementation_localization
+    prompt: "Find the JSONL import/export and `.ai` export implementations."
+    gold:
+      files:
+        - src/repo_semantic_memory/exporters/jsonl.py
+        - src/repo_semantic_memory/importers/jsonl.py
+        - src/repo_semantic_memory/exporters/ai_directory.py
+      symbols:
+        - repo_semantic_memory.exporters.jsonl.export_jsonl_directory
+        - repo_semantic_memory.importers.jsonl.import_jsonl_directory
+        - repo_semantic_memory.exporters.ai_directory.AiDirectoryExporter.export
+  - id: public_api_generated_artifact_suppression
+    category: generated_artifact_suppression
+    prompt: "Find package public exports in the ranking fixture packages; generated docs should not be selected."
+    gold:
+      files:
+        - tests/fixtures/ranking_repo/src/lifecore_ros2/__init__.py
+        - tests/fixtures/ranking_repo/lifecore_state/__init__.py
+        - tests/fixtures/ranking_repo/src/lifecore_ros2/components/lifecycle_component.py
+      symbols:
+        - tests.fixtures.ranking_repo.src.lifecore_ros2
+        - tests.fixtures.ranking_repo.lifecore_state
+        - tests.fixtures.ranking_repo.src.lifecore_ros2.components.lifecycle_component.LifecycleComponent
+  - id: source_root_detection_impl
+    category: source_root_disambiguation
+    prompt: "Find where non-src package roots are detected and classified as source code."
+    gold:
+      files:
+        - src/repo_semantic_memory/context/path_roles.py
+      symbols:
+        - repo_semantic_memory.context.path_roles.infer_source_roots
+        - repo_semantic_memory.context.path_roles.classify_path_role
+  - id: source_root_detection_tests
+    category: test_localization
+    prompt: "Find regression tests for source-root detection and generated-artifact classification."
+    gold:
+      files:
+        - tests/context/test_path_roles.py
+      symbols:
+        - tests.context.test_path_roles.TestInferSourceRoots.test_pyproject_toml_marker
+        - tests.context.test_path_roles.test_generated_artifact_paths_classified_as_generated
+  - id: compression_profiles
+    category: compression_quality
+    prompt: "Find the compression profiles that trade off context size, noise suppression, and detail."
+    gold:
+      files:
+        - src/repo_semantic_memory/context/compression.py
+        - docs/design/context_noise_taxonomy.md
+      symbols:
+        - repo_semantic_memory.context.compression.CompressionProfile
+        - repo_semantic_memory.context.compression.resolve_profile
+        - repo_semantic_memory.context.compression.filter_related_relations
+  - id: benchmark_runner_and_metrics
+    category: implementation_localization
+    prompt: "Find where retrieval benchmark datasets are loaded, scored, and reported."
+    gold:
+      files:
+        - src/repo_semantic_memory/eval/datasets.py
+        - src/repo_semantic_memory/eval/metrics.py
+        - src/repo_semantic_memory/eval/reports.py
+        - src/repo_semantic_memory/eval/runner.py
+      symbols:
+        - repo_semantic_memory.eval.datasets.load_retrieval_dataset
+        - repo_semantic_memory.eval.metrics.compute_benchmark_metrics
+        - repo_semantic_memory.eval.runner.run_retrieval_benchmark
