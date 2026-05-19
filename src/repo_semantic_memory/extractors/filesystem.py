@@ -16,6 +16,8 @@ IGNORED_DIRECTORIES: frozenset[str] = frozenset(
         ".git",
         ".venv",
         "__pycache__",
+        "_build",
+        "htmlcov",
         ".pytest_cache",
         ".mypy_cache",
         ".ruff_cache",
@@ -40,6 +42,7 @@ IGNORED_FILES: frozenset[str] = frozenset(
     }
 )
 BINARY_SAMPLE_BYTES = 8192
+_IGNORED_PATH_PREFIXES: tuple[str, ...] = ("docs/_build/",)
 
 
 def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
@@ -50,7 +53,13 @@ def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
 
     discovered: list[tuple[str, Path, EntityKind]] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
-        dirnames[:] = sorted(name for name in dirnames if name not in IGNORED_DIRECTORIES)
+        current_dir = Path(dirpath)
+        dirnames[:] = sorted(
+            name
+            for name in dirnames
+            if not _should_ignore_directory_name(name)
+            and not _should_ignore_directory_path(current_dir / name, root)
+        )
         for filename in sorted(filenames):
             if filename.lower() in IGNORED_FILES:
                 continue
@@ -112,3 +121,14 @@ def _is_binary_looking(path: Path) -> bool:
     except UnicodeDecodeError:
         return True
     return False
+
+
+def _should_ignore_directory_name(name: str) -> bool:
+    if name in IGNORED_DIRECTORIES:
+        return True
+    return name.endswith(".egg-info")
+
+
+def _should_ignore_directory_path(path: Path, root: Path) -> bool:
+    relative = path.relative_to(root).as_posix()
+    return any(relative.startswith(prefix) for prefix in _IGNORED_PATH_PREFIXES)

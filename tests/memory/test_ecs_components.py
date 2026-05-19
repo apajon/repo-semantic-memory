@@ -197,3 +197,71 @@ def test_public_api_components_remain_inferred() -> None:
 
     assert public_api
     assert public_api[0].status == "inferred"
+
+
+def test_method_level_integration_is_not_inferred_from_class_or_path_tokens_only() -> None:
+    noisy_method = _entity(
+        identifier="python:method:pkg.node.ros_handler.helper",
+        kind="method",
+        name="helper",
+        qualified_name="pkg.ros_node.ServiceClient.helper",
+        path="pkg/ros_node.py",
+    )
+
+    components = infer_semantic_components(entities=[noisy_method], relations=[])
+
+    assert components == []
+
+
+def test_method_level_integration_keeps_semantically_meaningful_method_names() -> None:
+    meaningful_method = _entity(
+        identifier="python:method:pkg.node.client.call_async",
+        kind="method",
+        name="call_async",
+        qualified_name="pkg.client.Component.call_async",
+        path="pkg/component.py",
+    )
+    lifecycle_method = _entity(
+        identifier="python:method:pkg.node.lifecycle._release_resources",
+        kind="method",
+        name="_release_resources",
+        qualified_name="pkg.lifecycle.Component._release_resources",
+        path="pkg/lifecycle.py",
+    )
+
+    components = infer_semantic_components(
+        entities=[meaningful_method, lifecycle_method],
+        relations=[],
+    )
+    component_pairs = {
+        (component.entity_id.value, component.component_type) for component in components
+    }
+
+    assert (meaningful_method.id.value, "ROSLikeIntegration") in component_pairs
+    assert (lifecycle_method.id.value, "ExternalIntegration") in component_pairs
+
+
+def test_lifecycle_hook_method_names_remain_eligible_for_method_level_labels() -> None:
+    hook_names = (
+        "_on_configure",
+        "_on_activate",
+        "_on_deactivate",
+        "_on_cleanup",
+        "_on_error",
+        "_on_shutdown",
+    )
+    methods = [
+        _entity(
+            identifier=f"python:method:pkg.lifecycle.node.{hook_name}",
+            kind="method",
+            name=hook_name,
+            qualified_name=f"pkg.lifecycle.Node.{hook_name}",
+            path="pkg/lifecycle_node.py",
+        )
+        for hook_name in hook_names
+    ]
+
+    components = infer_semantic_components(entities=methods, relations=[])
+    labeled_method_ids = {component.entity_id.value for component in components}
+
+    assert labeled_method_ids == {method.id.value for method in methods}

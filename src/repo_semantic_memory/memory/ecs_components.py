@@ -19,6 +19,24 @@ from repo_semantic_memory.model import (
 _HEURISTIC_EXTRACTOR = "ecs_heuristic"
 _INFERRED_CONFIDENCE = 0.6
 _ROS_LIKE_TOKENS = ("publisher", "subscriber", "service", "client", "timer")
+_ROS_LIKE_METHOD_NAMES = frozenset(
+    {"publish", "on_message", "on_tick", "call", "call_async", "wait_for_service"}
+)
+_LIFECYCLE_METHOD_NAMES = frozenset({"start", "stop", "reset"})
+_INTERNAL_CLEANUP_METHOD_NAMES = frozenset(
+    {
+        "_release_resources",
+        "_on_configure",
+        "_on_activate",
+        "_on_deactivate",
+        "_on_cleanup",
+        "_on_error",
+        "_on_shutdown",
+    }
+)
+_MEANINGFUL_METHOD_NAMES = frozenset(
+    _ROS_LIKE_METHOD_NAMES | _LIFECYCLE_METHOD_NAMES | _INTERNAL_CLEANUP_METHOD_NAMES
+)
 
 CompactComponentStatus = Literal["confirmed", "inferred", "needs_review"]
 
@@ -150,24 +168,35 @@ def _infer_integration_components(
     for entity in entities:
         if entity.kind not in {"class", "function", "method"}:
             continue
-        haystack = " ".join(
-            [
-                entity.name.lower(),
-                entity.qualified_name.lower(),
-                _normalized_path(entity.source_range.path).lower(),
-            ]
-        )
-        matched_token = next((token for token in _ROS_LIKE_TOKENS if token in haystack), None)
-        if matched_token is None:
-            continue
-        is_ros_like = "ros" in haystack
+        name_lower = entity.name.lower()
+        qualified_name_lower = entity.qualified_name.lower()
+        path_lower = _normalized_path(entity.source_range.path).lower()
+
+        if entity.kind == "method":
+            if name_lower not in _MEANINGFUL_METHOD_NAMES:
+                continue
+            heuristic = f"method_name_is_{name_lower}"
+            is_ros_like = (
+                name_lower in _ROS_LIKE_METHOD_NAMES
+                or "ros" in name_lower
+                or "ros" in qualified_name_lower
+                or "ros" in path_lower
+            )
+        else:
+            haystack = " ".join([name_lower, qualified_name_lower, path_lower])
+            matched_token = next((token for token in _ROS_LIKE_TOKENS if token in haystack), None)
+            if matched_token is None:
+                continue
+            heuristic = f"name_contains_{matched_token}"
+            is_ros_like = "ros" in haystack
+
         _upsert(
             components,
             _build_inferred_component(
                 entity=entity,
                 component_type="ROSLikeIntegration" if is_ros_like else "ExternalIntegration",
                 properties={
-                    "heuristic": f"name_contains_{matched_token}",
+                    "heuristic": heuristic,
                     "inference_basis": "lexical_heuristic",
                 },
                 inference_note="Derived from static name/path lexical heuristics only.",

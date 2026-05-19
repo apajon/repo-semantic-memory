@@ -130,6 +130,28 @@ def test_index_python_path_directory_ignores_ignored_directories(tmp_path: Path)
     assert all(not path.startswith(".venv/") for path in paths)
 
 
+def test_index_python_path_directory_ignores_docs_build_and_egg_info(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "keep.py").write_text("def keep() -> None:\n    pass\n", encoding="utf-8")
+    (repo_root / "docs" / "_build").mkdir(parents=True)
+    (repo_root / "docs" / "_build" / "generated.py").write_text(
+        "def generated() -> None:\n    pass\n", encoding="utf-8"
+    )
+    (repo_root / "src" / "lifecore_ros2.egg-info").mkdir(parents=True)
+    (repo_root / "src" / "lifecore_ros2.egg-info" / "generated.py").write_text(
+        "def generated() -> None:\n    pass\n", encoding="utf-8"
+    )
+
+    entities, _ = index_python_path(repo_root)
+    paths = {entity.source_range.path for entity in entities}
+
+    assert "src/keep.py" in paths
+    assert all(not path.startswith("docs/_build/") for path in paths)
+    assert all(".egg-info/" not in path for path in paths)
+
+
 def test_extract_python_file_module_qualified_name_variants(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     src_pkg_init = repo_root / "src" / "pkg" / "__init__.py"
