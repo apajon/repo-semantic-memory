@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from statistics import mean
 
 from repo_semantic_memory.eval.baselines import TaskBaselineComparison
 from repo_semantic_memory.eval.metrics import (
     APPROX_CHARS_PER_TOKEN,
     token_savings_improvement_claim_allowed,
+)
+from repo_semantic_memory.eval.report_data import (
+    build_compare_category_payload,
+    build_generated_artifact_false_positive_payload,
+    build_retrieval_category_payload,
+    build_savings_aggregate_payload,
 )
 from repo_semantic_memory.eval.runner import BaselineComparisonResult, RetrievalBenchmarkResult
 
@@ -49,7 +54,11 @@ def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, objec
             ),
             "wins": dict(sorted(result.aggregate.wins.items())),
             "major_misses": list(result.aggregate.major_misses),
-            "savings": _build_savings_aggregate_payload(result.outcomes),
+            "savings": build_savings_aggregate_payload(result.outcomes),
+            "generated_artifact_false_positives": build_generated_artifact_false_positive_payload(
+                result.outcomes
+            ),
+            "by_category": build_compare_category_payload(result.outcomes),
         },
         "tasks": [_compare_task_payload(task) for task in result.outcomes],
     }
@@ -133,7 +142,7 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
         )
 
     aggregate = result.aggregate
-    savings_aggregate = _build_savings_aggregate_payload(result.outcomes)
+    savings_aggregate = build_savings_aggregate_payload(result.outcomes)
     rows.append(
         (
             "AVG",
@@ -152,6 +161,8 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
 def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
     """Render markdown retrieval benchmark report."""
     aggregate = result.metrics.aggregate
+    primary_k = result.k_values[-1]
+    category_payload = build_retrieval_category_payload(result.outcomes, k_values=result.k_values)
     lines = [
         "# Retrieval benchmark report",
         "",
@@ -170,12 +181,37 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
         "Notes:",
         "- `context_character_estimate` is a character-based approximation, not tokenizer-based.",
         "- Gold invariants are dataset metadata only in this MVP and are not scored yet.",
+        "- This is a small internal dataset; per-category metrics are directional, not scientific.",
         "",
-        "## Task details",
+        "## Per-category metrics",
         "",
-        "| task_id | category | missing_gold_files | missing_gold_symbols |",
-        "|---|---|---|---|",
+        (
+            f"| category | tasks | R@{primary_k} files | R@{primary_k} symbols | "
+            "| MRR files | MRR symbols | file cov | symbol cov |"
+        ),
+        "|---|---|---|---|---|---|---|---|",
     ]
+    for category, payload in category_payload.items():
+        recall_at_k_files = payload["recall_at_k_files"]
+        recall_at_k_symbols = payload["recall_at_k_symbols"]
+        assert isinstance(recall_at_k_files, dict)
+        assert isinstance(recall_at_k_symbols, dict)
+        lines.append(
+            f"| {category} | {payload['task_count']} | "
+            f"{recall_at_k_files[str(primary_k)]:.6f} | "
+            f"{recall_at_k_symbols[str(primary_k)]:.6f} | "
+            f"{payload['mrr_files']:.6f} | {payload['mrr_symbols']:.6f} | "
+            f"{payload['gold_file_coverage']:.6f} | {payload['gold_symbol_coverage']:.6f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Task details",
+            "",
+            "| task_id | category | missing_gold_files | missing_gold_symbols |",
+            "|---|---|---|---|",
+        ]
+    )
     for outcome in result.outcomes:
         files_text = ", ".join(outcome.missing_gold_files) or "-"
         symbols_text = ", ".join(outcome.missing_gold_symbols) or "-"
@@ -186,7 +222,9 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
 def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
     """Render markdown report for repo-map vs lexical-context-pack comparison."""
     aggregate = result.aggregate
-    savings = _build_savings_aggregate_payload(result.outcomes)
+    savings = build_savings_aggregate_payload(result.outcomes)
+    generated_false_positives = build_generated_artifact_false_positive_payload(result.outcomes)
+    category_payload = build_compare_category_payload(result.outcomes)
     lines = [
         "# Baseline comparison report",
         "",
@@ -250,17 +288,64 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
             f"`{len(result.outcomes)}`"
         ),
         "",
-        "### Savings table",
+        "## Generated artifact false positives",
         "",
         (
-            "| task_id | raw_baseline_chars | selected_context_chars | "
-            "estimated_raw_tokens | estimated_selected_tokens | "
-            "estimated_tokens_saved | compression_ratio | "
-            "gold_file_coverage_preserved | gold_symbol_coverage_preserved | "
-            "coverage_per_1k_tokens | improvement_claim_allowed |"
+            f"- repo_map: selections=`{generated_false_positives['repo_map']['selection_count']}`, "
+            f"tasks=`{generated_false_positives['repo_map']['task_count']}`"
         ),
-        "|---|---|---|---|---|---|---|---|---|---|---|",
+        (
+            f"- lexical_context_pack: selections="
+            f"`{generated_false_positives['lexical_context_pack']['selection_count']}`, "
+            f"tasks=`{generated_false_positives['lexical_context_pack']['task_count']}`"
+        ),
+        (
+            f"- repo_map_files: "
+            f"`{_format_object_string_list(generated_false_positives['repo_map']['files'])}`"
+        ),
+        (
+            f"- lexical_context_pack_files: "
+            f"`{_format_object_string_list(generated_false_positives['lexical_context_pack']['files'])}`"
+        ),
+        "",
+        "## Per-category results",
+        "",
+        (
+            "| category | tasks | repo_map wins | pack wins | tie | inconclusive | "
+            "avg saved tok~ | repo_map generated fp | pack generated fp |"
+        ),
+        "|---|---|---|---|---|---|---|---|---|",
     ]
+    for category, payload in category_payload.items():
+        wins = payload["wins"]
+        savings_payload = payload["savings"]
+        false_positives_payload = payload["generated_artifact_false_positives"]
+        assert isinstance(wins, dict)
+        assert isinstance(savings_payload, dict)
+        assert isinstance(false_positives_payload, dict)
+        lines.append(
+            f"| {category} | {payload['task_count']} | "
+            f"{wins['repo_map']} | {wins['lexical_context_pack']} | "
+            f"{wins['tie']} | {wins['inconclusive']} | "
+            f"{savings_payload['average_estimated_tokens_saved']:.6f} | "
+            f"{false_positives_payload['repo_map']['selection_count']} | "
+            f"{false_positives_payload['lexical_context_pack']['selection_count']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "### Savings table",
+            "",
+            (
+                "| task_id | raw_baseline_chars | selected_context_chars | "
+                "estimated_raw_tokens | estimated_selected_tokens | "
+                "estimated_tokens_saved | compression_ratio | "
+                "gold_file_coverage_preserved | gold_symbol_coverage_preserved | "
+                "coverage_per_1k_tokens | improvement_claim_allowed |"
+            ),
+            "|---|---|---|---|---|---|---|---|---|---|---|",
+        ]
+    )
     for task in result.outcomes:
         metrics = task.token_savings_metrics
         lines.append(
@@ -367,6 +452,7 @@ def _aggregate_payload(result: RetrievalBenchmarkResult) -> dict[str, object]:
         "context_character_estimate": aggregate.context_character_estimate,
         "gold_file_coverage": aggregate.gold_file_coverage,
         "gold_symbol_coverage": aggregate.gold_symbol_coverage,
+        "by_category": build_retrieval_category_payload(result.outcomes, k_values=result.k_values),
     }
 
 
@@ -458,46 +544,6 @@ def _token_savings_payload(comparison: TaskBaselineComparison) -> dict[str, obje
     return payload
 
 
-def _build_savings_aggregate_payload(
-    outcomes: Sequence[TaskBaselineComparison],
-) -> dict[str, int | float]:
-    if not outcomes:
-        return {
-            "average_raw_baseline_chars": 0.0,
-            "average_selected_context_chars": 0.0,
-            "average_estimated_raw_tokens": 0.0,
-            "average_estimated_selected_tokens": 0.0,
-            "average_estimated_tokens_saved": 0.0,
-            "average_compression_ratio": 0.0,
-            "average_coverage_per_1k_tokens": 0.0,
-            "gold_file_coverage_preserved_tasks": 0,
-            "gold_symbol_coverage_preserved_tasks": 0,
-            "improvement_claim_allowed_tasks": 0,
-        }
-
-    metrics = [outcome.token_savings_metrics for outcome in outcomes]
-    return {
-        "average_raw_baseline_chars": mean(metric.raw_baseline_chars for metric in metrics),
-        "average_selected_context_chars": mean(metric.selected_context_chars for metric in metrics),
-        "average_estimated_raw_tokens": mean(metric.estimated_raw_tokens for metric in metrics),
-        "average_estimated_selected_tokens": mean(
-            metric.estimated_selected_tokens for metric in metrics
-        ),
-        "average_estimated_tokens_saved": mean(metric.estimated_tokens_saved for metric in metrics),
-        "average_compression_ratio": mean(metric.compression_ratio for metric in metrics),
-        "average_coverage_per_1k_tokens": mean(metric.coverage_per_1k_tokens for metric in metrics),
-        "gold_file_coverage_preserved_tasks": sum(
-            1 for metric in metrics if metric.gold_file_coverage_preserved
-        ),
-        "gold_symbol_coverage_preserved_tasks": sum(
-            1 for metric in metrics if metric.gold_symbol_coverage_preserved
-        ),
-        "improvement_claim_allowed_tasks": sum(
-            1 for metric in metrics if token_savings_improvement_claim_allowed(metric)
-        ),
-    }
-
-
 def _render_rows(rows: Sequence[tuple[str, ...]]) -> str:
     columns = zip(*rows, strict=True)
     widths = [max(len(value) for value in column) for column in columns]
@@ -513,3 +559,9 @@ def _format_missing(missing_files: tuple[str, ...], missing_symbols: tuple[str, 
     if missing_symbols:
         parts.append(f"symbols={','.join(missing_symbols)}")
     return ";".join(parts) if parts else "-"
+
+
+def _format_object_string_list(value: object) -> str:
+    if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
+        return "-"
+    return ", ".join(value) or "-"
