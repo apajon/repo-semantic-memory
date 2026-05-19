@@ -34,6 +34,11 @@ _COMMON_SOURCE_ROOT_NAMES = (
     "modules",
 )
 _MARKER_FILENAMES = {"pyproject.toml", "package.xml", "setup.py", "setup.cfg"}
+_TESTS_PREFIXES = ("tests/", "test/")
+_EXAMPLES_PREFIXES = ("examples/", "example/")
+_DOCS_PREFIXES = ("docs/", "doc/")
+_CI_CONFIG_PREFIXES = (".github/", ".gitlab/", ".circleci/", ".buildkite/", "ci/", "config/")
+_TOOLS_SCRIPTS_PREFIXES = ("tools/", "scripts/")
 _NON_SOURCE_DIR_NAMES = {
     "tests",
     "test",
@@ -52,17 +57,15 @@ _NON_SOURCE_DIR_NAMES = {
 def classify_path_role(*, path: str, source_roots: Sequence[str]) -> PathRole:
     """Classify a repository-relative path into a deterministic role bucket."""
     normalized = _normalize(path)
-    if normalized.startswith(("tests/", "test/")):
+    if normalized.startswith(_TESTS_PREFIXES):
         return TESTS_ROLE
-    if normalized.startswith(("examples/", "example/")):
+    if normalized.startswith(_EXAMPLES_PREFIXES):
         return EXAMPLES_ROLE
-    if normalized.startswith(("docs/", "doc/")):
+    if normalized.startswith(_DOCS_PREFIXES):
         return DOCS_ROLE
-    if normalized.startswith(
-        (".github/", ".gitlab/", ".circleci/", ".buildkite/", "ci/", "config/")
-    ):
+    if normalized.startswith(_CI_CONFIG_PREFIXES):
         return CI_CONFIG_ROLE
-    if normalized.startswith(("tools/", "scripts/")):
+    if normalized.startswith(_TOOLS_SCRIPTS_PREFIXES):
         return TOOLS_SCRIPTS_ROLE
     if _is_source_path(normalized, source_roots):
         return SOURCE_ROLE
