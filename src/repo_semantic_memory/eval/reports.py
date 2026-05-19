@@ -7,7 +7,10 @@ from pathlib import Path
 from statistics import mean
 
 from repo_semantic_memory.eval.baselines import TaskBaselineComparison
-from repo_semantic_memory.eval.metrics import token_savings_improvement_claim_allowed
+from repo_semantic_memory.eval.metrics import (
+    APPROX_CHARS_PER_TOKEN,
+    token_savings_improvement_claim_allowed,
+)
 from repo_semantic_memory.eval.runner import BaselineComparisonResult, RetrievalBenchmarkResult
 
 
@@ -46,7 +49,7 @@ def to_compare_json_payload(result: BaselineComparisonResult) -> dict[str, objec
             ),
             "wins": dict(sorted(result.aggregate.wins.items())),
             "major_misses": list(result.aggregate.major_misses),
-            "savings": _compare_savings_aggregate_payload(result.outcomes),
+            "savings": _build_savings_aggregate_payload(result.outcomes),
         },
         "tasks": [_compare_task_payload(task) for task in result.outcomes],
     }
@@ -130,7 +133,7 @@ def render_compare_compact_table(result: BaselineComparisonResult) -> str:
         )
 
     aggregate = result.aggregate
-    savings_aggregate = _compare_savings_aggregate_payload(result.outcomes)
+    savings_aggregate = _build_savings_aggregate_payload(result.outcomes)
     rows.append(
         (
             "AVG",
@@ -183,7 +186,7 @@ def render_markdown_report(result: RetrievalBenchmarkResult) -> str:
 def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
     """Render markdown report for repo-map vs lexical-context-pack comparison."""
     aggregate = result.aggregate
-    savings = _compare_savings_aggregate_payload(result.outcomes)
+    savings = _build_savings_aggregate_payload(result.outcomes)
     lines = [
         "# Baseline comparison report",
         "",
@@ -228,12 +231,12 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
         "",
         "## Estimated token savings (approximate)",
         "",
-        "- Token estimates are approximate and deterministic: `estimated_tokens = chars / 4`.",
-        "- Savings are not tokenizer-accurate and must be interpreted directionally.",
         (
-            f"- average_estimated_tokens_saved: "
-            f"`{savings['average_estimated_tokens_saved']:.6f}`"
+            "- Token estimates are approximate and deterministic: "
+            f"`estimated_tokens = chars / {APPROX_CHARS_PER_TOKEN:g}`."
         ),
+        "- Savings are not tokenizer-accurate and must be interpreted directionally.",
+        (f"- average_estimated_tokens_saved: `{savings['average_estimated_tokens_saved']:.6f}`"),
         (f"- average_compression_ratio: `{savings['average_compression_ratio']:.6f}`"),
         (
             f"- coverage_preserved_tasks: file="
@@ -308,7 +311,10 @@ def render_compare_markdown_report(result: BaselineComparisonResult) -> str:
                 "identifiers (item-level, not token-level) and does not "
                 "measure semantic correctness."
             ),
-            ("- Token estimates are approximate (`chars / 4`) and are not tokenizer-accurate."),
+            (
+                "- Token estimates are approximate "
+                f"(`chars / {APPROX_CHARS_PER_TOKEN:g}`) and are not tokenizer-accurate."
+            ),
             (
                 "- No superiority claim is made when "
                 "`gold_file_coverage_preserved` or "
@@ -452,7 +458,7 @@ def _token_savings_payload(comparison: TaskBaselineComparison) -> dict[str, obje
     return payload
 
 
-def _compare_savings_aggregate_payload(
+def _build_savings_aggregate_payload(
     outcomes: Sequence[TaskBaselineComparison],
 ) -> dict[str, int | float]:
     if not outcomes:

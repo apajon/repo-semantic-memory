@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from statistics import mean
 
+APPROX_CHARS_PER_TOKEN = 4.0
+
 
 @dataclass(frozen=True)
 class RetrievalOutcome:
@@ -65,7 +67,7 @@ class TokenSavingsMetrics:
     """Deterministic token-savings metrics for baseline comparison tasks.
 
     Token estimates are approximate and intentionally tokenizer-agnostic in MVP:
-    estimated_tokens = chars / 4
+    estimated_tokens = chars / APPROX_CHARS_PER_TOKEN
     """
 
     raw_baseline_chars: int
@@ -131,7 +133,7 @@ def estimate_tokens_from_chars(chars: int) -> float:
     """Return deterministic approximate token count from character count."""
     if chars < 0:
         raise ValueError("chars must be >= 0")
-    return chars / 4.0
+    return chars / APPROX_CHARS_PER_TOKEN
 
 
 def compute_token_savings_metrics(
@@ -215,6 +217,7 @@ def _coverage(gold: tuple[str, ...], missing: tuple[str, ...]) -> float:
 
 def _safe_compression_ratio(*, selected_chars: int, raw_chars: int) -> float:
     if raw_chars <= 0:
+        # Deterministic sentinel for undefined division-by-zero case; kept finite and JSON-safe.
         return 1.0 if selected_chars <= 0 else 0.0
     return selected_chars / raw_chars
 

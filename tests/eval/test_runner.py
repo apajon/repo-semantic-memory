@@ -273,7 +273,7 @@ def test_run_baseline_comparison_passes_budget_to_both_baselines(
     assert observed_budgets == [777]
 
 
-def test_run_baseline_comparison_savings_are_deterministic_for_4000_and_8000_budgets(
+def test_baseline_comparison_savings_deterministic_across_budgets(
     tmp_path: Path,
 ) -> None:
     fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
