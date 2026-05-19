@@ -154,13 +154,7 @@ def build_context_pack(
                 penalty=0,
                 matched_terms=(),
                 matched_fields=(),
-                reasons=(
-                    dedupe_stable_reasons(
-                        (
-                            ("graph", "fallback deterministic seed", 0.0),
-                        )
-                    )
-                ),
+                reasons=(dedupe_stable_reasons((("graph", "fallback deterministic seed", 0.0),))),
             )
 
     relations_by_entity_id = _relations_by_entity_id(normalized_relations)
@@ -374,7 +368,13 @@ def _score_entity(
     penalty_score = 0
     if is_generated_artifact_path(source_path):
         penalty_score += _GENERATED_ARTIFACT_PENALTY
-        reasons.append(("penalty", "generated/build artifact downrank", _GENERATED_ARTIFACT_PENALTY))
+        reasons.append(
+            (
+                "penalty",
+                "generated/build artifact downrank",
+                _GENERATED_ARTIFACT_PENALTY,
+            )
+        )
 
     path_role_score = 0
     task_intent_score = 0
@@ -446,7 +446,9 @@ def _score_entity(
     if not normalized_reasons and (
         lexical_score + path_role_score + task_intent_score + component_score + penalty_score > 0
     ):
-        normalized_reasons = dedupe_stable_reasons((("lexical", "lexical baseline relevance", 0.0),))
+        normalized_reasons = dedupe_stable_reasons(
+            (("lexical", "lexical baseline relevance", 0.0),)
+        )
     return build_breakdown(
         lexical=float(lexical_score),
         path_role=float(path_role_score),

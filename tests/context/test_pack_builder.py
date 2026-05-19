@@ -6,7 +6,12 @@ import json
 from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
-from repo_semantic_memory.context.pack_builder import _is_code_task, _score_entity, _task_hints, _tokenize
+from repo_semantic_memory.context.pack_builder import (
+    _is_code_task,
+    _score_entity,
+    _task_hints,
+    _tokenize,
+)
 from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
@@ -401,9 +406,12 @@ def test_selected_entity_ranking_breakdown_includes_matched_fields() -> None:
 
 
 def test_generated_artifact_penalty_appears_in_breakdown() -> None:
-    entities, _ = _ranking_fixture_entities_and_relations()
-    generated_entity = next(
-        entity for entity in entities if entity.source_range.path == "docs/_build/generated_api.py"
+    generated_entity = Entity(
+        id=StableId("python:module:docs._build.generated"),
+        kind="module",
+        name="generated.py",
+        qualified_name="docs._build.generated",
+        source_range=SourceRange(path="docs/_build/generated.py", start_line=1, end_line=1),
     )
     task_tokens = _tokenize("generated api docs")
     breakdown = _score_entity(
@@ -416,7 +424,9 @@ def test_generated_artifact_penalty_appears_in_breakdown() -> None:
     )
 
     assert breakdown.penalty < 0
-    assert any(reason.message == "generated/build artifact downrank" for reason in breakdown.reasons)
+    assert any(
+        reason.message == "generated/build artifact downrank" for reason in breakdown.reasons
+    )
 
 
 def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
@@ -444,7 +454,7 @@ def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
     )
 
     assert any(
-        "public API task hint -> boosted \"__init__.py\"" in reason.message
+        'public API task hint -> boosted "__init__.py"' in reason.message
         for breakdown in public_api_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )
@@ -464,7 +474,7 @@ def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
         for reason in breakdown.reasons
     )
     assert any(
-        "test task hint -> boosted \"tests/\"" in reason.message
+        'test task hint -> boosted "tests/"' in reason.message
         for breakdown in test_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )

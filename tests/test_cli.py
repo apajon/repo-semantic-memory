@@ -462,7 +462,9 @@ def test_pack_command_yaml_output(tmp_path: Path, capsys: pytest.CaptureFixture[
     assert "python_symbols.DerivedThing" in selected_qnames
 
 
-def test_pack_command_yaml_output_with_explain_ranking(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_pack_command_yaml_output_with_explain_ranking(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
     db_path = tmp_path / ".rsm" / "index.sqlite"
     assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
