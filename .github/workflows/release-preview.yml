@@ -43,11 +43,16 @@ jobs:
             echo 'Could not find semantic-release branch configuration with branch = "main" in pyproject.toml'
             exit 1
           fi
-          sed "0,/^branch = \"main\"$/s//branch = \"${release_preview_branch}\"/" pyproject.toml >/tmp/semantic-release-preview.toml
+          sed "1,/^branch = \"main\"$/s//branch = \"${release_preview_branch}\"/" pyproject.toml >/tmp/semantic-release-preview.toml
           cp CHANGELOG.md /tmp/changelog_before.md
 
           set +e
-          uv run semantic-release -c /tmp/semantic-release-preview.toml version --skip-build --no-commit --no-tag --no-push --no-vcs-release >/tmp/semantic_release_preview.log 2>&1
+          uv run semantic-release -c /tmp/semantic-release-preview.toml version \
+            --skip-build \
+            --no-commit \
+            --no-tag \
+            --no-push \
+            --no-vcs-release >/tmp/semantic_release_preview.log 2>&1
           status=$?
           set -e
 
@@ -64,6 +69,11 @@ jobs:
 
           if cmp -s CHANGELOG.md /tmp/changelog_before.md; then
             printf '%s\n' "_No semantic-release changelog update would be produced for this PR._" >/tmp/release_preview.md
+            exit 0
+          fi
+
+          if [ ! -s CHANGELOG.md ]; then
+            printf '%s\n' "_Unable to parse generated changelog preview._" >/tmp/release_preview.md
             exit 0
           fi
 
