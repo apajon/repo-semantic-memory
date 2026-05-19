@@ -33,13 +33,17 @@ jobs:
         run: |
           set -euo pipefail
           preview_branch="${{ github.base_ref }}"
+          release_preview_branch="preview-${preview_branch}"
+          # Keep failure output concise while preserving enough context to diagnose preview issues.
           tail_lines=120
 
-          git checkout -B "${preview_branch}" HEAD
+          git checkout -B "${release_preview_branch}" HEAD
+
+          RELEASE_PREVIEW_BRANCH="${release_preview_branch}" uv run python -c "from pathlib import Path; import os; source = Path('pyproject.toml').read_text(encoding='utf-8'); original = 'branch = \"main\"'; replacement = f'branch = \"{os.environ[\"RELEASE_PREVIEW_BRANCH\"]}\"'; (original in source) or (_ for _ in ()).throw(SystemExit('Expected semantic-release main branch config not found')); Path('/tmp/semantic-release-preview.toml').write_text(source.replace(original, replacement, 1), encoding='utf-8')"
           cp CHANGELOG.md /tmp/changelog_before.md
 
           set +e
-          uv run semantic-release version --skip-build --no-commit --no-tag --no-push --no-vcs-release >/tmp/semantic_release_preview.log 2>&1
+          uv run semantic-release -c /tmp/semantic-release-preview.toml version --skip-build --no-commit --no-tag --no-push --no-vcs-release >/tmp/semantic_release_preview.log 2>&1
           status=$?
           set -e
 
@@ -59,6 +63,7 @@ jobs:
             exit 0
           fi
 
+          # Extract the newest generated changelog section: from first heading to next heading.
           awk '
             BEGIN { capture = 0 }
             /^## / {
