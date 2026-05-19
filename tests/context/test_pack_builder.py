@@ -312,7 +312,7 @@ def test_implementation_cleanup_task_includes_src_components_and_tests() -> None
     assert "tests/public_api_checks.py" in selected_paths
 
 
-def test_generated_artifact_filtering_is_path_segment_aware_for_build_named_modules() -> None:
+def test_build_filtering_is_path_segment_aware() -> None:
     entities = [
         Entity(
             id=StableId("python:module:src.build_tools"),
