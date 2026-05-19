@@ -373,6 +373,17 @@ def test_eval_compare_command_json_output(
         "tie",
         "inconclusive",
     }
+    assert "savings" in payload["aggregate"]
+    savings = payload["tasks"][0]["savings_metrics"]
+    assert "raw_baseline_chars" in savings
+    assert "selected_context_chars" in savings
+    assert "estimated_raw_tokens" in savings
+    assert "estimated_selected_tokens" in savings
+    assert "estimated_tokens_saved" in savings
+    assert "compression_ratio" in savings
+    assert "gold_file_coverage_preserved" in savings
+    assert "gold_symbol_coverage_preserved" in savings
+    assert "coverage_per_1k_tokens" in savings
 
 
 def test_eval_compare_command_markdown_report(

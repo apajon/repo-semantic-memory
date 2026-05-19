@@ -60,6 +60,26 @@ class AggregateMetrics:
     context_character_estimate: float
 
 
+@dataclass(frozen=True)
+class TokenSavingsMetrics:
+    """Deterministic token-savings metrics for baseline comparison tasks.
+
+    Token estimates are approximate and intentionally tokenizer-agnostic in MVP:
+    estimated_tokens = chars / 4
+    """
+
+    raw_baseline_chars: int
+    selected_context_chars: int
+    estimated_raw_tokens: float
+    estimated_selected_tokens: float
+    estimated_tokens_saved: float
+    compression_ratio: float
+    gold_file_coverage_preserved: bool
+    gold_symbol_coverage_preserved: bool
+    coverage_per_1k_tokens: float
+    context_noise_ratio: float | None = None
+
+
 def compute_benchmark_metrics(
     outcomes: tuple[RetrievalOutcome, ...],
     *,
@@ -107,6 +127,66 @@ def compute_task_metrics(outcome: RetrievalOutcome, *, k_values: tuple[int, ...]
     )
 
 
+def estimate_tokens_from_chars(chars: int) -> float:
+    """Return deterministic approximate token count from character count."""
+    if chars < 0:
+        raise ValueError("chars must be >= 0")
+    return chars / 4.0
+
+
+def compute_token_savings_metrics(
+    *,
+    raw_baseline_chars: int,
+    selected_context_chars: int,
+    raw_gold_file_coverage: float,
+    raw_gold_symbol_coverage: float,
+    selected_gold_file_coverage: float,
+    selected_gold_symbol_coverage: float,
+    context_noise_ratio: float | None = None,
+) -> TokenSavingsMetrics:
+    """Compute deterministic token-savings and coverage-preservation metrics."""
+    if raw_baseline_chars < 0:
+        raise ValueError("raw_baseline_chars must be >= 0")
+    if selected_context_chars < 0:
+        raise ValueError("selected_context_chars must be >= 0")
+
+    estimated_raw_tokens = estimate_tokens_from_chars(raw_baseline_chars)
+    estimated_selected_tokens = estimate_tokens_from_chars(selected_context_chars)
+    estimated_tokens_saved = estimated_raw_tokens - estimated_selected_tokens
+    compression_ratio = _safe_compression_ratio(
+        selected_chars=selected_context_chars, raw_chars=raw_baseline_chars
+    )
+    gold_file_coverage_preserved = selected_gold_file_coverage >= raw_gold_file_coverage
+    gold_symbol_coverage_preserved = selected_gold_symbol_coverage >= raw_gold_symbol_coverage
+    coverage_per_1k_tokens = _coverage_per_1k_tokens(
+        gold_file_coverage=selected_gold_file_coverage,
+        gold_symbol_coverage=selected_gold_symbol_coverage,
+        estimated_tokens=estimated_selected_tokens,
+    )
+
+    return TokenSavingsMetrics(
+        raw_baseline_chars=raw_baseline_chars,
+        selected_context_chars=selected_context_chars,
+        estimated_raw_tokens=estimated_raw_tokens,
+        estimated_selected_tokens=estimated_selected_tokens,
+        estimated_tokens_saved=estimated_tokens_saved,
+        compression_ratio=compression_ratio,
+        gold_file_coverage_preserved=gold_file_coverage_preserved,
+        gold_symbol_coverage_preserved=gold_symbol_coverage_preserved,
+        coverage_per_1k_tokens=coverage_per_1k_tokens,
+        context_noise_ratio=context_noise_ratio,
+    )
+
+
+def token_savings_improvement_claim_allowed(metrics: TokenSavingsMetrics) -> bool:
+    """Return True only when token savings are positive and gold coverage is preserved."""
+    return (
+        metrics.estimated_tokens_saved > 0.0
+        and metrics.gold_file_coverage_preserved
+        and metrics.gold_symbol_coverage_preserved
+    )
+
+
 def _recall_at_k(gold: tuple[str, ...], ranked: tuple[str, ...], *, k: int) -> float:
     if not gold:
         return 1.0
@@ -131,3 +211,20 @@ def _coverage(gold: tuple[str, ...], missing: tuple[str, ...]) -> float:
         return 1.0
     found = len(gold) - len(missing)
     return found / len(gold)
+
+
+def _safe_compression_ratio(*, selected_chars: int, raw_chars: int) -> float:
+    if raw_chars <= 0:
+        return 1.0 if selected_chars <= 0 else 0.0
+    return selected_chars / raw_chars
+
+
+def _coverage_per_1k_tokens(
+    *,
+    gold_file_coverage: float,
+    gold_symbol_coverage: float,
+    estimated_tokens: float,
+) -> float:
+    if estimated_tokens <= 0.0:
+        return 0.0
+    return ((gold_file_coverage + gold_symbol_coverage) / estimated_tokens) * 1000.0

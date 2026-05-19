@@ -9,6 +9,7 @@ import pytest
 
 from repo_semantic_memory.cli import main
 from repo_semantic_memory.eval.baselines import BaselineTaskResult, TaskBaselineComparison
+from repo_semantic_memory.eval.metrics import compute_token_savings_metrics
 from repo_semantic_memory.eval.runner import run_baseline_comparison, run_retrieval_benchmark
 from repo_semantic_memory.model import Entity, SourceRange, StableId
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
@@ -251,6 +252,14 @@ def test_run_baseline_comparison_passes_budget_to_both_baselines(
             gold_symbols=("alpha.symbol",),
             repo_map=baseline,
             lexical_context_pack=lexical,
+            token_savings_metrics=compute_token_savings_metrics(
+                raw_baseline_chars=50,
+                selected_context_chars=50,
+                raw_gold_file_coverage=1.0,
+                raw_gold_symbol_coverage=1.0,
+                selected_gold_file_coverage=1.0,
+                selected_gold_symbol_coverage=1.0,
+            ),
             winner="tie",
         )
 
@@ -262,3 +271,54 @@ def test_run_baseline_comparison_passes_budget_to_both_baselines(
     run_baseline_comparison(db_path=db_path, dataset_path=dataset_path, budget_chars=777)
 
     assert observed_budgets == [777]
+
+
+def test_run_baseline_comparison_savings_are_deterministic_for_4000_and_8000_budgets(
+    tmp_path: Path,
+) -> None:
+    fixture_root = Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: compare_budget_001",
+                "    category: code_localization",
+                '    prompt: "Where is DerivedThing defined?"',
+                "    gold:",
+                "      files:",
+                "        - src/python_symbols.py",
+                "      symbols:",
+                "        - python_symbols.DerivedThing",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+
+    first_4000 = run_baseline_comparison(
+        db_path=db_path, dataset_path=dataset_path, budget_chars=4000
+    )
+    second_4000 = run_baseline_comparison(
+        db_path=db_path, dataset_path=dataset_path, budget_chars=4000
+    )
+    first_8000 = run_baseline_comparison(
+        db_path=db_path, dataset_path=dataset_path, budget_chars=8000
+    )
+    second_8000 = run_baseline_comparison(
+        db_path=db_path, dataset_path=dataset_path, budget_chars=8000
+    )
+
+    assert first_4000.outcomes == second_4000.outcomes
+    assert first_8000.outcomes == second_8000.outcomes
+    assert (
+        first_4000.outcomes[0].token_savings_metrics
+        == second_4000.outcomes[0].token_savings_metrics
+    )
+    assert (
+        first_8000.outcomes[0].token_savings_metrics
+        == second_8000.outcomes[0].token_savings_metrics
+    )
