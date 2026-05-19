@@ -1,6 +1,7 @@
 """Tests for version metadata constants."""
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import NoReturn
 
 import pytest
 
@@ -26,7 +27,7 @@ def test_get_version_info_returns_expected_values() -> None:
     assert info.context_pack_version == CONTEXT_PACK_VERSION
 
 
-def test_resolve_package_version_uses_distribution_metadata(
+def test_resolve_package_version_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
@@ -36,7 +37,7 @@ def test_resolve_package_version_uses_distribution_metadata(
 def test_package_version_fallback_when_not_installed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def _raise_package_not_found(_: str) -> str:
+    def _raise_package_not_found(_: str) -> NoReturn:
         raise PackageNotFoundError
 
     monkeypatch.setattr(version_module, "version", _raise_package_not_found)
