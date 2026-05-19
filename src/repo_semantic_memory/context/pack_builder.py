@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from collections.abc import Sequence
 
+from repo_semantic_memory.context.bm25 import FieldedBM25Index, FieldedDocument, tokenize_text
 from repo_semantic_memory.context.context_pack import ContextPack, SourceCitation, relation_key
 from repo_semantic_memory.context.path_roles import (
     SOURCE_ROLE,
@@ -22,9 +22,8 @@ from repo_semantic_memory.context.ranking import (
     dedupe_stable,
 )
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
-from repo_semantic_memory.model import Entity, JsonValue, Relation
+from repo_semantic_memory.model import Entity, JsonValue, Relation, SemanticComponent
 
-_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_./:-]+")
 _CODE_ENTITY_KINDS = frozenset({"module", "class", "function", "method", "field", "test"})
 _COARSE_ENTITY_KINDS = frozenset({"doc", "concept", "invariant"})
 _CODE_TASK_TOKENS = frozenset(
@@ -63,8 +62,7 @@ _FORBIDDEN_ASSUMPTIONS = (
 # - minimum list-marker punctuation across sections
 _PACK_FIXED_OVERHEAD_CHARS = 300
 _CODE_PATH_SUFFIXES = (".py",)
-_EXACT_TOKEN_WEIGHT = 12
-_SUBSTRING_TOKEN_WEIGHT = 4
+_EXACT_FIELD_MATCH_BOOST = 6.0
 # Scoring weights — all scoring/penalty constants remain here because they are
 # ranking concerns specific to pack_builder, not path classification concerns.
 _SOURCE_CITATION_BONUS = 2
@@ -121,6 +119,8 @@ def build_context_pack(
 
     ranked = _rank_entities(
         entities=normalized_entities,
+        relations=normalized_relations,
+        inferred_components=inferred_components,
         task_tokens=task_tokens,
         is_code_task=is_code_task,
         task_hints=task_hints,
@@ -277,6 +277,8 @@ def build_context_pack(
 def _rank_entities(
     *,
     entities: Sequence[Entity],
+    relations: Sequence[Relation],
+    inferred_components: Sequence[SemanticComponent],
     task_tokens: tuple[str, ...],
     is_code_task: bool,
     task_hints: set[str],
@@ -284,11 +286,19 @@ def _rank_entities(
     source_roots: Sequence[str],
 ) -> list[tuple[Entity, RankingBreakdown]]:
     # Ranked by deterministic breakdown.total, then stable entity id.
+    component_labels_by_entity = _component_labels_by_entity(inferred_components)
+    relation_labels_by_entity = _relation_labels_by_entity(relations)
+    bm25_index = _build_bm25_index(
+        entities=entities,
+        component_labels_by_entity=component_labels_by_entity,
+        relation_labels_by_entity=relation_labels_by_entity,
+    )
     ranked: list[tuple[Entity, RankingBreakdown]] = []
     for entity in entities:
         breakdown = _score_entity(
             entity,
             task_tokens,
+            bm25_index=bm25_index,
             is_code_task=is_code_task,
             task_hints=task_hints,
             public_api_entity_ids=public_api_entity_ids,
@@ -304,6 +314,7 @@ def _score_entity(
     entity: Entity,
     task_tokens: tuple[str, ...],
     *,
+    bm25_index: FieldedBM25Index,
     is_code_task: bool,
     task_hints: set[str],
     public_api_entity_ids: set[str],
@@ -314,45 +325,26 @@ def _score_entity(
     source_path = entity.source_range.path.replace("\\", "/").lower()
     path_role = classify_path_role(path=source_path, source_roots=source_roots)
     entity_id = entity.id.value.lower()
-    metadata_strings = [value.lower() for value in _metadata_strings(entity.metadata)]
-    haystacks = [name, qualified_name, source_path, entity_id, *metadata_strings]
-
-    exact_hits = 0
-    substring_hits = 0
-    matched_terms: list[str] = []
-    matched_fields: list[str] = []
+    bm25_score = bm25_index.score(entity.id.value, task_tokens)
+    lexical_score = bm25_score.score
+    matched_terms: list[str] = list(bm25_score.matched_terms)
+    matched_fields: list[str] = list(bm25_score.matched_fields)
     reasons: list[tuple[RankingCategory, str, float]] = []
-    for token in task_tokens:
-        matched_field = _lexical_matched_field(
-            token=token,
-            name=name,
-            qualified_name=qualified_name,
-            source_path=source_path,
-            entity_id=entity_id,
-            metadata_strings=metadata_strings,
-        )
-        if matched_field is not None:
-            matched_terms.append(token)
-            matched_fields.append(matched_field)
-            reasons.append(
-                (
-                    "lexical",
-                    f'lexical match on {matched_field.replace("_", " ")} "{entity.qualified_name}"',
-                    0.0,
-                )
+    for matched_field in matched_fields:
+        reasons.append(
+            (
+                "lexical",
+                f'lexical match on {matched_field.replace("_", " ")} "{entity.qualified_name}"',
+                0.0,
             )
+        )
 
-        for haystack in haystacks:
-            if not haystack:
-                continue
-            if token == haystack:
-                exact_hits += 1
-                break
-            if token in haystack:
-                substring_hits += 1
-                break
-
-    lexical_score = exact_hits * _EXACT_TOKEN_WEIGHT + substring_hits * _SUBSTRING_TOKEN_WEIGHT
+    exact_hits = sum(
+        1
+        for token in task_tokens
+        if token == name or token == qualified_name or token == source_path or token == entity_id
+    )
+    lexical_score += exact_hits * _EXACT_FIELD_MATCH_BOOST
     if entity.source_range.path:
         lexical_score += _SOURCE_CITATION_BONUS
 
@@ -463,8 +455,7 @@ def _score_entity(
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
-    ordered_tokens = dict.fromkeys(token.lower() for token in _TOKEN_PATTERN.findall(text))
-    return tuple(ordered_tokens.keys())
+    return tokenize_text(text)
 
 
 def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
@@ -485,28 +476,6 @@ def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     if any(token in _PUBLIC_API_TASK_TOKENS for token in task_tokens):
         hints.add("public_api")
     return hints
-
-
-def _lexical_matched_field(
-    *,
-    token: str,
-    name: str,
-    qualified_name: str,
-    source_path: str,
-    entity_id: str,
-    metadata_strings: Sequence[str],
-) -> str | None:
-    if token in name:
-        return "name"
-    if token in qualified_name:
-        return "qualified_name"
-    if token in source_path:
-        return "source_path"
-    if token in entity_id:
-        return "id"
-    if any(token in value for value in metadata_strings):
-        return "metadata"
-    return None
 
 
 def dedupe_stable_reasons(
@@ -724,3 +693,66 @@ def _collect_metadata_strings(value: JsonValue, out: list[str]) -> None:
         for key, item in sorted(value.items()):
             out.append(key)
             _collect_metadata_strings(item, out)
+
+
+def _build_bm25_index(
+    *,
+    entities: Sequence[Entity],
+    component_labels_by_entity: dict[str, tuple[str, ...]],
+    relation_labels_by_entity: dict[str, tuple[str, ...]],
+) -> FieldedBM25Index:
+    documents = [
+        FieldedDocument(
+            doc_id=entity.id.value,
+            fields={
+                "id": entity.id.value,
+                "name": entity.name,
+                "qualified_name": entity.qualified_name,
+                "source_path": entity.source_range.path.replace("\\", "/"),
+                "kind": entity.kind,
+                "semantic_components": " ".join(component_labels_by_entity.get(entity.id.value, ())),
+                "relation_labels": " ".join(relation_labels_by_entity.get(entity.id.value, ())),
+                "metadata": " ".join(_metadata_strings(entity.metadata)),
+            },
+        )
+        for entity in sorted(entities, key=lambda item: item.id.value)
+    ]
+    return FieldedBM25Index(documents)
+
+
+def _component_labels_by_entity(
+    components: Sequence[SemanticComponent],
+) -> dict[str, tuple[str, ...]]:
+    labels_by_entity: dict[str, list[str]] = defaultdict(list)
+    for component in components:
+        entity_id = getattr(getattr(component, "entity_id", None), "value", None)
+        component_type = getattr(component, "component_type", None)
+        status = getattr(component, "status", None)
+        if not isinstance(entity_id, str):
+            continue
+        if isinstance(component_type, str):
+            labels_by_entity[entity_id].append(component_type)
+        if isinstance(status, str):
+            labels_by_entity[entity_id].append(status)
+    return {
+        entity_id: tuple(dict.fromkeys(labels))
+        for entity_id, labels in sorted(labels_by_entity.items())
+    }
+
+
+def _relation_labels_by_entity(relations: Sequence[Relation]) -> dict[str, tuple[str, ...]]:
+    labels_by_entity: dict[str, list[str]] = defaultdict(list)
+    for relation in sorted(
+        relations,
+        key=lambda item: (item.kind, item.source_entity_id.value, item.target_entity_id.value),
+    ):
+        source_id = relation.source_entity_id.value
+        target_id = relation.target_entity_id.value
+        labels_by_entity[source_id].append(relation.kind)
+        labels_by_entity[source_id].append(f"outgoing_{relation.kind}")
+        labels_by_entity[target_id].append(relation.kind)
+        labels_by_entity[target_id].append(f"incoming_{relation.kind}")
+    return {
+        entity_id: tuple(dict.fromkeys(labels))
+        for entity_id, labels in sorted(labels_by_entity.items())
+    }
