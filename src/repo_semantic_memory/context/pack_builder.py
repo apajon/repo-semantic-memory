@@ -13,6 +13,14 @@ from repo_semantic_memory.context.path_roles import (
     infer_source_roots,
     is_generated_artifact_path,
 )
+from repo_semantic_memory.context.ranking import (
+    RankingBreakdown,
+    RankingCategory,
+    RankingReason,
+    append_reason,
+    build_breakdown,
+    dedupe_stable,
+)
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation
 
@@ -64,9 +72,13 @@ _AST_BACKED_BONUS = 10
 _CODE_ENTITY_KIND_BONUS = 6
 _COARSE_ENTITY_PENALTY = -6
 _CITATION_RANGE_OVERHEAD_CHARS = 24
-_IMPLEMENTATION_PATH_BONUS = 20
-_TEST_PATH_BONUS = 20
-_PUBLIC_API_HINT_BONUS = 24
+_IMPLEMENTATION_PATH_ROLE_BONUS = 14
+_IMPLEMENTATION_TASK_INTENT_BONUS = 6
+_TEST_PATH_ROLE_BONUS = 14
+_TEST_TASK_INTENT_BONUS = 6
+_PUBLIC_API_PATH_ROLE_BONUS = 16
+_PUBLIC_API_TASK_INTENT_BONUS = 8
+_PUBLIC_API_COMPONENT_BONUS = 16
 # Detection of generated artifacts is delegated to path_roles.is_generated_artifact_path.
 _GENERATED_ARTIFACT_PENALTY = -80
 
@@ -77,6 +89,7 @@ def build_context_pack(
     entities: Sequence[Entity],
     relations: Sequence[Relation],
     budget_chars: int,
+    explain_ranking: bool = False,
 ) -> ContextPack:
     """Build a compact context pack for a task from indexed entities and relations."""
     if budget_chars < 1:
@@ -118,15 +131,37 @@ def build_context_pack(
     selected_entity_ids: list[str] = []
     selected_entity_set: set[str] = set()
     reasons_by_key: dict[str, list[str]] = defaultdict(list)
-    for entity, _, reasons in ranked:
-        if reasons:
+    ranking_breakdowns_by_id: dict[str, RankingBreakdown] = {}
+    for entity, breakdown in ranked:
+        reason_messages = tuple(reason.message for reason in breakdown.reasons)
+        if reason_messages:
             _add_entity(entity.id.value, selected_entity_ids, selected_entity_set)
-            reasons_by_key[entity.id.value].extend(reasons)
+            reasons_by_key[entity.id.value].extend(reason_messages)
+            if explain_ranking:
+                ranking_breakdowns_by_id[entity.id.value] = breakdown
 
     if not selected_entity_ids and normalized_entities:
         fallback = normalized_entities[0]
         _add_entity(fallback.id.value, selected_entity_ids, selected_entity_set)
         reasons_by_key[fallback.id.value].append("fallback deterministic seed")
+        if explain_ranking:
+            ranking_breakdowns_by_id[fallback.id.value] = build_breakdown(
+                lexical=0,
+                path_role=0,
+                task_intent=0,
+                component=0,
+                graph=0,
+                penalty=0,
+                matched_terms=(),
+                matched_fields=(),
+                reasons=(
+                    dedupe_stable_reasons(
+                        (
+                            ("graph", "fallback deterministic seed", 0.0),
+                        )
+                    )
+                ),
+            )
 
     relations_by_entity_id = _relations_by_entity_id(normalized_relations)
     selected_relations: list[Relation] = []
@@ -154,6 +189,28 @@ def build_context_pack(
             reasons_by_key[neighbor_id].append(
                 f"direct neighbor via {relation.kind} from {current_id}"
             )
+            if explain_ranking and neighbor_id not in ranking_breakdowns_by_id:
+                ranking_breakdowns_by_id[neighbor_id] = build_breakdown(
+                    lexical=0,
+                    path_role=0,
+                    task_intent=0,
+                    component=0,
+                    graph=1,
+                    penalty=0,
+                    matched_terms=(),
+                    matched_fields=(),
+                    reasons=(
+                        dedupe_stable_reasons(
+                            (
+                                (
+                                    "graph",
+                                    f"direct neighbor via {relation.kind} from {current_id}",
+                                    1.0,
+                                ),
+                            )
+                        )
+                    ),
+                )
             queue.append(neighbor_id)
 
     selected_entities = [
@@ -206,6 +263,15 @@ def build_context_pack(
         selected_relations=tuple(budgeted_relations),
         source_citations=tuple(citations),
         why_selected=why_selected,
+        ranking_breakdowns=(
+            {
+                entity.id.value: ranking_breakdowns_by_id[entity.id.value]
+                for entity in budgeted_entities
+                if entity.id.value in ranking_breakdowns_by_id
+            }
+            if explain_ranking
+            else {}
+        ),
         semantic_components=semantic_components,
         uncertainties=tuple(uncertainties),
         suggested_files_to_inspect=tuple(suggested_files),
@@ -222,10 +288,11 @@ def _rank_entities(
     task_hints: set[str],
     public_api_entity_ids: set[str],
     source_roots: Sequence[str],
-) -> list[tuple[Entity, int, tuple[str, ...]]]:
-    ranked: list[tuple[Entity, int, tuple[str, ...]]] = []
+) -> list[tuple[Entity, RankingBreakdown]]:
+    # Ranked by deterministic breakdown.total, then stable entity id.
+    ranked: list[tuple[Entity, RankingBreakdown]] = []
     for entity in entities:
-        score, reasons = _score_entity(
+        breakdown = _score_entity(
             entity,
             task_tokens,
             is_code_task=is_code_task,
@@ -233,10 +300,10 @@ def _rank_entities(
             public_api_entity_ids=public_api_entity_ids,
             source_roots=source_roots,
         )
-        if score < 1:
+        if breakdown.total < 1:
             continue
-        ranked.append((entity, score, reasons))
-    return sorted(ranked, key=lambda item: (-item[1], item[0].id.value))
+        ranked.append((entity, breakdown))
+    return sorted(ranked, key=lambda item: (-item[1].total, item[0].id.value))
 
 
 def _score_entity(
@@ -247,7 +314,7 @@ def _score_entity(
     task_hints: set[str],
     public_api_entity_ids: set[str],
     source_roots: Sequence[str],
-) -> tuple[int, tuple[str, ...]]:
+) -> RankingBreakdown:
     name = entity.name.lower()
     qualified_name = entity.qualified_name.lower()
     source_path = entity.source_range.path.replace("\\", "/").lower()
@@ -258,18 +325,28 @@ def _score_entity(
 
     exact_hits = 0
     substring_hits = 0
-    reasons: list[str] = []
+    matched_terms: list[str] = []
+    matched_fields: list[str] = []
+    reasons: list[tuple[RankingCategory, str, float]] = []
     for token in task_tokens:
-        if token in name:
-            reasons.append(f'lexical match on name "{entity.name}"')
-        elif token in qualified_name:
-            reasons.append(f'lexical match on qualified name "{entity.qualified_name}"')
-        elif token in source_path:
-            reasons.append(f'lexical match on source path "{entity.source_range.path}"')
-        elif token in entity_id:
-            reasons.append(f'lexical match on id "{entity.id.value}"')
-        elif any(token in value for value in metadata_strings):
-            reasons.append(f'lexical match on metadata for "{entity.qualified_name}"')
+        matched_field = _lexical_matched_field(
+            token=token,
+            name=name,
+            qualified_name=qualified_name,
+            source_path=source_path,
+            entity_id=entity_id,
+            metadata_strings=metadata_strings,
+        )
+        if matched_field is not None:
+            matched_terms.append(token)
+            matched_fields.append(matched_field)
+            reasons.append(
+                (
+                    "lexical",
+                    f'lexical match on {matched_field.replace("_", " ")} "{entity.qualified_name}"',
+                    0.0,
+                )
+            )
 
         for haystack in haystacks:
             if not haystack:
@@ -281,40 +358,106 @@ def _score_entity(
                 substring_hits += 1
                 break
 
-    score = exact_hits * _EXACT_TOKEN_WEIGHT + substring_hits * _SUBSTRING_TOKEN_WEIGHT
-    score += _SOURCE_CITATION_BONUS if entity.source_range.path else 0
+    lexical_score = exact_hits * _EXACT_TOKEN_WEIGHT + substring_hits * _SUBSTRING_TOKEN_WEIGHT
+    if entity.source_range.path:
+        lexical_score += _SOURCE_CITATION_BONUS
 
+    component_score = 0
     if is_code_task:
         if entity.id.value.startswith("python:"):
-            score += _AST_BACKED_BONUS
+            component_score += _AST_BACKED_BONUS
         if entity.kind in _CODE_ENTITY_KINDS:
-            score += _CODE_ENTITY_KIND_BONUS
+            component_score += _CODE_ENTITY_KIND_BONUS
         if entity.kind in _COARSE_ENTITY_KINDS:
-            score += _COARSE_ENTITY_PENALTY
+            component_score += _COARSE_ENTITY_PENALTY
 
+    penalty_score = 0
     if is_generated_artifact_path(source_path):
-        score += _GENERATED_ARTIFACT_PENALTY
-        reasons.append("generated/build artifact downrank")
+        penalty_score += _GENERATED_ARTIFACT_PENALTY
+        reasons.append(("penalty", "generated/build artifact downrank", _GENERATED_ARTIFACT_PENALTY))
 
+    path_role_score = 0
+    task_intent_score = 0
     if "implementation" in task_hints and path_role == SOURCE_ROLE:
-        score += _IMPLEMENTATION_PATH_BONUS
-        reasons.append("implementation task hint -> boosted source/package root")
+        path_role_score += _IMPLEMENTATION_PATH_ROLE_BONUS
+        task_intent_score += _IMPLEMENTATION_TASK_INTENT_BONUS
+        reasons.append(
+            (
+                "path_role",
+                "implementation task hint -> boosted source/package root",
+                _IMPLEMENTATION_PATH_ROLE_BONUS,
+            )
+        )
+        reasons.append(
+            (
+                "task_intent",
+                "implementation task intent boost",
+                _IMPLEMENTATION_TASK_INTENT_BONUS,
+            )
+        )
 
     if "tests" in task_hints and source_path.startswith("tests/"):
-        score += _TEST_PATH_BONUS
-        reasons.append('test task hint -> boosted "tests/"')
+        path_role_score += _TEST_PATH_ROLE_BONUS
+        task_intent_score += _TEST_TASK_INTENT_BONUS
+        reasons.append(("path_role", 'test task hint -> boosted "tests/"', _TEST_PATH_ROLE_BONUS))
+        reasons.append(("task_intent", "test-like task intent boost", _TEST_TASK_INTENT_BONUS))
 
     if "public_api" in task_hints:
         if source_path.endswith("/__init__.py") or source_path == "__init__.py":
-            score += _PUBLIC_API_HINT_BONUS
-            reasons.append('public API task hint -> boosted "__init__.py"')
+            path_role_score += _PUBLIC_API_PATH_ROLE_BONUS
+            task_intent_score += _PUBLIC_API_TASK_INTENT_BONUS
+            reasons.append(
+                (
+                    "path_role",
+                    'public API task hint -> boosted "__init__.py"',
+                    _PUBLIC_API_PATH_ROLE_BONUS,
+                )
+            )
+            reasons.append(
+                (
+                    "task_intent",
+                    "public API task intent boost",
+                    _PUBLIC_API_TASK_INTENT_BONUS,
+                )
+            )
         if entity.id.value in public_api_entity_ids:
-            score += _PUBLIC_API_HINT_BONUS
-            reasons.append("public API task hint -> boosted PublicAPI component entity")
+            component_score += _PUBLIC_API_COMPONENT_BONUS
+            task_intent_score += _PUBLIC_API_TASK_INTENT_BONUS
+            reasons.append(
+                (
+                    "component",
+                    "public API task hint -> boosted PublicAPI component entity",
+                    _PUBLIC_API_COMPONENT_BONUS,
+                )
+            )
+            reasons.append(
+                (
+                    "task_intent",
+                    "public API task intent boost",
+                    _PUBLIC_API_TASK_INTENT_BONUS,
+                )
+            )
 
-    if not reasons and score > 0:
-        reasons.append("lexical baseline relevance")
-    return score, tuple(dict.fromkeys(reasons))
+    if lexical_score > 0:
+        reasons.append(("lexical", "lexical baseline relevance", float(lexical_score)))
+
+    graph_score = 0
+    normalized_reasons = dedupe_stable_reasons(tuple(reasons))
+    if not normalized_reasons and (
+        lexical_score + path_role_score + task_intent_score + component_score + penalty_score > 0
+    ):
+        normalized_reasons = dedupe_stable_reasons((("lexical", "lexical baseline relevance", 0.0),))
+    return build_breakdown(
+        lexical=float(lexical_score),
+        path_role=float(path_role_score),
+        task_intent=float(task_intent_score),
+        component=float(component_score),
+        graph=float(graph_score),
+        penalty=float(penalty_score),
+        matched_terms=dedupe_stable(tuple(matched_terms)),
+        matched_fields=dedupe_stable(tuple(matched_fields)),
+        reasons=normalized_reasons,
+    )
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
@@ -340,6 +483,48 @@ def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     if any(token in _PUBLIC_API_TASK_TOKENS for token in task_tokens):
         hints.add("public_api")
     return hints
+
+
+def _lexical_matched_field(
+    *,
+    token: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+    entity_id: str,
+    metadata_strings: Sequence[str],
+) -> str | None:
+    if token in name:
+        return "name"
+    if token in qualified_name:
+        return "qualified_name"
+    if token in source_path:
+        return "source_path"
+    if token in entity_id:
+        return "id"
+    if any(token in value for value in metadata_strings):
+        return "metadata"
+    return None
+
+
+def dedupe_stable_reasons(
+    raw_reasons: tuple[tuple[RankingCategory, str, float], ...],
+) -> tuple[RankingReason, ...]:
+    reasons: list[RankingReason] = []
+    for category, message, score_delta in raw_reasons:
+        append_reason(
+            reasons,
+            category=category,
+            message=message,
+            score_delta=score_delta,
+        )
+    deduped: dict[tuple[str, str, float], RankingReason] = {}
+    for reason in reasons:
+        key = (reason.category, reason.message, reason.score_delta)
+        if key in deduped:
+            continue
+        deduped[key] = reason
+    return tuple(deduped.values())
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:

@@ -178,6 +178,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="markdown",
         help="Output format.",
     )
+    pack_parser.add_argument(
+        "--explain-ranking",
+        action="store_true",
+        help="Include deterministic ranking breakdown details in pack output.",
+    )
     components_parser = subparsers.add_parser(
         "components",
         help="Infer and inspect ECS-style semantic components.",
@@ -414,7 +419,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_repo_map_command(path=args.path, db=args.db, budget=args.budget)
     if args.command == "pack":
         return _run_pack_command(
-            task=args.task, db=args.db, budget=args.budget, output_format=args.format
+            task=args.task,
+            db=args.db,
+            budget=args.budget,
+            output_format=args.format,
+            explain_ranking=args.explain_ranking,
         )
     if args.command == "components":
         if args.components_target == "infer":
@@ -642,7 +651,9 @@ def _run_eval_compare_command(
     return 0
 
 
-def _run_pack_command(*, task: str, db: str, budget: int, output_format: str) -> int:
+def _run_pack_command(
+    *, task: str, db: str, budget: int, output_format: str, explain_ranking: bool
+) -> int:
     store = SQLiteStore(db)
     try:
         store.initialize()
@@ -656,11 +667,12 @@ def _run_pack_command(*, task: str, db: str, budget: int, output_format: str) ->
         entities=entities,
         relations=relations,
         budget_chars=budget,
+        explain_ranking=explain_ranking,
     )
     if output_format == "yaml":
-        print(context_pack.to_yaml())
+        print(context_pack.to_yaml(include_ranking=explain_ranking))
         return 0
-    print(render_context_pack_markdown(context_pack))
+    print(render_context_pack_markdown(context_pack, explain_ranking=explain_ranking))
     return 0
 
 

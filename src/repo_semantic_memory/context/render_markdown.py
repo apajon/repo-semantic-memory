@@ -7,7 +7,9 @@ from repo_semantic_memory.context.context_pack import ContextPack
 from repo_semantic_memory.model import Entity, Relation
 
 
-def render_context_pack_markdown(context_pack: ContextPack) -> str:
+def render_context_pack_markdown(
+    context_pack: ContextPack, *, explain_ranking: bool = False
+) -> str:
     """Render a compact deterministic Markdown context pack."""
     budget = CharacterBudget(max_chars=context_pack.budget)
     entity_by_id = {entity.id.value: entity for entity in context_pack.selected_entities}
@@ -25,6 +27,8 @@ def render_context_pack_markdown(context_pack: ContextPack) -> str:
         budget=budget,
         entities=context_pack.selected_entities,
         why_selected=context_pack.why_selected,
+        context_pack=context_pack,
+        explain_ranking=explain_ranking,
     ):
         return budget.render()
     if not _append_related_symbols(
@@ -32,6 +36,7 @@ def render_context_pack_markdown(context_pack: ContextPack) -> str:
         relations=context_pack.selected_relations,
         entity_by_id=entity_by_id,
         why_selected=context_pack.why_selected,
+        explain_ranking=explain_ranking,
     ):
         return budget.render()
     if not _append_suggested_files(
@@ -62,6 +67,8 @@ def _append_selected_symbols(
     budget: CharacterBudget,
     entities: tuple[Entity, ...],
     why_selected: dict[str, tuple[str, ...]],
+    context_pack: ContextPack,
+    explain_ranking: bool,
 ) -> bool:
     if not _append_or_truncate(budget, "## Selected symbols"):
         return False
@@ -77,10 +84,25 @@ def _append_selected_symbols(
             f"- `{entity.qualified_name}` {_format_source_citation(entity)}",
         ):
             return False
-        reasons = why_selected.get(entity.id.value, ())
-        # Keep output compact by showing only the first deterministic reason.
-        if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
-            return False
+        if explain_ranking:
+            breakdown = context_pack.ranking_breakdowns.get(entity.id.value)
+            if breakdown is not None:
+                summary = (
+                    "  Score: "
+                    f"total={breakdown.total:g}, "
+                    f"lexical={breakdown.lexical:g}, "
+                    f"path_role={breakdown.path_role:g}, "
+                    f"task_intent={breakdown.task_intent:g}, "
+                    f"component={breakdown.component:g}, "
+                    f"graph={breakdown.graph:g}, "
+                    f"penalty={breakdown.penalty:g}"
+                )
+                if not _append_or_truncate(budget, summary):
+                    return False
+            reasons = why_selected.get(entity.id.value, ())
+            # Keep output compact in explain mode by showing only the first reason.
+            if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
+                return False
     return _append_or_truncate(budget, "")
 
 
@@ -90,6 +112,7 @@ def _append_related_symbols(
     relations: tuple[Relation, ...],
     entity_by_id: dict[str, Entity],
     why_selected: dict[str, tuple[str, ...]],
+    explain_ranking: bool,
 ) -> bool:
     if not _append_or_truncate(budget, "## Related symbols"):
         return False
@@ -113,10 +136,11 @@ def _append_related_symbols(
             "relation:"
             f"{relation.kind}:{relation.source_entity_id.value}->{relation.target_entity_id.value}"
         )
-        reasons = why_selected.get(key, ())
-        # Keep output compact by showing only the first deterministic reason.
-        if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
-            return False
+        if explain_ranking:
+            reasons = why_selected.get(key, ())
+            # Keep output compact in explain mode by showing only the first reason.
+            if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
+                return False
     return _append_or_truncate(budget, "")
 
 

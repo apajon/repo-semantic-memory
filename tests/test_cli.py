@@ -457,8 +457,64 @@ def test_pack_command_yaml_output(tmp_path: Path, capsys: pytest.CaptureFixture[
     parsed_yaml = json.loads(capsys.readouterr().out)
     assert parsed_yaml["task"] == "DerivedThing"
     assert parsed_yaml["selected_entities"]
+    assert "ranking_breakdowns" not in parsed_yaml
     selected_qnames = {entity["qualified_name"] for entity in parsed_yaml["selected_entities"]}
     assert "python_symbols.DerivedThing" in selected_qnames
+
+
+def test_pack_command_yaml_output_with_explain_ranking(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "pack",
+            "--task",
+            "DerivedThing implementation",
+            "--db",
+            str(db_path),
+            "--budget",
+            "4000",
+            "--format",
+            "yaml",
+            "--explain-ranking",
+        ]
+    )
+    assert exit_code == 0
+
+    parsed_yaml = json.loads(capsys.readouterr().out)
+    assert parsed_yaml["ranking_breakdowns"]
+    first_breakdown = next(iter(parsed_yaml["ranking_breakdowns"].values()))
+    assert "matched_fields" in first_breakdown
+    assert "reasons" in first_breakdown
+
+
+def test_pack_command_markdown_explain_ranking_includes_score_lines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "pack",
+            "--task",
+            "DerivedThing implementation",
+            "--db",
+            str(db_path),
+            "--budget",
+            "4000",
+            "--explain-ranking",
+        ]
+    )
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Score: total=" in output
+    assert "Reason:" in output
 
 
 def test_components_infer_command_json_output(
