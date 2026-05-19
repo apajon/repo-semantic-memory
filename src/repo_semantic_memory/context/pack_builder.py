@@ -6,6 +6,14 @@ from collections import defaultdict
 from collections.abc import Sequence
 
 from repo_semantic_memory.context.bm25 import FieldedBM25Index, FieldedDocument, tokenize_text
+from repo_semantic_memory.context.compression import (
+    CompressionProfile,
+    filter_related_relations,
+    filter_semantic_components,
+    filter_source_citations,
+    filter_uncertainties,
+    resolve_profile,
+)
 from repo_semantic_memory.context.context_pack import ContextPack, SourceCitation, relation_key
 from repo_semantic_memory.context.graph_selection import (
     GraphSelectionConfig,
@@ -92,11 +100,13 @@ def build_context_pack(
     relations: Sequence[Relation],
     budget_chars: int,
     explain_ranking: bool = False,
+    profile: CompressionProfile | str | None = None,
 ) -> ContextPack:
     """Build a compact context pack for a task from indexed entities and relations."""
     if budget_chars < 1:
         raise ValueError("budget_chars must be >= 1")
 
+    resolved_profile = resolve_profile(profile)
     normalized_entities = sorted(entities, key=lambda entity: entity.id.value)
     normalized_relations = sorted(
         relations,
@@ -143,7 +153,7 @@ def build_context_pack(
         if reason_messages:
             _add_entity(entity.id.value, selected_entity_ids, selected_entity_set)
             reasons_by_key[entity.id.value].extend(reason_messages)
-            if explain_ranking:
+            if explain_ranking or resolved_profile.include_ranking_breakdown:
                 ranking_breakdowns_by_id[entity.id.value] = breakdown
             if _is_graph_seed_eligible(breakdown):
                 graph_seed_ids.append(entity.id.value)
@@ -153,7 +163,7 @@ def build_context_pack(
         _add_entity(fallback.id.value, selected_entity_ids, selected_entity_set)
         reasons_by_key[fallback.id.value].append("fallback deterministic seed")
         graph_seed_ids.append(fallback.id.value)
-        if explain_ranking:
+        if explain_ranking or resolved_profile.include_ranking_breakdown:
             ranking_breakdowns_by_id[fallback.id.value] = build_breakdown(
                 lexical=0,
                 path_role=0,
@@ -189,7 +199,7 @@ def build_context_pack(
         if is_new:
             for reason_msg in neighbor_reasons:
                 reasons_by_key[neighbor_id].append(reason_msg)
-        if explain_ranking:
+        if explain_ranking or resolved_profile.include_ranking_breakdown:
             reason_tuples: tuple[tuple[RankingCategory, str, float], ...]
             if neighbor_reasons:
                 reason_tuples = tuple(("graph", msg, graph_score) for msg in neighbor_reasons)
@@ -256,6 +266,7 @@ def build_context_pack(
             relation.target_entity_id.value,
         ),
     )
+    selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
 
     (
         budgeted_entities,
@@ -274,19 +285,28 @@ def build_context_pack(
         selected_relations=budgeted_relations,
         entity_by_id=entity_by_id,
     )
+    uncertainties = list(filter_uncertainties(uncertainties, profile=resolved_profile))
     citations = _build_citations(
         selected_entities=budgeted_entities,
         selected_relations=budgeted_relations,
         entity_by_id=entity_by_id,
     )
-    semantic_components = compact_component_labels(
-        infer_semantic_components(entities=budgeted_entities, relations=budgeted_relations)
+    citations = filter_source_citations(citations, profile=resolved_profile)
+    semantic_components = filter_semantic_components(
+        compact_component_labels(
+            infer_semantic_components(entities=budgeted_entities, relations=budgeted_relations)
+        ),
+        profile=resolved_profile,
     )
-    why_selected = {
-        key: tuple(dict.fromkeys(reasons_by_key[key]))
-        for key in sorted(reasons_by_key.keys())
-        if reasons_by_key[key]
-    }
+    include_compact_reasons = explain_ranking or resolved_profile.include_compact_score_reasons
+    why_selected = {}
+    if include_compact_reasons:
+        for key in sorted(reasons_by_key.keys()):
+            if not reasons_by_key[key]:
+                continue
+            unique_reasons = tuple(dict.fromkeys(reasons_by_key[key]))
+            why_selected[key] = unique_reasons
+    include_ranking_breakdown = explain_ranking or resolved_profile.include_ranking_breakdown
 
     return ContextPack(
         task=task,
@@ -301,7 +321,7 @@ def build_context_pack(
                 for entity in budgeted_entities
                 if entity.id.value in ranking_breakdowns_by_id
             }
-            if explain_ranking
+            if include_ranking_breakdown
             else {}
         ),
         semantic_components=semantic_components,

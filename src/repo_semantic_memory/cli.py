@@ -15,6 +15,7 @@ from repo_semantic_memory.context import (
     build_repo_map_markdown,
     render_context_pack_markdown,
 )
+from repo_semantic_memory.context.compression import available_profile_names, resolve_profile
 from repo_semantic_memory.eval import (
     render_compact_table,
     render_compare_compact_table,
@@ -152,6 +153,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=4000,
         help="Approximate character budget for map output (not tokenizer-based token count).",
     )
+    repo_map_parser.add_argument(
+        "--profile",
+        choices=available_profile_names(),
+        default="agent_standard",
+        help="Compression profile controlling deterministic context noise filtering.",
+    )
     pack_parser = subparsers.add_parser(
         "pack",
         help="Generate a task-specific context pack.",
@@ -182,6 +189,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--explain-ranking",
         action="store_true",
         help="Include deterministic ranking breakdown details in pack output.",
+    )
+    pack_parser.add_argument(
+        "--profile",
+        choices=available_profile_names(),
+        default="agent_standard",
+        help="Compression profile controlling deterministic context noise filtering.",
     )
     components_parser = subparsers.add_parser(
         "components",
@@ -416,7 +429,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 2
     if args.command == "repo-map":
-        return _run_repo_map_command(path=args.path, db=args.db, budget=args.budget)
+        return _run_repo_map_command(
+            path=args.path,
+            db=args.db,
+            budget=args.budget,
+            profile=args.profile,
+        )
     if args.command == "pack":
         return _run_pack_command(
             task=args.task,
@@ -424,6 +442,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             budget=args.budget,
             output_format=args.format,
             explain_ranking=args.explain_ranking,
+            profile=args.profile,
         )
     if args.command == "components":
         if args.components_target == "infer":
@@ -582,10 +601,10 @@ def _run_inspect_relations_command(*, db: str, emit_json: bool) -> int:
     return 0
 
 
-def _run_repo_map_command(*, path: str | None, db: str | None, budget: int) -> int:
+def _run_repo_map_command(*, path: str | None, db: str | None, budget: int, profile: str) -> int:
     if path is not None:
         entities, relations = _index_for_repo_map(path=path)
-        print(build_repo_map_markdown(entities, relations, budget_chars=budget))
+        print(build_repo_map_markdown(entities, relations, budget_chars=budget, profile=profile))
         return 0
 
     db_path = db if db is not None else ".rsm/index.sqlite"
@@ -596,7 +615,7 @@ def _run_repo_map_command(*, path: str | None, db: str | None, budget: int) -> i
         relations = store.list_relations()
     finally:
         store.close()
-    print(build_repo_map_markdown(entities, relations, budget_chars=budget))
+    print(build_repo_map_markdown(entities, relations, budget_chars=budget, profile=profile))
     return 0
 
 
@@ -652,7 +671,13 @@ def _run_eval_compare_command(
 
 
 def _run_pack_command(
-    *, task: str, db: str, budget: int, output_format: str, explain_ranking: bool
+    *,
+    task: str,
+    db: str,
+    budget: int,
+    output_format: str,
+    explain_ranking: bool,
+    profile: str,
 ) -> int:
     store = SQLiteStore(db)
     try:
@@ -662,17 +687,20 @@ def _run_pack_command(
     finally:
         store.close()
 
+    resolved_profile = resolve_profile(profile)
+    include_ranking = explain_ranking or resolved_profile.include_ranking_breakdown
     context_pack = build_context_pack(
         task=task,
         entities=entities,
         relations=relations,
         budget_chars=budget,
-        explain_ranking=explain_ranking,
+        explain_ranking=include_ranking,
+        profile=resolved_profile,
     )
     if output_format == "yaml":
-        print(context_pack.to_yaml(include_ranking=explain_ranking))
+        print(context_pack.to_yaml(include_ranking=include_ranking))
         return 0
-    print(render_context_pack_markdown(context_pack, explain_ranking=explain_ranking))
+    print(render_context_pack_markdown(context_pack, explain_ranking=include_ranking))
     return 0
 
 

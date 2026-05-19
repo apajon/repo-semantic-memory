@@ -82,6 +82,38 @@ Prefer loading only files relevant to the current task.
 `repo_map.md` provides the broadest structural context at lowest token cost.
 `symbols.yaml` and `relations.yaml` together provide full graph context.
 
+## Compression profiles
+
+`rsm repo-map` and `rsm pack` support deterministic profiles:
+
+- `agent_brief`: smallest output, suppresses unresolved imports and low-signal detail.
+- `agent_standard`: default balanced profile for most coding tasks.
+- `agent_debug`: keeps ranking breakdown and compact score reasons for diagnostics.
+- `human_review`: balanced for human PR/design review workflows.
+- `ci_summary`: compact CI-oriented output with strict noise suppression.
+- `full`: maximum verbosity while still avoiding source body dumps.
+
+Profile controls include:
+
+- max imports per module
+- max components per entity
+- unresolved import inclusion
+- ranking breakdown inclusion
+- low-confidence inferred component inclusion
+- relation verbosity
+- citation verbosity
+- max related symbols
+- max uncertainties
+- compact score reason inclusion
+
+Preservation rules always favor:
+
+- direct task matches
+- source citations
+- explicit public exports
+- high-confidence structural context
+- selected implementation symbols
+
 ## Staleness
 
 Check `INDEX.yaml` → `generated_at` field against recent git commits.
