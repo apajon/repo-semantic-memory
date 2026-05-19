@@ -52,8 +52,6 @@ packages = ["src/repo_semantic_memory"]
 [tool.semantic_release]
 branch = "main"
 tag_format = "v{version}"
-version_toml = ["pyproject.toml:project.version"]
-version_variables = ["src/repo_semantic_memory/version.py:PACKAGE_VERSION"]
 allow_zero_version = true
 major_on_zero = false
 upload_to_pypi = false
