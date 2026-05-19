@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 from repo_semantic_memory.eval.baselines import BaselineTaskResult, TaskBaselineComparison
 from repo_semantic_memory.eval.metrics import (
@@ -127,14 +128,18 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     payload_two = to_compare_json_payload(result)
     assert payload_one == payload_two
     assert json.dumps(payload_one, sort_keys=True) == json.dumps(payload_two, sort_keys=True)
-    assert "average_approx_useful_item_ratio" in payload_one["aggregate"]
-    assert "savings" in payload_one["aggregate"]
-    assert payload_one["aggregate"]["savings"]["average_estimated_tokens_saved"] == 5.0
-    repo_payload = payload_one["tasks"][0]["repo_map"]
+    aggregate_payload = cast(dict[str, Any], payload_one["aggregate"])
+    assert "average_approx_useful_item_ratio" in aggregate_payload
+    assert "savings" in aggregate_payload
+    savings_aggregate = cast(dict[str, Any], aggregate_payload["savings"])
+    assert savings_aggregate["average_estimated_tokens_saved"] == 5.0
+    task_payloads = cast(list[dict[str, Any]], payload_one["tasks"])
+    first_task_payload = task_payloads[0]
+    repo_payload = cast(dict[str, Any], first_task_payload["repo_map"])
     assert repo_payload["approx_useful_item_ratio"] == 0.75
     assert repo_payload["selected_files"] == ["src/a.py"]
     assert repo_payload["selected_symbols"] == ["pkg.a"]
-    savings_payload = payload_one["tasks"][0]["savings_metrics"]
+    savings_payload = cast(dict[str, Any], first_task_payload["savings_metrics"])
     assert savings_payload["raw_baseline_chars"] == 100
     assert savings_payload["selected_context_chars"] == 80
     assert savings_payload["estimated_raw_tokens"] == 25.0
