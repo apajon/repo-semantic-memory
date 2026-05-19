@@ -11,6 +11,7 @@ from repo_semantic_memory.context.path_roles import (
     SOURCE_ROLE,
     classify_path_role,
     infer_source_roots,
+    is_generated_artifact_path,
 )
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation
@@ -56,6 +57,8 @@ _PACK_FIXED_OVERHEAD_CHARS = 300
 _CODE_PATH_SUFFIXES = (".py",)
 _EXACT_TOKEN_WEIGHT = 12
 _SUBSTRING_TOKEN_WEIGHT = 4
+# Scoring weights — all scoring/penalty constants remain here because they are
+# ranking concerns specific to pack_builder, not path classification concerns.
 _SOURCE_CITATION_BONUS = 2
 _AST_BACKED_BONUS = 10
 _CODE_ENTITY_KIND_BONUS = 6
@@ -64,18 +67,8 @@ _CITATION_RANGE_OVERHEAD_CHARS = 24
 _IMPLEMENTATION_PATH_BONUS = 20
 _TEST_PATH_BONUS = 20
 _PUBLIC_API_HINT_BONUS = 24
+# Detection of generated artifacts is delegated to path_roles.is_generated_artifact_path.
 _GENERATED_ARTIFACT_PENALTY = -80
-_GENERATED_ARTIFACT_PATTERNS = (
-    "/docs/_build/",
-    "/_build/",
-    "/dist/",
-    "/build/",
-    "/htmlcov/",
-    "/.pytest_cache/",
-    "/.mypy_cache/",
-    "/.ruff_cache/",
-    "/.egg-info/",
-)
 
 
 def build_context_pack(
@@ -299,7 +292,7 @@ def _score_entity(
         if entity.kind in _COARSE_ENTITY_KINDS:
             score += _COARSE_ENTITY_PENALTY
 
-    if _is_generated_artifact_path(source_path):
+    if is_generated_artifact_path(source_path):
         score += _GENERATED_ARTIFACT_PENALTY
         reasons.append("generated/build artifact downrank")
 
@@ -347,11 +340,6 @@ def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     if any(token in _PUBLIC_API_TASK_TOKENS for token in task_tokens):
         hints.add("public_api")
     return hints
-
-
-def _is_generated_artifact_path(path: str) -> bool:
-    normalized = f"/{path.strip('/')}/"
-    return any(token in normalized for token in _GENERATED_ARTIFACT_PATTERNS)
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:

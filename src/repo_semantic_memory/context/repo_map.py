@@ -10,13 +10,15 @@ from typing import Final
 
 from repo_semantic_memory.context.budget import CharacterBudget
 from repo_semantic_memory.context.path_roles import (
-    CI_CONFIG_ROLE,
-    DOCS_ROLE,
-    EXAMPLES_ROLE,
+    CI_ROLE,
+    CONFIG_ROLE,
+    DOC_ROLE,
+    EXAMPLE_ROLE,
+    GENERATED_ROLE,
     OTHER_ROLE,
     SOURCE_ROLE,
-    TESTS_ROLE,
-    TOOLS_SCRIPTS_ROLE,
+    TEST_ROLE,
+    TOOL_ROLE,
     classify_path_role,
     infer_source_roots,
 )
@@ -26,12 +28,14 @@ _REPO_MAP_ROLE_PRIORITY: Final[dict[str, int]] = {
     # Lower number means higher priority in rendered module ordering.
     # We prioritize likely implementation/package code first, then supporting contexts.
     SOURCE_ROLE: 0,
-    TESTS_ROLE: 1,
-    EXAMPLES_ROLE: 2,
-    DOCS_ROLE: 3,
-    CI_CONFIG_ROLE: 4,
-    TOOLS_SCRIPTS_ROLE: 5,
+    TEST_ROLE: 1,
+    EXAMPLE_ROLE: 2,
+    DOC_ROLE: 3,
+    CI_ROLE: 4,
+    CONFIG_ROLE: 4,
+    TOOL_ROLE: 5,
     OTHER_ROLE: 6,
+    GENERATED_ROLE: 7,
 }
 
 
