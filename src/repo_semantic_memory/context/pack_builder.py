@@ -727,8 +727,7 @@ def _component_labels_by_entity(
 ) -> dict[str, tuple[str, ...]]:
     labels_by_entity: dict[str, list[str]] = defaultdict(list)
     for component in components:
-        entity_id_obj = component.entity_id
-        entity_id = entity_id_obj.value
+        entity_id = component.entity_id.value
         component_type = component.component_type
         status = component.status
         if not entity_id:

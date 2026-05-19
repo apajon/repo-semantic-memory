@@ -164,16 +164,16 @@ def tokenize_text(text: str) -> tuple[str, ...]:
     """Tokenize deterministically with identifier/path aware splitting."""
     ordered: dict[str, None] = {}
     for raw_token in _TOKEN_PATTERN.findall(text):
-        _append_token(ordered, raw_token.lower())
+        _add_token(ordered, raw_token.lower())
         for segment in _DELIMITER_PATTERN.split(raw_token):
             if not segment:
                 continue
-            _append_token(ordered, segment.lower())
+            _add_token(ordered, segment.lower())
             for piece in _CAMEL_PATTERN.findall(segment):
-                _append_token(ordered, piece.lower())
+                _add_token(ordered, piece.lower())
     return tuple(ordered.keys())
 
 
-def _append_token(tokens: dict[str, None], token: str) -> None:
+def _add_token(tokens: dict[str, None], token: str) -> None:
     if token:
         tokens.setdefault(token, None)
