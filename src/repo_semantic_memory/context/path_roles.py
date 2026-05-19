@@ -3,10 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from typing import Literal
 
 from repo_semantic_memory.model import Entity
 
-PathRole = str
+PathRole = Literal[
+    "source",
+    "tests",
+    "examples",
+    "docs",
+    "ci_config",
+    "tools_scripts",
+    "other",
+]
 
 SOURCE_ROLE: PathRole = "source"
 TESTS_ROLE: PathRole = "tests"
@@ -16,20 +25,28 @@ CI_CONFIG_ROLE: PathRole = "ci_config"
 TOOLS_SCRIPTS_ROLE: PathRole = "tools_scripts"
 OTHER_ROLE: PathRole = "other"
 
-_COMMON_SOURCE_ROOT_NAMES = ("src", "packages", "libs", "modules")
-_MARKER_FILENAMES = {"pyproject.toml", "package.xml", "setup.py", "setup.cfg"}
-_NON_SOURCE_ROLE_PREFIXES = (
-    "tests/",
-    "test/",
-    "examples/",
-    "example/",
-    "docs/",
-    "doc/",
-    ".github/",
-    "ci/",
-    "tools/",
-    "scripts/",
+_COMMON_SOURCE_ROOT_NAMES = (
+    # Common monorepo code roots used across Python and mixed-language repositories.
+    # Keep this small and explicit; broader root inference comes from package markers.
+    "src",
+    "packages",
+    "libs",
+    "modules",
 )
+_MARKER_FILENAMES = {"pyproject.toml", "package.xml", "setup.py", "setup.cfg"}
+_NON_SOURCE_DIR_NAMES = {
+    "tests",
+    "test",
+    "examples",
+    "example",
+    "docs",
+    "doc",
+    ".github",
+    "ci",
+    "tools",
+    "scripts",
+    "config",
+}
 
 
 def classify_path_role(*, path: str, source_roots: Sequence[str]) -> PathRole:
@@ -70,7 +87,7 @@ def infer_source_roots(entities: Iterable[Entity]) -> tuple[str, ...]:
         if (
             filename == "__init__.py"
             and parent
-            and not parent.startswith(_NON_SOURCE_ROLE_PREFIXES)
+            and not _contains_non_source_dir(parent)
         ):
             roots.add(parent)
 
@@ -92,3 +109,7 @@ def _normalize(path: str) -> str:
 
 def _first_segment(path: str) -> str:
     return path.split("/", maxsplit=1)[0]
+
+
+def _contains_non_source_dir(path: str) -> bool:
+    return any(segment in _NON_SOURCE_DIR_NAMES for segment in path.split("/"))

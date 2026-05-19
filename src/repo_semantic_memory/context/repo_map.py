@@ -22,6 +22,8 @@ from repo_semantic_memory.context.path_roles import (
 from repo_semantic_memory.model import Entity, Relation
 
 _REPO_MAP_ROLE_PRIORITY: dict[str, int] = {
+    # Lower number means higher priority in rendered module ordering.
+    # We prioritize likely implementation/package code first, then supporting contexts.
     SOURCE_ROLE: 0,
     TESTS_ROLE: 1,
     EXAMPLES_ROLE: 2,

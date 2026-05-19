@@ -174,6 +174,32 @@ def test_repo_map_treats_non_src_package_root_as_source_when_markers_exist() -> 
     assert lifecore_state_idx < tests_idx
 
 
+def test_repo_map_does_not_promote_nested_test_package_init_as_source_root() -> None:
+    entities = [
+        Entity(
+            id=StableId.from_parts(["file", "pkg_core/main.py"]),
+            kind="module",
+            name="main",
+            qualified_name="pkg_core.main",
+            source_range=SourceRange(path="pkg_core/main.py", start_line=1, end_line=1),
+        ),
+        Entity(
+            id=StableId.from_parts(["file", "pkg_core/tests/__init__.py"]),
+            kind="module",
+            name="__init__.py",
+            qualified_name="pkg_core.tests",
+            source_range=SourceRange(path="pkg_core/tests/__init__.py", start_line=1, end_line=1),
+        ),
+    ]
+
+    output = build_repo_map_markdown(entities, [], budget_chars=4000)
+
+    source_idx = output.index("## pkg_core/main.py")
+    nested_tests_idx = output.index("## pkg_core/tests/__init__.py")
+
+    assert source_idx < nested_tests_idx
+
+
 def _ranking_fixture_entities_and_relations() -> tuple[list[Entity], list[Relation]]:
     fixture_root = _ranking_fixture_root()
     filesystem_entities = extract_filesystem_entities(fixture_root)
