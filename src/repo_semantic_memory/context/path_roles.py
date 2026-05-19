@@ -16,7 +16,7 @@ CI_CONFIG_ROLE: PathRole = "ci_config"
 TOOLS_SCRIPTS_ROLE: PathRole = "tools_scripts"
 OTHER_ROLE: PathRole = "other"
 
-_SOURCE_ROOT_PREFIX_NAMES = ("src", "packages", "libs", "modules")
+_COMMON_SOURCE_ROOT_NAMES = ("src", "packages", "libs", "modules")
 _MARKER_FILENAMES = {"pyproject.toml", "package.xml", "setup.py", "setup.cfg"}
 _NON_SOURCE_ROLE_PREFIXES = (
     "tests/",
@@ -60,7 +60,7 @@ def infer_source_roots(entities: Iterable[Entity]) -> tuple[str, ...]:
         if not path:
             continue
         top_level = _first_segment(path)
-        if top_level in _SOURCE_ROOT_PREFIX_NAMES:
+        if top_level in _COMMON_SOURCE_ROOT_NAMES:
             roots.add(top_level)
 
         filename = path.rsplit("/", maxsplit=1)[-1]
@@ -78,7 +78,10 @@ def infer_source_roots(entities: Iterable[Entity]) -> tuple[str, ...]:
 
 
 def _is_source_path(path: str, source_roots: Sequence[str]) -> bool:
-    if any(path == prefix or path.startswith(f"{prefix}/") for prefix in _SOURCE_ROOT_PREFIX_NAMES):
+    if any(
+        path == root_name or path.startswith(f"{root_name}/")
+        for root_name in _COMMON_SOURCE_ROOT_NAMES
+    ):
         return True
     return any(path == root or path.startswith(f"{root}/") for root in source_roots)
 

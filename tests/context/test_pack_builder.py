@@ -356,4 +356,5 @@ def test_public_api_ranking_selects_non_src_package_exports() -> None:
     selected_paths = {entity.source_range.path for entity in pack.selected_entities}
 
     assert "lifecore_state/__init__.py" in selected_paths
+    assert "lifecore_state/state_component.py" in selected_paths
     assert "docs/_build/generated_api.py" not in selected_paths
