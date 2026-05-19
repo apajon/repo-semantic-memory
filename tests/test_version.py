@@ -26,7 +26,14 @@ def test_get_version_info_returns_expected_values() -> None:
     assert info.context_pack_version == CONTEXT_PACK_VERSION
 
 
-def test_resolve_package_version_falls_back_when_distribution_missing(
+def test_resolve_package_version_uses_distribution_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
+    assert version_module._resolve_package_version() == "1.2.3"
+
+
+def test_package_version_fallback_when_not_installed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def _raise_package_not_found(_: str) -> str:
