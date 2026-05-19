@@ -39,7 +39,11 @@ jobs:
 
           git checkout -B "${release_preview_branch}" HEAD
 
-          RELEASE_PREVIEW_BRANCH="${release_preview_branch}" uv run python -c "from pathlib import Path; import os; source = Path('pyproject.toml').read_text(encoding='utf-8'); original = 'branch = \"main\"'; replacement = f'branch = \"{os.environ[\"RELEASE_PREVIEW_BRANCH\"]}\"'; (original in source) or (_ for _ in ()).throw(SystemExit('Expected semantic-release main branch config not found')); Path('/tmp/semantic-release-preview.toml').write_text(source.replace(original, replacement, 1), encoding='utf-8')"
+          if ! grep -q '^branch = "main"$' pyproject.toml; then
+            echo 'Could not find semantic-release branch configuration with branch = "main" in pyproject.toml'
+            exit 1
+          fi
+          sed "0,/^branch = \"main\"$/s//branch = \"${release_preview_branch}\"/" pyproject.toml >/tmp/semantic-release-preview.toml
           cp CHANGELOG.md /tmp/changelog_before.md
 
           set +e
