@@ -394,6 +394,25 @@ def test_deduplication_prevents_duplicate_relations(tmp_path: Path) -> None:
     assert len(pairs) == len(set(pairs)), "Duplicate (source, target) pairs found"
 
 
+def test_deduplication_keeps_best_confidence(tmp_path: Path) -> None:
+    """When direct_import (HIGH) and file_path (MEDIUM) both match the same target,
+    the HIGH-confidence relation is kept and the MEDIUM is dropped."""
+    test_mod = _module_entity("tests/test_foo.py", "tests.test_foo")
+    src_mod = _module_entity("src/foo.py", "foo")
+    import_rel = _imports_relation(test_mod, "foo")  # fires direct_import (HIGH)
+    # file_path heuristic also fires because stem "foo" matches src/foo.py
+    rels = extract_test_relationships(tmp_path, [test_mod, src_mod], [import_rel])
+
+    # Must be exactly one relation for this (test_mod, src_mod) pair.
+    matching = [
+        r for r in rels if r.source_entity_id == test_mod.id and r.target_entity_id == src_mod.id
+    ]
+    assert len(matching) == 1
+    # The kept relation must be the higher-confidence one (direct_import / high).
+    assert matching[0].metadata["heuristic"] == "direct_import"
+    assert matching[0].metadata["confidence"] == "high"
+
+
 def test_invalid_repo_root_raises(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="Repository root does not exist"):
         extract_test_relationships(tmp_path / "nonexistent", [])
@@ -508,7 +527,33 @@ def test_explain_ranking_shows_tests_relation_reason() -> None:
         assert any("tests" in r.message for r in src_breakdown.reasons)
 
 
-def test_low_confidence_relation_emits_uncertainty_in_pack() -> None:
+def test_implementation_pack_pulls_tests_via_incoming_tests_relation() -> None:
+    """An implementation task with a source entity seed must pull the test entity
+    through the *incoming* direction of the ``tests`` relation (test → source).
+    The source entity is the seed; graph selection follows the incoming edge to the
+    test entity because GraphSelectionConfig uses direction='both'."""
+    test_mod = _module_entity("tests/test_foo.py", "tests.test_foo")
+    src_mod = _module_entity("src/foo.py", "foo")
+    tests_rel = Relation(
+        source_entity_id=test_mod.id,
+        target_entity_id=src_mod.id,
+        kind="tests",
+        metadata={"confidence": "high", "heuristic": "file_path", "status": "inferred"},
+    )
+
+    # The source module is the only graph seed (implementation task, no test hint).
+    result = select_graph_neighbors(
+        seed_ids=[src_mod.id.value],
+        entity_id_set=frozenset({test_mod.id.value, src_mod.id.value}),
+        relations=[tests_rel],
+        config=GraphSelectionConfig(max_depth=2, max_entities=10),
+    )
+
+    # The test entity must be discovered as a neighbor via the incoming tests edge.
+    assert test_mod.id.value in result.selected_ids
+    score = result.scores_by_id[test_mod.id.value]
+    assert score == pytest.approx(0.9)  # DEFAULT_RELATION_WEIGHTS["tests"]
+
     """Low-confidence inferred tests relations appear in pack.uncertainties."""
     test_cls = _class_entity(
         "tests/test_cleanup.py",
