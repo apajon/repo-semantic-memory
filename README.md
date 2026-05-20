@@ -75,14 +75,14 @@ uv run rsm eval compare \
 
 RSM extracts Python exports from `__init__.py` via static AST analysis and uses that evidence to mark `PublicAPI` components as `confirmed`.
 
-Important caveat:
+Important caveats:
 
-- `confirmed PublicAPI` means **explicitly exported in source** (for example via `__all__`/export patterns)
+- `confirmed PublicAPI` means **explicitly exported in source** (for example via `__all__` or explicit re-exports in `__init__.py`)
 - it does **not** mean a long-term stability guarantee for users of that API
 
 ## Test relationship extraction
 
-RSM infers `tests` relations between test entities and implementation entities using deterministic heuristics (for example direct imports and path/symbol signals). These are emitted as inferred relations with metadata and confidence labels.
+RSM infers `tests` relations between test entities and implementation entities using deterministic heuristics (for example direct imports, filename/path overlap, and symbol-name overlap). These are emitted as inferred relations with metadata and confidence labels.
 
 ## Markdown section extraction
 
@@ -112,7 +112,7 @@ uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml -
 
 When discussing results:
 
-- say **"on the current internal benchmark"**
+- refer to results as **"on the current internal benchmark"**
 - benchmark categories are still small; results are directional
 - token estimate is approximate and deterministic (`estimated_tokens = chars / 4`)
 - token savings are only meaningful when gold coverage is preserved
