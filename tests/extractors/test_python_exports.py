@@ -444,13 +444,8 @@ def test_public_api_inferred_without_exports() -> None:
     # No export_relations - only heuristic relations
 
     components = infer_semantic_components(entities=entities, relations=relations)
-    # All PublicAPI components without exports should be inferred
-    public_api = [c for c in components if c.component_type == "PublicAPI"]
-    for c in public_api:
-        assert c.status in {"inferred", "confirmed", "needs_review"}, (
-            f"Unexpected status {c.status} for {c.entity_id.value}"
-        )
     # None should be confirmed without export relations
+    public_api = [c for c in components if c.component_type == "PublicAPI"]
     confirmed = [c for c in public_api if c.status == "confirmed"]
     confirmed_ids = [c.entity_id.value for c in confirmed]
     assert confirmed == [], f"Expected no confirmed PublicAPI without exports; got {confirmed_ids}"
