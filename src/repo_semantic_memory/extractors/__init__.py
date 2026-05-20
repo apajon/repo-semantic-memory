@@ -13,6 +13,10 @@ from repo_semantic_memory.extractors.markdown_outline import (
     extract_markdown_outline_path,
 )
 from repo_semantic_memory.extractors.python_ast import extract_python_file, index_python_path
+from repo_semantic_memory.extractors.python_exports import (
+    extract_python_exports,
+    index_python_exports,
+)
 
 __all__ = [
     "GitFileMetadata",
@@ -22,7 +26,9 @@ __all__ = [
     "extract_filesystem_entities",
     "extract_markdown_file",
     "extract_markdown_outline_path",
+    "extract_python_exports",
     "extract_python_file",
     "get_git_repository_summary",
+    "index_python_exports",
     "index_python_path",
 ]

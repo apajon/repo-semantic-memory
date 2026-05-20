@@ -20,6 +20,7 @@ RelationKind = Literal[
     "owns",
     "requires",
     "violates",
+    "exports",
 ]
 RELATION_KINDS: tuple[RelationKind, ...] = (
     "contains",
@@ -32,6 +33,7 @@ RELATION_KINDS: tuple[RelationKind, ...] = (
     "owns",
     "requires",
     "violates",
+    "exports",
 )
 
 

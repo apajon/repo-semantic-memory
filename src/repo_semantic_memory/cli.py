@@ -31,6 +31,7 @@ from repo_semantic_memory.extractors import (
     extract_filesystem_entities,
     extract_markdown_outline_path,
     get_git_repository_summary,
+    index_python_exports,
     index_python_path,
 )
 from repo_semantic_memory.importers import import_jsonl_directory
@@ -513,10 +514,11 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     markdown_outline = extract_markdown_outline_path(repository_root)
     python_entities, python_relations = index_python_path(repository_root)
+    export_relations = index_python_exports(repository_root)
     all_entities = _merge_entities(
         filesystem_entities, [*markdown_outline.entities, *python_entities]
     )
-    all_relations = [*markdown_outline.relations, *python_relations]
+    all_relations = [*markdown_outline.relations, *python_relations, *export_relations]
     git_status = "disabled"
     if with_git:
         git_summary = get_git_repository_summary(repository_root)
@@ -536,9 +538,10 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
             "git_history",
             "markdown_outline",
             "python_ast",
+            "python_exports",
         )
         if with_git
-        else ("filesystem", "markdown_outline", "python_ast"),
+        else ("filesystem", "markdown_outline", "python_ast", "python_exports"),
         timestamp=datetime.now(tz=UTC).isoformat(),
     )
     store = SQLiteStore(db_path)
