@@ -1,0 +1,24 @@
+# .ai/INDEX.yaml — semantic memory index manifest
+# WARNING: Generated file. Regenerate with: rsm export-ai
+# Apache-2.0 — repo-semantic-memory
+
+generated_at: '2026-05-20T03:24:01.760993+00:00'
+source_db: '.rsm/index.sqlite'
+
+versions:
+  package_version: '0.6.0'
+  schema_version: '0.1.0'
+  context_pack_version: '0.1.0'
+
+counts:
+  entities: 1114
+  relations: 2205
+  components: 547
+  invariants: 0
+
+extraction_metadata:
+  extractor_names: '["filesystem","markdown_outline","python_ast","python_exports","test_relationships"]'
+  package_version: '0.6.0'
+  repository_root: '/home/runner/work/repo-semantic-memory/repo-semantic-memory'
+  schema_version: '0.1.0'
+  timestamp: '2026-05-20T03:23:56.987152+00:00'
