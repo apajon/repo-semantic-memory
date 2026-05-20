@@ -704,6 +704,12 @@ def _collect_uncertainties(
         resolved = relation.metadata.get("resolved")
         if relation.kind in {"imports", "inherits"} and resolved is not True:
             uncertainties.add(f"Relation {relation.kind} {source_id} -> {target_id} is unresolved")
+        if relation.kind == "tests" and relation.metadata.get("status") == "inferred":
+            confidence = relation.metadata.get("confidence")
+            if confidence == "low":
+                uncertainties.add(
+                    f"Relation tests {source_id} -> {target_id} is inferred with low confidence"
+                )
         if target_id not in entity_by_id:
             uncertainties.add(f"Relation target not indexed in entities: {target_id}")
     return sorted(uncertainties)

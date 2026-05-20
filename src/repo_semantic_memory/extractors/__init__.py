@@ -17,6 +17,7 @@ from repo_semantic_memory.extractors.python_exports import (
     extract_python_exports,
     index_python_exports,
 )
+from repo_semantic_memory.extractors.test_relationships import extract_test_relationships
 
 __all__ = [
     "GitFileMetadata",
@@ -28,6 +29,7 @@ __all__ = [
     "extract_markdown_outline_path",
     "extract_python_exports",
     "extract_python_file",
+    "extract_test_relationships",
     "get_git_repository_summary",
     "index_python_exports",
     "index_python_path",

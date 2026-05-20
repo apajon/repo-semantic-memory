@@ -30,6 +30,7 @@ from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_dir
 from repo_semantic_memory.extractors import (
     extract_filesystem_entities,
     extract_markdown_outline_path,
+    extract_test_relationships,
     get_git_repository_summary,
     index_python_exports,
     index_python_path,
@@ -519,6 +520,12 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
         filesystem_entities, [*markdown_outline.entities, *python_entities]
     )
     all_relations = [*markdown_outline.relations, *python_relations, *export_relations]
+    test_relations = extract_test_relationships(
+        repository_root,
+        all_entities,
+        all_relations,
+    )
+    all_relations = [*all_relations, *test_relations]
     git_status = "disabled"
     if with_git:
         git_summary = get_git_repository_summary(repository_root)
@@ -539,9 +546,16 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
             "markdown_outline",
             "python_ast",
             "python_exports",
+            "test_relationships",
         )
         if with_git
-        else ("filesystem", "markdown_outline", "python_ast", "python_exports"),
+        else (
+            "filesystem",
+            "markdown_outline",
+            "python_ast",
+            "python_exports",
+            "test_relationships",
+        ),
         timestamp=datetime.now(tz=UTC).isoformat(),
     )
     store = SQLiteStore(db_path)
