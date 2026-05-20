@@ -29,6 +29,7 @@ from repo_semantic_memory.eval import (
 from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_directory
 from repo_semantic_memory.extractors import (
     extract_filesystem_entities,
+    extract_markdown_outline_path,
     get_git_repository_summary,
     index_python_path,
 )
@@ -510,8 +511,10 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
 
     filesystem_entities = extract_filesystem_entities(repository_root)
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
+    markdown_outline = extract_markdown_outline_path(repository_root)
     python_entities, python_relations = index_python_path(repository_root)
-    all_entities = _merge_entities(filesystem_entities, python_entities)
+    all_entities = _merge_entities(filesystem_entities, [*markdown_outline.entities, *python_entities])
+    all_relations = [*markdown_outline.relations, *python_relations]
     git_status = "disabled"
     if with_git:
         git_summary = get_git_repository_summary(repository_root)
@@ -529,25 +532,26 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
         extractor_names=(
             "filesystem",
             "git_history",
+            "markdown_outline",
             "python_ast",
         )
         if with_git
-        else ("filesystem", "python_ast"),
+        else ("filesystem", "markdown_outline", "python_ast"),
         timestamp=datetime.now(tz=UTC).isoformat(),
     )
     store = SQLiteStore(db_path)
     try:
         store.initialize()
-        store.persist_index(entities=all_entities, relations=python_relations, metadata=metadata)
+        store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
     finally:
         store.close()
     if with_git:
         print(
-            f"entities={len(all_entities)} relations={len(python_relations)} "
+            f"entities={len(all_entities)} relations={len(all_relations)} "
             f"git_metadata={git_status}"
         )
         return 0
-    print(f"entities={len(all_entities)} relations={len(python_relations)}")
+    print(f"entities={len(all_entities)} relations={len(all_relations)}")
     return 0
 
 
@@ -824,9 +828,10 @@ def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
     repository_root = Path(path).resolve()
     filesystem_entities = extract_filesystem_entities(repository_root)
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
+    markdown_outline = extract_markdown_outline_path(repository_root)
     python_entities, python_relations = index_python_path(repository_root)
-    all_entities = _merge_entities(filesystem_entities, python_entities)
-    return all_entities, python_relations
+    all_entities = _merge_entities(filesystem_entities, [*markdown_outline.entities, *python_entities])
+    return all_entities, [*markdown_outline.relations, *python_relations]
 
 
 def _load_index_from_db(db: str) -> tuple[list[Entity], list[Relation]]:

@@ -55,6 +55,14 @@ class ModuleSection:
     imports: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class DocOutline:
+    """Flattened Markdown outline payload for deterministic rendering."""
+
+    doc: Entity
+    sections: tuple[Entity, ...]
+
+
 def build_repo_map_markdown(
     entities: Sequence[Entity],
     relations: Sequence[Relation],
@@ -66,6 +74,7 @@ def build_repo_map_markdown(
     resolved_profile = resolve_profile(profile)
     budget = CharacterBudget(max_chars=budget_chars)
     module_sections = _build_module_sections(entities, relations, profile=resolved_profile)
+    doc_outlines = _build_doc_outlines(entities, relations)
 
     if not budget.append_line("# Repo map"):
         return "# Repo map"[:budget_chars]
@@ -79,6 +88,16 @@ def build_repo_map_markdown(
         if not _append_module_section(budget, section):
             budget.append_truncation_notice()
             break
+
+    need_separator = bool(module_sections)
+    for outline in doc_outlines:
+        if need_separator and not budget.append_line(""):
+            budget.append_truncation_notice()
+            break
+        if not _append_doc_outline(budget, outline):
+            budget.append_truncation_notice()
+            break
+        need_separator = True
 
     return budget.render()
 
@@ -143,6 +162,33 @@ def _build_module_sections(
     )
 
 
+def _build_doc_outlines(entities: Sequence[Entity], relations: Sequence[Relation]) -> list[DocOutline]:
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    sections_by_doc_id: dict[str, list[Entity]] = defaultdict(list)
+
+    for relation in relations:
+        if relation.kind != "contains":
+            continue
+        source = entity_by_id.get(relation.source_entity_id.value)
+        target = entity_by_id.get(relation.target_entity_id.value)
+        if source is None or target is None:
+            continue
+        if (
+            source.kind == "doc"
+            and not _is_doc_section(source)
+            and _is_markdown_doc(source)
+            and _is_doc_section(target)
+        ):
+            sections_by_doc_id[source.id.value].append(target)
+
+    outlines = [
+        DocOutline(doc=doc, sections=tuple(_sort_entities(sections)))
+        for doc_id, sections in sections_by_doc_id.items()
+        if (doc := entity_by_id.get(doc_id)) is not None
+    ]
+    return sorted(outlines, key=lambda outline: _entity_sort_key(outline.doc))
+
+
 def _preferred_module_entities(entities: Sequence[Entity]) -> list[Entity]:
     modules = [entity for entity in entities if entity.kind == "module"]
     python_modules_by_path: dict[str, list[Entity]] = defaultdict(list)
@@ -204,6 +250,23 @@ def _append_module_section(budget: CharacterBudget, section: ModuleSection) -> b
     return True
 
 
+def _append_doc_outline(budget: CharacterBudget, outline: DocOutline) -> bool:
+    doc = outline.doc
+    if not budget.append_line(f"## {_to_posix_path(doc.source_range.path)}"):
+        return False
+    if not budget.append_line(f"- doc `{doc.qualified_name}` {_format_source_citation(doc)}"):
+        return False
+    for section in outline.sections:
+        level = section.metadata.get("section_level")
+        numeric_level = level if isinstance(level, int) else 1
+        indent = "  " * max(0, numeric_level - 1)
+        if not budget.append_line(
+            f"{indent}- h{numeric_level} `{section.name}` {_format_source_citation(section)}"
+        ):
+            return False
+    return True
+
+
 def _format_source_citation(entity: Entity) -> str:
     source = entity.source_range
     path = _to_posix_path(source.path)
@@ -246,3 +309,11 @@ def _repo_map_path_priority(path: str, source_roots: Sequence[str]) -> int:
 
 def _sort_entities(entities: Sequence[Entity]) -> list[Entity]:
     return sorted(entities, key=_entity_sort_key)
+
+
+def _is_markdown_doc(entity: Entity) -> bool:
+    return Path(entity.source_range.path).suffix.lower() in {".md", ".markdown"}
+
+
+def _is_doc_section(entity: Entity) -> bool:
+    return entity.kind == "doc" and entity.metadata.get("entity_type") == "doc_section"

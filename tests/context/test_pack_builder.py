@@ -17,7 +17,12 @@ from repo_semantic_memory.context.pack_builder import (
     _task_hints,
     _tokenize,
 )
-from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.extractors import (
+    extract_filesystem_entities,
+    extract_markdown_file,
+    extract_markdown_outline_path,
+    index_python_path,
+)
 from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
@@ -33,8 +38,12 @@ def _indexed_entities_and_relations() -> tuple[list[Entity], list[Relation]]:
         for entity in extract_filesystem_entities(fixture_root)
         if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
     ]
+    markdown_outline = extract_markdown_outline_path(fixture_root)
     python_entities, python_relations = index_python_path(fixture_root)
-    return [*filesystem_entities, *python_entities], python_relations
+    return [*filesystem_entities, *markdown_outline.entities, *python_entities], [
+        *markdown_outline.relations,
+        *python_relations,
+    ]
 
 
 def _ranking_fixture_root() -> Path:
@@ -48,8 +57,12 @@ def _ranking_fixture_entities_and_relations() -> tuple[list[Entity], list[Relati
         for entity in extract_filesystem_entities(fixture_root)
         if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
     ]
+    markdown_outline = extract_markdown_outline_path(fixture_root)
     python_entities, python_relations = index_python_path(fixture_root)
-    return [*filesystem_entities, *python_entities], python_relations
+    return [*filesystem_entities, *markdown_outline.entities, *python_entities], [
+        *markdown_outline.relations,
+        *python_relations,
+    ]
 
 
 def test_pack_selects_symbol_by_name() -> None:
@@ -206,6 +219,39 @@ def test_pack_output_excludes_source_bodies_and_docstrings() -> None:
 
     assert '"""A class with a docstring."""' not in markdown
     assert "return str(value)" not in markdown
+
+
+def test_pack_can_select_relevant_markdown_doc_section_without_body_leakage(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    doc = repo / "benchmark_plan.md"
+    doc.write_text(
+        "# Benchmark plan\n\n"
+        "Do not leak this body paragraph into compact context.\n\n"
+        "## Retrieval dataset\n\n"
+        "Gold files and symbols for benchmark tasks live here.\n",
+        encoding="utf-8",
+    )
+    entities, relations = extract_markdown_file(repo, doc)
+
+    pack = build_context_pack(
+        task="Find retrieval dataset benchmark documentation",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+    )
+    markdown = render_context_pack_markdown(pack)
+
+    selected_headings = {
+        entity.metadata.get("heading")
+        for entity in pack.selected_entities
+        if entity.metadata.get("entity_type") == "doc_section"
+    }
+    assert "Retrieval dataset" in selected_headings
+    assert "Do not leak this body paragraph" not in markdown
+    assert "Gold files and symbols" not in markdown
 
 
 def test_suggested_files_are_deduplicated_deterministic_and_bounded() -> None:

@@ -6,7 +6,11 @@ from pathlib import Path
 
 from repo_semantic_memory.context.compression import resolve_profile
 from repo_semantic_memory.context.repo_map import build_repo_map_markdown
-from repo_semantic_memory.extractors import extract_filesystem_entities, index_python_path
+from repo_semantic_memory.extractors import (
+    extract_filesystem_entities,
+    extract_markdown_outline_path,
+    index_python_path,
+)
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
 
@@ -21,8 +25,12 @@ def _ranking_fixture_root() -> Path:
 def _merged_entities() -> tuple[list[Entity], list[Relation]]:
     fixture_root = _fixture_root()
     filesystem_entities = extract_filesystem_entities(fixture_root)
+    markdown_outline = extract_markdown_outline_path(fixture_root)
     python_entities, python_relations = index_python_path(fixture_root)
-    return [*filesystem_entities, *python_entities], python_relations
+    return [*filesystem_entities, *markdown_outline.entities, *python_entities], [
+        *markdown_outline.relations,
+        *python_relations,
+    ]
 
 
 def test_repo_map_includes_modules_classes_methods_functions_imports_and_source_ranges() -> None:
@@ -67,6 +75,26 @@ def test_repo_map_rendering_is_deterministic() -> None:
     second = build_repo_map_markdown(entities, relations, budget_chars=4000)
 
     assert first == second
+
+
+def test_repo_map_can_show_markdown_section_outline(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    doc = repo / "docs" / "guide.md"
+    doc.parent.mkdir()
+    doc.write_text("# Guide\n## Install\n", encoding="utf-8")
+    markdown_outline = extract_markdown_outline_path(repo)
+
+    output = build_repo_map_markdown(
+        markdown_outline.entities,
+        markdown_outline.relations,
+        budget_chars=4000,
+    )
+
+    assert "## docs/guide.md" in output
+    assert "- doc `docs/guide.md` docs/guide.md:1-2" in output
+    assert "- h1 `Guide` docs/guide.md:1-2" in output
+    assert "  - h2 `Install` docs/guide.md:2" in output
 
 
 def test_repo_map_source_citations_are_posix_paths() -> None:
