@@ -32,3 +32,12 @@ dist/
 
 # Local index artifacts
 .rsm/
+
+# Generated .ai/ snapshot files (volatile — depend on current index state)
+# Static template files (AGENT_COMMANDS.md, README.md, context_policy.md) may be committed.
+.ai/INDEX.yaml
+.ai/symbols.yaml
+.ai/relations.yaml
+.ai/components.yaml
+.ai/invariants.yaml
+.ai/repo_map.md

@@ -31,9 +31,27 @@ This repository hosts the `rsm` semantic compiler foundation.
 - Do not release `1.0.0` until the public API, schema versioning contract, and context-pack format are explicitly declared stable.
 - Keep `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` manually managed; release automation must not bump them automatically.
 
-## `.ai/` semantic memory export
+## Using RSM to develop RSM
 
-The canonical workflow for generating portable agent-facing artifacts is:
+When working on this repository, use RSM itself to navigate and understand the codebase:
+
+```bash
+# Re-index after structural changes
+uv run rsm index . --db .rsm/index.sqlite
+
+# Regenerate .ai/ if this project commits snapshots
+uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
+
+# Pack context for a specific development task
+uv run rsm pack --db .rsm/index.sqlite --task "<task description>" --budget 8000
+```
+
+See `.ai/AGENT_COMMANDS.md` for the full command guide and canonical workflows.
+
+Before editing source, run `rsm pack` to identify the relevant symbols and cited files.
+Do not read full source modules before checking the context pack output.
+
+
 
 ```bash
 uv run rsm index . --db .rsm/index.sqlite

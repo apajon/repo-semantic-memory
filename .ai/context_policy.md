@@ -26,14 +26,14 @@ Prefer loading only files relevant to the current task.
 
 `rsm repo-map` and `rsm pack` support deterministic profiles:
 
-- `agent_brief`
-- `agent_standard` (default)
-- `agent_debug`
-- `human_review`
-- `ci_summary`
-- `full`
+- `agent_brief`: smallest output, suppresses unresolved imports and low-signal detail.
+- `agent_standard`: default balanced profile for most coding tasks.
+- `agent_debug`: keeps ranking breakdown and compact score reasons for diagnostics.
+- `human_review`: balanced for human PR/design review workflows.
+- `ci_summary`: compact CI-oriented output with strict noise suppression.
+- `full`: maximum verbosity while still avoiding source body dumps.
 
-Profiles control:
+Profile controls include:
 
 - max imports per module
 - max components per entity
@@ -45,6 +45,14 @@ Profiles control:
 - max related symbols
 - max uncertainties
 - compact score reason inclusion
+
+Preservation rules always favor:
+
+- direct task matches
+- source citations
+- explicit public exports
+- high-confidence structural context
+- selected implementation symbols
 
 ## Staleness
 

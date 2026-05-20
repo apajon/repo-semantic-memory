@@ -70,6 +70,7 @@ def test_export_creates_expected_files(tmp_path: Path) -> None:
         "symbols.yaml",
         "relations.yaml",
         "context_policy.md",
+        "AGENT_COMMANDS.md",
     ):
         assert (ai_dir / name).exists(), f"Expected {name} to be created"
     # No components or invariants → those files should NOT exist
@@ -82,6 +83,7 @@ def test_export_creates_expected_files(tmp_path: Path) -> None:
         "symbols.yaml",
         "relations.yaml",
         "context_policy.md",
+        "AGENT_COMMANDS.md",
     }
 
 
@@ -343,7 +345,14 @@ def test_export_ai_cli_command_creates_files(
     assert "entities=" in out
     assert "files_written=" in out
 
-    for fname in ("README.md", "INDEX.yaml", "repo_map.md", "symbols.yaml", "relations.yaml"):
+    for fname in (
+        "README.md",
+        "INDEX.yaml",
+        "repo_map.md",
+        "symbols.yaml",
+        "relations.yaml",
+        "AGENT_COMMANDS.md",
+    ):
         assert (ai_dir / fname).exists(), f"Expected {fname} in .ai/"
 
 
@@ -383,3 +392,104 @@ def test_export_ai_cli_force_overwrites(tmp_path: Path, capsys: pytest.CaptureFi
     exit_code = main(["export-ai", "--db", str(db_path), "--out", str(ai_dir), "--force"])
     assert exit_code == 0
     assert readme.read_text(encoding="utf-8") != "CUSTOM CONTENT"
+
+
+# ---------------------------------------------------------------------------
+# AGENT_COMMANDS.md tests
+# ---------------------------------------------------------------------------
+
+
+def test_export_writes_agent_commands_md(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    exporter = _make_exporter(tmp_path, entities, [])
+    result = exporter.export()
+
+    assert (tmp_path / ".ai" / "AGENT_COMMANDS.md").exists()
+    assert "AGENT_COMMANDS.md" in result.files_written
+
+
+def test_agent_commands_contains_source_of_truth_warning(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    exporter = _make_exporter(tmp_path, entities, [])
+    exporter.export()
+
+    content = (tmp_path / ".ai" / "AGENT_COMMANDS.md").read_text(encoding="utf-8")
+    assert "WARNING" in content
+    assert "source of truth" in content.lower() or "Source of truth" in content
+    assert "stale" in content
+    assert "rsm export-ai" in content
+
+
+def test_agent_commands_contains_canonical_commands(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    exporter = _make_exporter(tmp_path, entities, [])
+    exporter.export()
+
+    content = (tmp_path / ".ai" / "AGENT_COMMANDS.md").read_text(encoding="utf-8")
+    assert "rsm index" in content
+    assert "rsm repo-map" in content
+    assert "rsm pack" in content
+
+
+def test_agent_commands_mentions_profiles(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    exporter = _make_exporter(tmp_path, entities, [])
+    exporter.export()
+
+    content = (tmp_path / ".ai" / "AGENT_COMMANDS.md").read_text(encoding="utf-8")
+    assert "agent_brief" in content
+    assert "agent_debug" in content
+
+
+def test_agent_commands_mentions_token_savings_caveat(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    exporter = _make_exporter(tmp_path, entities, [])
+    exporter.export()
+
+    content = (tmp_path / ".ai" / "AGENT_COMMANDS.md").read_text(encoding="utf-8")
+    assert "token" in content.lower()
+    assert "coverage" in content.lower()
+
+
+def test_agent_commands_no_absolute_local_paths(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    exporter = _make_exporter(tmp_path, entities, [])
+    exporter.export()
+
+    content = (tmp_path / ".ai" / "AGENT_COMMANDS.md").read_text(encoding="utf-8")
+    # Template must not embed tmp_path or any other absolute local filesystem path
+    assert str(tmp_path) not in content
+    # Must not start with a Unix root or Windows drive letter followed by a path segment
+    import re
+
+    assert not re.search(r"(?<!\S)/(?:home|tmp|var|usr|root|Users|mnt)/\S+", content)
+
+
+def test_agent_commands_is_deterministic(tmp_path: Path) -> None:
+    entities = [_make_entity("python:mymod", "module", "mymod", "src/mymod.py")]
+    out1 = tmp_path / "ai1"
+    out2 = tmp_path / "ai2"
+    for out in (out1, out2):
+        e = AiDirectoryExporter(
+            db_path=Path(".rsm/index.sqlite"),
+            output_dir=out,
+            entities=entities,
+            relations=[],
+            metadata={"schema_version": "0.1.0"},
+            generated_at="2026-01-01T00:00:00+00:00",
+        )
+        e.export()
+
+    assert (out1 / "AGENT_COMMANDS.md").read_text() == (out2 / "AGENT_COMMANDS.md").read_text()
+
+
+def test_export_creates_agent_commands_in_cli_run(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = _build_db(tmp_path)
+    ai_dir = tmp_path / ".ai"
+    capsys.readouterr()
+
+    exit_code = main(["export-ai", "--db", str(db_path), "--out", str(ai_dir)])
+    assert exit_code == 0
+    assert (ai_dir / "AGENT_COMMANDS.md").exists()
