@@ -167,6 +167,12 @@ def test_symbols_yaml_can_include_markdown_doc_sections(tmp_path: Path) -> None:
     assert parsed["symbols"][0]["kind"] == "doc"
     assert parsed["symbols"][0]["qualified_name"] == "docs/guide.md#install"
     assert parsed["symbols"][0]["source"] == "docs/guide.md:3"
+    assert parsed["symbols"][0]["metadata"] == {
+        "entity_type": "doc_section",
+        "section_level": 2,
+        "heading": "Install",
+        "anchor": "install",
+    }
 
 
 def test_relations_yaml_parses(tmp_path: Path) -> None:
