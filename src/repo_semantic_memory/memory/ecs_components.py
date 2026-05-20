@@ -221,8 +221,9 @@ def _infer_public_api_components(
         return
 
     # Index entities by name for name-based export resolution.
-    # Restrict to explicitly exportable kinds to avoid false matches on variables/parameters.
-    _EXPORTABLE_KINDS = frozenset({"class", "function", "method", "constant", "variable"})
+    # Restrict to explicitly exportable kinds to avoid false matches on non-exportable entities.
+    # Supported EntityKind values: class, function, method, field.
+    _EXPORTABLE_KINDS = frozenset({"class", "function", "method", "field"})
     entity_by_name: dict[str, list[Entity]] = {}
     for entity in entity_by_id.values():
         if entity.kind not in _EXPORTABLE_KINDS:

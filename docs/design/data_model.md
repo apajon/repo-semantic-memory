@@ -51,6 +51,16 @@ If occurrence-level tracking is required later, a future schema can introduce ex
 | `violates` | Invariant violation reference                                               |
 | `exports`  | Explicit re-export from a `__init__.py` module (static AST only; target may be unresolved) |
 
+### `PublicAPI` component status semantics
+
+A `PublicAPI` semantic component on an entity means the entity appears in the package's externally visible surface. It does **not** mean the API is stable or subject to any compatibility contract.
+
+- `status: confirmed` — the entity is explicitly re-exported from a `__init__.py` file (backed by an `exports` relation with source-range evidence). It is part of the package's public surface.
+- `status: inferred` — the entity is associated with a `__init__.py` module via heuristic relations (`contains` or resolved `imports`) but no explicit export statement was found. Export intent may be incomplete.
+- `status: needs_review` — insufficient evidence; treat as unvalidated.
+
+Confirmed status does not imply API stability, semantic versioning, or a backwards-compatibility guarantee. Those contracts must be documented separately.
+
 ### `exports` relation semantics
 
 The `exports` relation is produced by the `python_exports` extractor from `__init__.py` files.
