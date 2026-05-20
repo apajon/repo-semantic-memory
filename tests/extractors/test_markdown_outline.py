@@ -31,12 +31,20 @@ def test_markdown_outline_extracts_headings_with_metadata_and_ranges(tmp_path: P
     )
 
     entities, relations = extract_markdown_file(repo, doc)
-    sections = [entity for entity in entities if entity.metadata.get("entity_type") == "doc_section"]
+    sections = [
+        entity for entity in entities if entity.metadata.get("entity_type") == "doc_section"
+    ]
 
     assert [section.name for section in sections] == ["Overview", "Install plan", "API"]
     assert [section.metadata["section_level"] for section in sections] == [1, 2, 1]
-    assert [section.metadata["anchor"] for section in sections] == ["overview", "install-plan", "api"]
-    assert [(section.source_range.start_line, section.source_range.end_line) for section in sections] == [
+    assert [section.metadata["anchor"] for section in sections] == [
+        "overview",
+        "install-plan",
+        "api",
+    ]
+    assert [
+        (section.source_range.start_line, section.source_range.end_line) for section in sections
+    ] == [
         (1, 5),
         (4, 5),
         (6, 7),
@@ -129,6 +137,8 @@ def test_markdown_outline_ignores_headings_inside_fenced_code(tmp_path: Path) ->
     doc.write_text("# Real\n```markdown\n# Not heading\n```\n## Also real\n", encoding="utf-8")
 
     entities, _ = extract_markdown_file(repo, doc)
-    sections = [entity.name for entity in entities if entity.metadata.get("entity_type") == "doc_section"]
+    sections = [
+        entity.name for entity in entities if entity.metadata.get("entity_type") == "doc_section"
+    ]
 
     assert sections == ["Real", "Also real"]

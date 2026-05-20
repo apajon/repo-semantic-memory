@@ -513,7 +513,9 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     markdown_outline = extract_markdown_outline_path(repository_root)
     python_entities, python_relations = index_python_path(repository_root)
-    all_entities = _merge_entities(filesystem_entities, [*markdown_outline.entities, *python_entities])
+    all_entities = _merge_entities(
+        filesystem_entities, [*markdown_outline.entities, *python_entities]
+    )
     all_relations = [*markdown_outline.relations, *python_relations]
     git_status = "disabled"
     if with_git:
@@ -547,8 +549,7 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
         store.close()
     if with_git:
         print(
-            f"entities={len(all_entities)} relations={len(all_relations)} "
-            f"git_metadata={git_status}"
+            f"entities={len(all_entities)} relations={len(all_relations)} git_metadata={git_status}"
         )
         return 0
     print(f"entities={len(all_entities)} relations={len(all_relations)}")
@@ -830,7 +831,9 @@ def _index_for_repo_map(*, path: str) -> tuple[list[Entity], list[Relation]]:
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     markdown_outline = extract_markdown_outline_path(repository_root)
     python_entities, python_relations = index_python_path(repository_root)
-    all_entities = _merge_entities(filesystem_entities, [*markdown_outline.entities, *python_entities])
+    all_entities = _merge_entities(
+        filesystem_entities, [*markdown_outline.entities, *python_entities]
+    )
     return all_entities, [*markdown_outline.relations, *python_relations]
 
 

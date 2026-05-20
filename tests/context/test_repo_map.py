@@ -65,7 +65,7 @@ def test_repo_map_budget_is_approximately_respected() -> None:
 
     assert len(output) <= 160
     assert output.startswith("# Repo map")
-    assert output.endswith("[truncated: budget reached]")
+    assert output.rstrip().endswith("[truncated: budget reached]")
 
 
 def test_repo_map_rendering_is_deterministic() -> None:

@@ -49,8 +49,8 @@ def extract_markdown_outline_path(repo_root: Path | str) -> MarkdownOutline:
         if target.suffix.lower() not in _MARKDOWN_EXTENSIONS:
             return MarkdownOutline(entities=(), relations=())
         root = target.parent
-        entities, relations = extract_markdown_file(root, target)
-        return MarkdownOutline(entities=tuple(entities), relations=tuple(relations))
+        file_entities, file_relations = extract_markdown_file(root, target)
+        return MarkdownOutline(entities=tuple(file_entities), relations=tuple(file_relations))
 
     root = target
     entities: list[Entity] = []
@@ -107,7 +107,9 @@ def _iter_markdown_files(root: Path) -> list[Path]:
             file_path = Path(dirpath) / filename
             if file_path.suffix.lower() in _MARKDOWN_EXTENSIONS:
                 relative_path = file_path.relative_to(root).as_posix()
-                if not is_generated_artifact_path(relative_path) and not _is_binary_looking(file_path):
+                if not is_generated_artifact_path(relative_path) and not _is_binary_looking(
+                    file_path
+                ):
                     discovered.append(file_path)
     return discovered
 
@@ -118,7 +120,9 @@ def _extract_headings(lines: list[str]) -> list[_Heading]:
     fence_marker = ""
     for index, line in enumerate(lines, start=1):
         stripped = line.lstrip(" ")
-        if len(line) - len(stripped) <= 3 and (stripped.startswith("```") or stripped.startswith("~~~")):
+        if len(line) - len(stripped) <= 3 and (
+            stripped.startswith("```") or stripped.startswith("~~~")
+        ):
             marker = stripped[:3]
             if not in_fence:
                 in_fence = True
@@ -164,7 +168,9 @@ def _anchor_for_heading(text: str) -> str:
     return normalized or "section"
 
 
-def _section_entities(relative_path: str, lines: list[str], headings: list[_Heading]) -> list[Entity]:
+def _section_entities(
+    relative_path: str, lines: list[str], headings: list[_Heading]
+) -> list[Entity]:
     entities: list[Entity] = []
     for index, heading in enumerate(headings):
         end_line = _section_end_line(index, headings, len(lines))
@@ -210,12 +216,16 @@ def _contains_relations(doc_entity: Entity, section_entities: list[Entity]) -> l
     relations: list[Relation] = []
     stack: list[Entity] = []
     for section in section_entities:
-        relations.append(_contains_relation(doc_entity, section, note="document contains heading section"))
+        relations.append(
+            _contains_relation(doc_entity, section, note="document contains heading section")
+        )
         level = section.metadata.get("section_level")
         while stack and isinstance(level, int) and _section_level(stack[-1]) >= level:
             stack.pop()
         if stack:
-            relations.append(_contains_relation(stack[-1], section, note="parent heading contains child"))
+            relations.append(
+                _contains_relation(stack[-1], section, note="parent heading contains child")
+            )
         stack.append(section)
     return relations
 

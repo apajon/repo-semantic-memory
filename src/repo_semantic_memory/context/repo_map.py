@@ -162,7 +162,9 @@ def _build_module_sections(
     )
 
 
-def _build_doc_outlines(entities: Sequence[Entity], relations: Sequence[Relation]) -> list[DocOutline]:
+def _build_doc_outlines(
+    entities: Sequence[Entity], relations: Sequence[Relation]
+) -> list[DocOutline]:
     entity_by_id = {entity.id.value: entity for entity in entities}
     sections_by_doc_id: dict[str, list[Entity]] = defaultdict(list)
 
