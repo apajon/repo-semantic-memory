@@ -26,6 +26,15 @@ from repo_semantic_memory.mcp.tools import (
     ValidatePatchContextResponse,
     get_mcp_tool_contracts,
 )
+from repo_semantic_memory.mcp.handlers import (
+    handle_build_context_pack,
+    handle_explain_entity,
+    handle_export_ai_memory,
+    handle_get_git_summary,
+    handle_query_graph,
+    handle_search_symbols,
+    handle_validate_patch_context,
+)
 
 __all__ = [
     "BudgetEnvelope",
@@ -47,5 +56,12 @@ __all__ = [
     "Uncertainty",
     "ValidatePatchContextRequest",
     "ValidatePatchContextResponse",
+    "handle_build_context_pack",
+    "handle_explain_entity",
+    "handle_export_ai_memory",
+    "handle_get_git_summary",
+    "handle_query_graph",
+    "handle_search_symbols",
+    "handle_validate_patch_context",
     "get_mcp_tool_contracts",
 ]
