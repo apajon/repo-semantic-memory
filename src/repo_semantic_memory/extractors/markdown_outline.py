@@ -199,8 +199,8 @@ def _section_end_line(index: int, headings: list[_Heading], line_count: int) -> 
     heading = headings[index]
     for next_heading in headings[index + 1 :]:
         if next_heading.level <= heading.level:
-            return max(heading.line, next_heading.line - 1)
-    return max(heading.line, line_count)
+            return next_heading.line - 1
+    return line_count
 
 
 def _section_metadata(heading: _Heading) -> dict[str, JsonValue]:
