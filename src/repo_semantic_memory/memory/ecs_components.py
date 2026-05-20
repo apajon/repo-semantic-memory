@@ -17,7 +17,9 @@ from repo_semantic_memory.model import (
 )
 
 _HEURISTIC_EXTRACTOR = "ecs_heuristic"
+_EXPORT_EXTRACTOR = "python_exports"
 _INFERRED_CONFIDENCE = 0.6
+_CONFIRMED_CONFIDENCE = 0.9
 _ROS_LIKE_TOKENS = ("publisher", "subscriber", "service", "client", "timer")
 _ROS_LIKE_METHOD_NAMES = frozenset(
     {"publish", "on_message", "on_tick", "call", "call_async", "wait_for_service"}
@@ -218,11 +220,60 @@ def _infer_public_api_components(
     if not init_module_ids:
         return
 
+    # Index entities by name for name-based export resolution.
+    entity_by_name: dict[str, list[Entity]] = {}
+    for entity in entity_by_id.values():
+        if entity.kind in {"repository", "package", "module"}:
+            continue
+        entity_by_name.setdefault(entity.name, []).append(entity)
+
     for relation in relations:
         source_id = relation.source_entity_id.value
-        target_id = relation.target_entity_id.value
         if source_id not in init_module_ids:
             continue
+
+        # --- Explicit exports relation (strongest evidence) ---
+        if relation.kind == "exports":
+            exported_name = relation.metadata.get("exported_name")
+            if not isinstance(exported_name, str):
+                continue
+            init_entity = entity_by_id.get(source_id)
+            if init_entity is not None:
+                # The __init__.py module itself is a confirmed PublicAPI entry-point.
+                _upsert_upgrade(
+                    components,
+                    _build_confirmed_component(
+                        entity=init_entity,
+                        component_type="PublicAPI",
+                        properties={
+                            "evidence_kind": "exports_relation",
+                            "exported_name": exported_name,
+                            "exporter_module_id": source_id,
+                        },
+                        evidence=relation.evidence,
+                    ),
+                )
+            # Resolve the exported name against the entity index.
+            matched_entities = entity_by_name.get(exported_name, [])
+            for matched_entity in matched_entities:
+                _upsert_upgrade(
+                    components,
+                    _build_confirmed_component(
+                        entity=matched_entity,
+                        component_type="PublicAPI",
+                        properties={
+                            "evidence_kind": "explicit_export",
+                            "exported_name": exported_name,
+                            "exporter_module_id": source_id,
+                            "via_all": relation.metadata.get("via_all", False),
+                        },
+                        evidence=relation.evidence,
+                    ),
+                )
+            continue
+
+        # --- Fallback: heuristic from contains/imports (inferred) ---
+        target_id = relation.target_entity_id.value
         target_entity = entity_by_id.get(target_id)
         if target_entity is None or target_entity.kind in {"repository", "package", "module"}:
             continue
@@ -247,6 +298,35 @@ def _infer_public_api_components(
                 ),
             ),
         )
+
+
+def _build_confirmed_component(
+    *,
+    entity: Entity,
+    component_type: SemanticComponentType,
+    properties: dict[str, JsonValue],
+    evidence: Evidence | None,
+) -> SemanticComponent:
+    if evidence is not None:
+        evidence_tuple: tuple[Evidence, ...] = (evidence,)
+    else:
+        # Fall back to entity source range when no explicit evidence is available.
+        evidence_tuple = (
+            Evidence(
+                source_range=entity.source_range,
+                extractor=_EXPORT_EXTRACTOR,
+                confidence=_CONFIRMED_CONFIDENCE,
+                note="export_evidence_anchored_to_entity",
+            ),
+        )
+    return SemanticComponent(
+        component_type=component_type,
+        entity_id=entity.id,
+        properties=properties,
+        evidence=evidence_tuple,
+        confidence=_CONFIRMED_CONFIDENCE,
+        status="confirmed",
+    )
 
 
 def _build_inferred_component(
@@ -281,6 +361,19 @@ def _upsert(
     if key in components:
         return
     components[key] = component
+
+
+def _upsert_upgrade(
+    components: dict[tuple[str, str], SemanticComponent], component: SemanticComponent
+) -> None:
+    """Insert or upgrade: prefer ``confirmed`` over ``inferred``/``needs_review``."""
+    key = (component.entity_id.value, component.component_type)
+    existing = components.get(key)
+    if existing is None:
+        components[key] = component
+        return
+    if component.status == "confirmed" and existing.status != "confirmed":
+        components[key] = component
 
 
 def _normalized_path(path: str) -> str:

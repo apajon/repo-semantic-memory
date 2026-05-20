@@ -89,6 +89,9 @@ _TEST_TASK_INTENT_BONUS = 6
 _PUBLIC_API_PATH_ROLE_BONUS = 16
 _PUBLIC_API_TASK_INTENT_BONUS = 8
 _PUBLIC_API_COMPONENT_BONUS = 16
+# Boost for test files that test public imports (e.g. test_*.py with public/api/import tokens).
+# Applied when public_api task hint is active and entity is in a tests/ path.
+_PUBLIC_API_IMPORT_TEST_BOOST = 4
 # Detection of generated artifacts is delegated to path_roles.is_generated_artifact_path.
 _GENERATED_ARTIFACT_PENALTY = -80
 
@@ -485,6 +488,18 @@ def _score_entity(
                     "task_intent",
                     "public API task intent boost",
                     _PUBLIC_API_TASK_INTENT_BONUS,
+                )
+            )
+        # Boost test files that test public imports (e.g. public_api_checks.py).
+        # These are useful supporting evidence even when no explicit "tests" hint fires.
+        _in_tests = "/tests/" in f"/{source_path}" or source_path.startswith("tests/")
+        if _in_tests and entity.kind in {"module", "test", "function", "method"}:
+            task_intent_score += _PUBLIC_API_IMPORT_TEST_BOOST
+            reasons.append(
+                (
+                    "task_intent",
+                    "public API task hint -> boosted public-import test",
+                    _PUBLIC_API_IMPORT_TEST_BOOST,
                 )
             )
 
