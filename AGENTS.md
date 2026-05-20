@@ -2,71 +2,72 @@
 
 ## Purpose
 
-This repository hosts the `rsm` semantic compiler foundation.
+This repository hosts `rsm`, a deterministic repository context compiler for coding agents.
 
-## Agent workflow
+## Canonical commands
 
-1. Read source files, docs, and tests before changing behavior.
-2. Keep modules focused and deterministic.
-3. Add or update tests for any behavior change.
-4. Run formatting, linting, type-checking, and tests before finalizing.
-5. Keep semantic claims tied to explicit evidence or mark uncertainty.
+```bash
+# index
+uv run rsm index . --db .rsm/index.sqlite
+
+# repo map
+uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
+
+# context pack
+uv run rsm pack --db .rsm/index.sqlite --task "<task description>" --budget 8000 --profile agent_standard
+
+# .ai export
+uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
+
+# eval retrieval
+uv run rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --json
+
+# eval compare
+uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 --json
+```
+
+## Generated artifacts and source of truth
+
+- Source of truth: code, docs, tests, and git history.
+- `.rsm/` stores local SQLite working state and is always local-only.
+- `.ai/` stores compiled semantic artifacts for agents and may be stale.
+- Regenerate `.ai/` after indexing when structural changes occur.
+
+## `.rsm/` vs `.ai/`
+
+- `.rsm/index.sqlite`: local index database, gitignored.
+- `.ai/INDEX.yaml`, `.ai/symbols.yaml`, `.ai/relations.yaml`, `.ai/components.yaml`, `.ai/repo_map.md`: volatile generated snapshots, gitignored in this repo.
+- `.ai/AGENT_COMMANDS.md`, `.ai/README.md`, `.ai/context_policy.md`: static tracked templates.
+
+## Profiles
+
+`rsm repo-map` and `rsm pack` support deterministic profiles:
+
+- `agent_brief`
+- `agent_standard`
+- `agent_debug`
+- `human_review`
+- `ci_summary`
+- `full`
+
+Use tighter profiles for smaller context budgets and debug profile for ranking diagnostics.
+
+## Evidence and interpretation rules
+
+- Do not treat inferred relations/components as confirmed facts.
+- Always verify important claims against cited source ranges.
+- `confirmed PublicAPI` means explicitly exported in source; it is not a stability promise.
+- Token-savings values are approximate (`chars / 4`) and directional.
+- Benchmark claims must be scoped to the current internal benchmark.
+
+## Versioning policy (pre-1.0)
+
+- Stay in `0.x` until public API/schema/context-pack format are explicitly stable.
+- `fix:` patch, `feat:` minor, `feat!` or `BREAKING CHANGE` triggers major semantics.
+- Keep schema/context-pack version contracts explicit and intentional.
 
 ## Guardrails
 
-- Do not add repository scanning, AST extraction, SQLite, vector DB, Neo4j, MCP server, or web UI in this phase.
-- Keep APIs explicit and scriptable.
-- Keep CLI output stable for automation.
-
-## Commit conventions for releases
-
-- `fix:` triggers a patch release.
-- `feat:` triggers a minor release.
-- `feat!:` or a `BREAKING CHANGE:` footer triggers a major release.
-- `docs:`, `test:`, `chore:`, and `ci:` should not normally trigger a release.
-
-## Pre-1.0 versioning policy
-
-- The project is in initial development and must remain in the `0.x` range.
-- Do not release `1.0.0` until the public API, schema versioning contract, and context-pack format are explicitly declared stable.
-- Keep `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` manually managed; release automation must not bump them automatically.
-
-## Using RSM to develop RSM
-
-When working on this repository, use RSM itself to navigate and understand the codebase:
-
-```bash
-# Re-index after structural changes
-uv run rsm index . --db .rsm/index.sqlite
-
-# Regenerate .ai/ if this project commits snapshots
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
-
-# Pack context for a specific development task
-uv run rsm pack --db .rsm/index.sqlite --task "<task description>" --budget 8000
-```
-
-See `.ai/AGENT_COMMANDS.md` for the full command guide and canonical workflows.
-
-Before editing source, run `rsm pack` to identify the relevant symbols and cited files.
-Do not read full source modules before checking the context pack output.
-
-
-
-```bash
-uv run rsm index . --db .rsm/index.sqlite
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai
-```
-
-Use `--force` to regenerate after re-indexing:
-
-```bash
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
-```
-
-Generated files under `.ai/` are compiled semantic artifacts. Projects may choose
-to commit them as a shared snapshot (similar to generated protobufs) or keep them
-local-only. The `.rsm/` index (SQLite) must never be committed — it is git-ignored.
-
-Source of truth always remains code, docs, tests, and git history. Generated `.ai/`
-files may be stale; regenerate after significant structural changes.
+- Keep outputs deterministic and scriptable.
+- Keep semantic claims tied to evidence or marked uncertain.
+- Avoid overclaiming benchmark scope or quality.

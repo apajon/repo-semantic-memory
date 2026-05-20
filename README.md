@@ -1,595 +1,247 @@
 # repo-semantic-memory
 
-`repo-semantic-memory` is an experimental repository context compiler for coding agents.
+`repo-semantic-memory` (`rsm`) is an **experimental (pre-1.0)** deterministic repository context compiler for coding agents.
 
-It indexes a software repository and produces compact, deterministic, source-cited knowledge artifacts that help agents understand codebases without reading entire files or dumping excessive context.
+It indexes a repository and produces compact, source-cited artifacts (repo maps, task context packs, JSONL graph exports, `.ai/` snapshots) that are local-first and benchmarkable.
 
-The project is currently pre-1.0 and under active design.
+This project is intentionally positioned as a repository context compiler, **not** a broad "AI knowledge graph platform".
 
-## What this is
+## Positioning
 
-`repo-semantic-memory` is designed to help coding agents answer questions like:
+RSM focuses on:
 
-- Which files and symbols are relevant to this task?
-- What classes, functions, methods, imports, and relations exist in this repository?
-- Can we generate a compact repo map instead of pasting whole files?
-- Can we benchmark whether retrieval finds the expected files and symbols?
-- Can future context packs be measured against a generic repo map?
+- deterministic extraction and ranking
+- source-cited artifacts tied to code/docs/tests/git metadata
+- benchmarkable retrieval and compression behavior
+- local-first outputs that can be inspected in plain text
 
-The long-term goal is to build a semantic memory layer for repositories, including:
-
-- symbol indexes
-- structural relations
-- compact repo maps
-- task-specific context packs
-- evidence-backed semantic components
-- claims and invariants
-- benchmark reports
-- optional MCP integration
-
-## What this is not
-
-This project is not:
-
-- an Obsidian vault generator
-- a generic vector database
-- a documentation generator
-- an IDE replacement
-- a language server replacement
-- a code completion model
-- an LLM wrapper
-
-The first priority is deterministic repository analysis, compact context generation, and measurable retrieval quality.
+Source of truth always remains the repository itself (code, docs, tests, git history).
 
 ## Current status
 
-Experimental MVP.
-
-Implemented:
-
-- Python 3.12+ package using `uv`
-- CLI entrypoint: `rsm`
-- deterministic version contracts
-- filesystem scanning
-- Python AST symbol extraction
-- SQLite local index
-- optional minimal Git temporal metadata extraction
-- compact repo map generation
-- task-specific context pack generation
-- local retrieval benchmark harness
-- ECS-style semantic component inference (derived, non-persisted)
-- repo-map vs lexical context-pack baseline comparison
-
-Not implemented yet:
-
-- full historical semantic memory
-- MCP server
-- embeddings
-- LLM summarization
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/<owner>/repo-semantic-memory.git
-cd repo-semantic-memory
-```
-
-Install dependencies:
-```bash
-uv sync --all-groups
-```
-Run the CLI:
-```bash
-uv run rsm --help
-uv run rsm version
-```
+- MVP is functional
+- benchmark dataset has expanded (still small by category)
+- token-savings metrics are reported (approximate)
+- `.ai/` export exists
+- JSONL import/export exists
+- ranking explainability exists (`--explain-ranking`)
+- deterministic compression profiles exist
+- Markdown section extraction exists
+- public API export resolver exists
+- test relationship extraction exists
+- pure MCP handlers may exist depending on merge state
 
 ## Quick start
 
-Index a repository into SQLite:
 ```bash
-uv run rsm index /path/to/repo --db .rsm/index.sqlite
-```
-Inspect indexed entities:
-```bash
-uv run rsm inspect entities --db .rsm/index.sqlite
-```
-Inspect indexed relations:
-```bash
-uv run rsm inspect relations --db .rsm/index.sqlite
-```
-Generate a compact repo map:
-```bash
+# install deps
+uv sync --all-groups
+
+# build local index
+uv run rsm index . --db .rsm/index.sqlite
+
+# compact repository map
 uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
-```
-Generate a task-specific context pack in Markdown:
-```bash
+
+# task-specific context pack
 uv run rsm pack \
-  --task "Update DerivedThing imports in src/python_symbols.py" \
   --db .rsm/index.sqlite \
+  --task "find where context pack ranking happens" \
   --budget 4000 \
   --profile agent_standard
-```
-Generate a task-specific context pack in YAML-compatible structured output:
-```bash
-uv run rsm pack \
-  --task "Update DerivedThing imports in src/python_symbols.py" \
-  --db .rsm/index.sqlite \
-  --budget 4000 \
-  --format yaml \
-  --profile agent_standard
-```
-Or generate a repo map directly from a path without leaving persistent artifacts:
-```bash
-uv run rsm repo-map --path /path/to/repo --budget 4000 --profile agent_standard
-```
-Run a retrieval benchmark:
-```bash
-uv run rsm eval retrieval \
-  --db .rsm/index.sqlite \
-  --dataset benchmarks/tasks.yaml
-```
-Generate JSON output:
-```bash
+
+# deterministic .ai/ artifact export
+uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
+
+# JSONL graph portability
+uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
+uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
+
+# benchmark retrieval
 uv run rsm eval retrieval \
   --db .rsm/index.sqlite \
   --dataset benchmarks/tasks.yaml \
   --json
-```
-Generate a Markdown report:
-```bash
-uv run rsm eval retrieval \
+
+# compare repo-map baseline vs lexical context pack baseline
+uv run rsm eval compare \
   --db .rsm/index.sqlite \
   --dataset benchmarks/tasks.yaml \
-  --markdown-report retrieval_report.md
+  --budget 4000 \
+  --json
 ```
 
+## Public API export semantics
 
-## CLI overview
+RSM extracts Python exports from `__init__.py` via static AST analysis and uses that evidence to mark `PublicAPI` components as `confirmed`.
+
+Important caveat:
+
+- `confirmed PublicAPI` means **explicitly exported in source** (for example via `__all__`/export patterns)
+- it does **not** mean a long-term stability guarantee for users of that API
+
+## Test relationship extraction
+
+RSM infers `tests` relations between test entities and implementation entities using deterministic heuristics (for example direct imports and path/symbol signals). These are emitted as inferred relations with metadata and confidence labels.
+
+## Markdown section extraction
+
+RSM indexes Markdown headings as section entities (`doc_section`) with source ranges and stable IDs, then adds `contains` relations between documents and sections (including nested heading structure).
+
+## Compression profiles
+
+`rsm repo-map` and `rsm pack` support deterministic profiles:
+
+- `agent_brief`
+- `agent_standard` (default)
+- `agent_debug`
+- `human_review`
+- `ci_summary`
+- `full`
+
+Profiles control detail level and noise suppression while preserving deterministic ordering.
+
+## Benchmarks and token-savings caveats
+
+Use local benchmark commands:
+
 ```bash
-rsm version
-rsm scan <path>
-rsm index-python <path> --json
-rsm index <path> --db .rsm/index.sqlite [--with-git]
-rsm git summary <path> [--json]
-rsm inspect entities --db .rsm/index.sqlite [--json]
-rsm inspect relations --db .rsm/index.sqlite [--json]
-rsm repo-map --db .rsm/index.sqlite --budget 4000 [--profile agent_brief|agent_standard|agent_debug|human_review|ci_summary|full]
-rsm repo-map --path <path> --budget 4000 [--profile agent_brief|agent_standard|agent_debug|human_review|ci_summary|full]
-rsm pack --task "..." --db .rsm/index.sqlite --budget 4000 [--format markdown|yaml] [--explain-ranking] [--profile agent_brief|agent_standard|agent_debug|human_review|ci_summary|full]
-rsm components infer --db .rsm/index.sqlite [--json]
-rsm components list --db .rsm/index.sqlite [--json]
-rsm invariants export --db .rsm/index.sqlite --out invariants.yaml
-rsm invariants import --db .rsm/index.sqlite invariants.yaml
-rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
-rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
-rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml
-rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 [--json]
+uv run rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --json
+uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 --json
 ```
 
-## Git temporal metadata (optional)
+When discussing results:
 
-`rsm index --with-git` attaches local Git metadata under `entity.metadata.git`.
+- say **"on the current internal benchmark"**
+- benchmark categories are still small; results are directional
+- token estimate is approximate and deterministic (`estimated_tokens = chars / 4`)
+- token savings are only meaningful when gold coverage is preserved
+- do not claim scientific superiority
 
-Important scope:
+## Illustrative examples (generated, small, non-authoritative)
 
-- This metadata is **temporal context only**.
-- It is not semantic evidence, architectural truth, or inferred claims.
-- `SCHEMA_VERSION` remains unchanged because data is stored in the existing JSON metadata field.
+### 1) Context pack snippet
 
-Current fields:
+```markdown
+# Context pack
+Task: Find explicit public API exports for lifecore_ros2 and related tests
 
-- `last_commit_hash`
-- `last_commit_date` (stable ISO 8601 UTC, e.g. `2024-05-18T00:00:00+00:00`)
-- `commit_count`
+## Selected symbols
+- tests.fixtures.ranking_repo.src.lifecore_ros2
+- tests.fixtures.ranking_repo.src.lifecore_ros2.components.lifecycle_component.LifecycleComponent
 
-Behavior details:
+## Suggested files to inspect
+- tests/fixtures/ranking_repo/src/lifecore_ros2/__init__.py
+- tests/fixtures/ranking_repo/src/lifecore_ros2/components/lifecycle_component.py
+```
 
-- Dirty state in `rsm git summary` is `true` when `git status --porcelain` returns any entry.
-- File lookups use repository-relative POSIX paths.
-- `--with-git` can be slower on large repositories because it runs local Git queries per indexed path.
+### 2) Repo-map snippet
 
-## JSONL interop
-
-Machine-facing graph portability is available via JSONL import/export.
-
-`export-jsonl` emits deterministic `entities.jsonl`, `relations.jsonl`, and `metadata.json`
-(`components.jsonl` is included only when inferred components are available).
-
-Notes:
-
-- `components.jsonl` is a **derived snapshot** (not persisted SQLite facts).
-- `import-jsonl` ignores `components.jsonl` and imports entities/relations only in the current schema.
-- `metadata.json` includes `export_format` and `export_format_version` so interchange can evolve
-  independently from SQLite `SCHEMA_VERSION`.
-
-## Data model
-
-The MVP data model is intentionally small.
-
-Core objects:
-
-StableId
-
-SourceRange
-
-Evidence
-
-Entity
-
-Relation
-
-
-Supported entity kinds:
-
-repository
-package
-module
-class
-function
-method
-field
-test
-doc
-concept
-invariant
-
-Supported relation kinds:
-
-contains
-imports
-inherits
-calls
-uses
-tests
-documents
-owns
-requires
-violates
-
-Relations are currently logical edges keyed by:
-
-(source_id, target_id, kind)
-
-Repeated occurrences of the same logical relation are collapsed. This is deliberate for the MVP. A later schema may add occurrence-level relation IDs if line-level multiplicity becomes important.
-
-## Python extraction
-
-The Python AST extractor currently extracts:
-
-modules
-
-classes
-
-functions
-
-methods
-
-imports
-
-inheritance declarations
-
-source ranges
-
-simple metadata such as docstring presence, decorators, signatures, and async flags
-
-
-Limitations:
-
-no full type inference
-
-no import resolution
-
-no inheritance target resolution
-
-no call graph extraction yet
-
-no nested function modeling guarantee
-
-no LLM summarization
-
-
-Unresolved inheritance targets are represented explicitly and must not be treated as resolved graph facts.
-
-## Markdown outline extraction
-
-Markdown files are indexed as `doc` entities. ATX headings (`#` through `######`) are also
-represented as `doc` entities with metadata:
-
-- `entity_type: doc_section`
-- `section_level`
-- `heading`
-- `anchor`
-
-The Markdown outline extractor emits source ranges for heading sections and `contains`
-relations from the document to each section. Nested headings also receive parent-section
-`contains` relations. Section IDs are stable across runs because they are derived from the
-repository-relative path, heading anchor, and heading line. Full section bodies are not stored
-in entity metadata or context-pack output.
-
-## Repo map
-
-The repo map is a compact Markdown representation of indexed symbols.
-
-It includes:
-
-modules
-
-classes
-
-methods
-
-functions
-
-Markdown document section outlines
-
-compact imports
-
-source citations
-
-
-Example:
-
+```markdown
 # Repo map
-
-## src/pkg/module.py
-
-- module `pkg.module` src/pkg/module.py:1-120
-- class `pkg.module.MyClass` src/pkg/module.py:10-42
-  - method `run` src/pkg/module.py:20-35
-- function `pkg.module.helper` src/pkg/module.py:45-51
-
-Imports:
-- `typing` static
-- `pathlib.Path` static
-
-The --budget option is currently an approximate character budget, not a tokenizer-based token budget.
-
-## Context pack
-
-The context pack is a compact task-specific output generated from indexed entities and relations.
-
-Selection behavior in the MVP:
-
-- lexical matching across entity names, qualified names, source paths, stable IDs, and string-like metadata
-- direct graph-neighbor expansion from selected entities
-- deterministic ranking and deterministic tie-break by stable ID
-- conservative handling of unresolved import/inheritance edges with explicit uncertainty
-- no source bodies and no full docstring content in output
-
-`--format yaml` emits a JSON-formatted payload that is YAML 1.2-compatible.
-
-Profiles:
-
-- `agent_brief`: smallest compact context
-- `agent_standard` (default): balanced compact context
-- `agent_debug`: includes ranking breakdown and compact score reasons
-- `human_review`: balanced for human review
-- `ci_summary`: compact CI-focused context
-- `full`: highest verbosity without source body dumps
-
-Budget semantics:
-
-- budget is character-based (not tokenizer-based)
-- budget is applied during context-pack construction and final Markdown rendering
-- selected files are deduplicated, deterministic, and bounded by the budget-constrained selected entities
-- semantic component labels are compact and currently emitted only in structured context-pack payloads
-  (not in Markdown), so they do not consume Markdown budget or displace cited symbols
-
-## Semantic components
-
-Semantic components are currently derived from indexed entities/relations at query time and are not
-persisted in SQLite schema tables.
-
-Use:
-
-```bash
-uv run rsm components infer --db .rsm/index.sqlite --json
-uv run rsm components list --db .rsm/index.sqlite --json
+## src/repo_semantic_memory/cli.py
+- module repo_semantic_memory.cli
+- function repo_semantic_memory.cli.build_parser
+- function repo_semantic_memory.cli.main
 ```
 
-`components list` recomputes and returns the same derived view as `components infer`.
+### 3) Benchmark report snippet
 
-## Claims and invariants
-
-Claims and invariants now have explicit typed models with evidence and uncertainty states.
-
-Current persistence decision:
-
-- claims/invariants are exported and imported as standalone JSON-style YAML 1.2-compatible files
-- SQLite schema is unchanged for this phase (no claim/invariant tables yet)
-- `SCHEMA_VERSION` is intentionally unchanged because persisted DB schema did not change
-- `--db` is used only for index/schema compatibility checks; claim/invariant payloads are not read from SQLite
-
-Use:
-
-```bash
-uv run rsm invariants export --db .rsm/index.sqlite --out invariants.yaml
-uv run rsm invariants import --db .rsm/index.sqlite invariants.yaml
+```markdown
+# Baseline comparison report
+- dataset: benchmarks/tasks.yaml
+- tasks: 12
+- wins: repo_map=0, lexical_context_pack=11, inconclusive=1
 ```
 
-`rsm invariants import` currently validates the payload only and does not persist claims/invariants to SQLite.
-`rsm invariants export` writes an explicit empty document note when no claims/invariants are provided:
-`No claims or invariants are inferred automatically by default.`
+### 4) Token-savings example (approximate)
 
-## Retrieval benchmarks
-
-Retrieval benchmarks are local and deterministic.
-
-Dataset example:
-
-tasks:
-  - id: example_001
-    category: code_localization
-    prompt: "Where is inactive publish gating enforced?"
-    gold:
-      files:
-        - src/example.py
-      symbols:
-        - example.Symbol
-      invariants:
-        - inactive_outgoing_calls_forbidden
-
-Gold files should be repository-relative POSIX paths.
-
-Gold symbols are intended to match indexed entity names, qualified names, or IDs depending on benchmark configuration.
-
-Current metrics:
-
-file recall@k
-
-symbol recall@k
-
-file MRR
-
-symbol MRR
-
-approximate context character estimate
-
-gold file coverage
-
-gold symbol coverage
-
-
-Gold invariants may appear in datasets for future compatibility, but invariant retrieval is not implemented yet.
-
-## Design principles
-
-1. Source remains the source of truth.
-
-Code, docs, tests, and git history are authoritative. Generated memory artifacts must be traceable back to source evidence.
-
-
-2. Deterministic extraction first.
-
-Prefer AST, filesystem, and static analysis before LLM-generated summaries.
-
-
-3. Compact context over large dumps.
-
-The project optimizes for concise, cited, task-relevant context.
-
-
-4. Evidence over vibes.
-
-Semantic claims must eventually carry source evidence or be marked uncertain.
-
-
-5. Measure before adding complexity.
-
-Repo maps, context packs, ECS components, invariants, embeddings, and MCP integrations should be benchmarked against simpler baselines.
-
-
-
-## Versioning
-
-This project uses semantic versioning through python-semantic-release.
-
-The project is still in 0.x development.
-
-Important version contracts:
-
-package version
-
-schema version
-
-context-pack version
-
-
-These are separate.
-
-The package version may change through semantic-release. Schema and context-pack versions must only change when their persisted compatibility contracts change.
-
-During 0.x development:
-
-fix: bumps patch
-
-feat: bumps minor
-
-breaking changes do not imply 1.0.0
-
-1.0.0 must not be released until the public API, schema, and context-pack format are explicitly declared stable
-
-
-## Development
-
-Install all dependencies:
-```bash
-uv sync --all-groups
+```text
+average_estimated_tokens_saved: 442.58
+average_compression_ratio: 0.5566
+coverage_preserved_tasks: file=12, symbol=12
 ```
-Run checks:
+
+### 5) `.ai/` export listing example
+
+```text
+.ai/
+  AGENT_COMMANDS.md
+  README.md
+  context_policy.md
+  INDEX.yaml
+  symbols.yaml
+  relations.yaml
+  components.yaml
+  repo_map.md
+```
+
+### 6) lifecore_ros2 case-study excerpt (fixture-based)
+
+```text
+task: package_public_api_exports
+category: public_api_localization
+fixture files include:
+- tests/fixtures/ranking_repo/src/lifecore_ros2/__init__.py
+- tests/fixtures/ranking_repo/src/lifecore_ros2/components/lifecycle_component.py
+```
+
+All examples above are illustrative snapshots and may become stale after re-indexing.
+
+## `.rsm/` and `.ai/` tracking policy
+
+- `.rsm/` (SQLite index) is local working state and must remain ignored
+- volatile `.ai/` snapshots are ignored by default:
+  - `.ai/INDEX.yaml`
+  - `.ai/symbols.yaml`
+  - `.ai/relations.yaml`
+  - `.ai/components.yaml`
+  - `.ai/repo_map.md`
+  - `.ai/invariants.yaml`
+- static `.ai` guide/policy templates are intentionally tracked:
+  - `.ai/AGENT_COMMANDS.md`
+  - `.ai/README.md`
+  - `.ai/context_policy.md`
+
+Generated outputs should not be committed accidentally unless a PR intentionally versions them.
+
+## Related work and scope boundaries
+
+Adjacent categories include:
+
+- broad repository knowledge graph tools
+- local document/search and code navigation tools
+- token/output compression tools for LLM workflows
+
+RSM’s differentiator is the combination of:
+
+- deterministic extraction and ranking
+- explicit source citations and uncertainty signaling
+- benchmarked context artifacts
+- local-first operation and inspectable outputs
+
+RSM does not claim global superiority over other tools or scientific generalization beyond current internal benchmark coverage.
+
+## Limitations
+
+- pre-1.0: API/format ergonomics may evolve
+- benchmark categories are still small and not comprehensive
+- token metrics are approximate (`chars / 4`), not tokenizer-accurate
+- some relations/components are inferred and require source verification
+- extracted context is compact by design and may omit useful details for some tasks
+
+## Versioning and license
+
+- package versioning uses python-semantic-release
+- project remains in `0.x` (no accidental `1.0.0` path intended)
+- `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` are managed explicitly for compatibility
+- license is Apache-2.0 across project metadata and repository license files
+
+## Development checks
+
 ```bash
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src
-uv run pytest
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
 ```
-Format code:
-```bash
-uv run ruff format .
-```
-
-
-## Devcontainer
-
-A minimal devcontainer is provided for reproducible development.
-
-Open the repository in VS Code or a compatible environment and rebuild the container. The devcontainer installs uv and runs:
-```bash
-uv sync --all-groups
-```
-## Roadmap
-
-Near-term:
-
-task-specific context pack builder
-
-repo-map vs context-pack baseline comparison
-
-ECS-style semantic component layer
-
-claims and invariants
-
-.ai/ export
-
-JSONL import/export
-
-
-Later:
-
-historical git temporal memory
-
-MCP server
-
-richer graph traversal
-
-language-server or Tree-sitter integration
-
-optional vector retrieval
-
-public benchmark datasets
-
-
-## Research and design notes
-
-See:
-
-docs/roadmap.md
-
-docs/design/architecture.md
-
-docs/design/data_model.md
-
-docs/benchmarks/benchmark_plan.md
-
-
-If present, the initial research report is stored under:
-
-docs/research/
-
-
-## License
-
-Apache License 2.0
