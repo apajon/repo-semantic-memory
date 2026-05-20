@@ -91,8 +91,10 @@ class SearchSymbolsRequest:
     """Placeholder request for symbol lookup over the local index."""
 
     query: str
+    db_path: str = ".rsm/index.sqlite"
     limit: int = 10
     entity_kinds: tuple[str, ...] = ()
+    path_roles: tuple[str, ...] = ()
     include_relations: bool = False
 
     def __post_init__(self) -> None:
@@ -107,6 +109,7 @@ class SearchSymbolsResponse:
     """Placeholder response for symbol search results."""
 
     matches: tuple[str, ...] = ()
+    results: tuple[dict[str, object], ...] = ()
     citations: tuple[Citation, ...] = ()
     uncertainties: tuple[Uncertainty, ...] = ()
     budget: BudgetEnvelope | None = None
@@ -117,6 +120,7 @@ class ExplainEntityRequest:
     """Placeholder request for deterministic entity explanation."""
 
     entity_id: str
+    db_path: str = ".rsm/index.sqlite"
     include_incoming_relations: bool = True
     include_outgoing_relations: bool = True
     include_components: bool = True
@@ -132,6 +136,9 @@ class ExplainEntityResponse:
     """Placeholder response for a resolved entity description."""
 
     entity_id: str
+    entity: dict[str, object] | None = None
+    relations: tuple[dict[str, object], ...] = ()
+    semantic_components: tuple[dict[str, object], ...] = ()
     related_entity_ids: tuple[str, ...] = ()
     citations: tuple[Citation, ...] = ()
     uncertainties: tuple[Uncertainty, ...] = ()
@@ -142,8 +149,11 @@ class BuildContextPackRequest:
     """Placeholder request for bounded context-pack construction."""
 
     task: str
+    db_path: str = ".rsm/index.sqlite"
     budget_chars: int = 4000
     format: Literal["markdown", "yaml"] = "markdown"
+    profile: str = "agent_standard"
+    explain_ranking: bool = False
     include_semantic_components: bool = True
 
     def __post_init__(self) -> None:
@@ -158,6 +168,7 @@ class BuildContextPackResponse:
     """Placeholder response for future context-pack MCP output."""
 
     rendered: str
+    payload: dict[str, object] = field(default_factory=dict)
     selected_entity_ids: tuple[str, ...] = ()
     selected_relation_keys: tuple[str, ...] = ()
     citations: tuple[Citation, ...] = ()
@@ -170,7 +181,9 @@ class QueryGraphRequest:
     """Placeholder request for bounded graph traversal."""
 
     entity_ids: tuple[str, ...]
+    db_path: str = ".rsm/index.sqlite"
     relation_kinds: tuple[str, ...] = ()
+    direction: Literal["outgoing", "incoming", "both"] = "both"
     max_hops: int = 1
     limit: int = 25
 
@@ -188,6 +201,8 @@ class QueryGraphResponse:
     """Placeholder response for graph query results."""
 
     entity_ids: tuple[str, ...] = ()
+    entities: tuple[dict[str, object], ...] = ()
+    relations: tuple[dict[str, object], ...] = ()
     relation_keys: tuple[str, ...] = ()
     citations: tuple[Citation, ...] = ()
     uncertainties: tuple[Uncertainty, ...] = ()
@@ -199,8 +214,12 @@ class ExportAiMemoryRequest:
     """Placeholder request matching the existing local `.ai/` export flow."""
 
     db_path: str = ".rsm/index.sqlite"
-    output_dir: str = ".ai"
+    output_dir: str | None = None
     force: bool = False
+
+    def __post_init__(self) -> None:
+        if self.output_dir is None or not self.output_dir.strip():
+            raise ValueError("ExportAiMemoryRequest output_dir must be explicitly provided")
 
 
 @dataclass(frozen=True)
@@ -226,6 +245,7 @@ class ValidatePatchContextRequest:
 
     task: str
     changed_paths: tuple[str, ...]
+    db_path: str = ".rsm/index.sqlite"
     referenced_entity_ids: tuple[str, ...] = ()
     budget_chars: int | None = None
 
@@ -246,8 +266,11 @@ class ValidatePatchContextResponse:
     not whether a patch is correct.
     """
 
+    covered_paths: tuple[str, ...] = ()
     missing_paths: tuple[str, ...] = ()
+    covered_entity_ids: tuple[str, ...] = ()
     missing_entity_ids: tuple[str, ...] = ()
+    suggested_context_query: str | None = None
     suggested_follow_up_tools: tuple[McpToolName, ...] = ()
     uncertainties: tuple[Uncertainty, ...] = ()
     budget: BudgetEnvelope | None = None
