@@ -180,8 +180,8 @@ class BuildContextPackResponse:
 class QueryGraphRequest:
     """Placeholder request for bounded graph traversal."""
 
-    db_path: str = ".rsm/index.sqlite"
     entity_ids: tuple[str, ...]
+    db_path: str = ".rsm/index.sqlite"
     relation_kinds: tuple[str, ...] = ()
     direction: Literal["outgoing", "incoming", "both"] = "both"
     max_hops: int = 1
@@ -244,8 +244,8 @@ class ValidatePatchContextRequest:
     """
 
     task: str
-    db_path: str = ".rsm/index.sqlite"
     changed_paths: tuple[str, ...]
+    db_path: str = ".rsm/index.sqlite"
     referenced_entity_ids: tuple[str, ...] = ()
     budget_chars: int | None = None
 

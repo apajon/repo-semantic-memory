@@ -242,9 +242,8 @@ def test_get_git_summary_uses_existing_core_logic(
     assert response.uncertainties
 
 
-def test_project_has_no_mcp_runtime_dependency(
-    project_root: Path = Path(__file__).resolve().parents[2],
-) -> None:
+def test_project_has_no_mcp_runtime_dependency() -> None:
+    project_root = Path(__file__).resolve().parents[2]
     pyproject = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
     dependencies = pyproject.get("project", {}).get("dependencies", [])
     assert all("mcp" not in str(item).lower() for item in dependencies)

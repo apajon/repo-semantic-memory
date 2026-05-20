@@ -4,13 +4,19 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal
 
 from repo_semantic_memory.context import (
     build_context_pack,
     render_context_pack_markdown,
     resolve_profile,
 )
-from repo_semantic_memory.context.bm25 import FieldedBM25Index, FieldedDocument, tokenize_text
+from repo_semantic_memory.context.bm25 import (
+    BM25Score,
+    FieldedBM25Index,
+    FieldedDocument,
+    tokenize_text,
+)
 from repo_semantic_memory.context.context_pack import relation_key
 from repo_semantic_memory.context.graph_selection import (
     GraphSelectionConfig,
@@ -19,7 +25,6 @@ from repo_semantic_memory.context.graph_selection import (
 from repo_semantic_memory.context.path_roles import classify_path_role, infer_source_roots
 from repo_semantic_memory.exporters.ai_directory import AiDirectoryExporter
 from repo_semantic_memory.extractors.git_history import get_git_repository_summary
-from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.mcp.tools import (
     BudgetEnvelope,
     BuildContextPackRequest,
@@ -31,6 +36,7 @@ from repo_semantic_memory.mcp.tools import (
     ExportAiMemoryResponse,
     GetGitSummaryRequest,
     GetGitSummaryResponse,
+    McpToolName,
     QueryGraphRequest,
     QueryGraphResponse,
     SearchSymbolsRequest,
@@ -39,12 +45,15 @@ from repo_semantic_memory.mcp.tools import (
     ValidatePatchContextRequest,
     ValidatePatchContextResponse,
 )
+from repo_semantic_memory.memory import infer_semantic_components
+from repo_semantic_memory.model import Entity, Relation
 from repo_semantic_memory.store import SQLiteStore
 
 _MAX_SEARCH_LIMIT = 100
 _MAX_GRAPH_DEPTH = 3
 _MAX_GRAPH_ENTITIES = 100
 _MAX_CONTEXT_BUDGET = 20_000
+_MAX_DIRECT_RELATIONS = 10
 
 
 def handle_search_symbols(
@@ -115,8 +124,7 @@ def handle_search_symbols(
             budget=BudgetEnvelope(requested_chars=1, used_chars=0, truncated=False),
         )
 
-    scored: list[tuple[float, str, object, object]] = []
-    entity_by_id = {entity.id.value: entity for entity in filtered_entities}
+    scored: list[tuple[float, str, Entity, BM25Score]] = []
     for entity in filtered_entities:
         score = index.score(entity.id.value, tokens)
         if score.score <= 0:
@@ -129,7 +137,10 @@ def handle_search_symbols(
         uncertainties.append(
             Uncertainty(
                 code="search_limit_capped",
-                message=f"Requested limit {request.limit} exceeds max {_MAX_SEARCH_LIMIT}; results capped.",
+                message=(
+                    f"Requested limit {request.limit} exceeds max {_MAX_SEARCH_LIMIT}; "
+                    "results capped."
+                ),
             )
         )
     if len(scored) > bounded_limit:
@@ -141,8 +152,9 @@ def handle_search_symbols(
         )
 
     results: list[dict[str, object]] = []
+    matches: list[str] = []
     citations: list[Citation] = []
-    for _, entity_id, entity_obj, score_obj in scored[:bounded_limit]:
+    for _, _entity_id, entity_obj, score_obj in scored[:bounded_limit]:
         entity = entity_obj
         score = score_obj
         result: dict[str, object] = {
@@ -170,13 +182,12 @@ def handle_search_symbols(
             direct_relations = _direct_relations_for_entity(entity.id.value, relations)
             result["direct_relations"] = direct_relations
         results.append(result)
+        matches.append(entity.id.value)
         citations.append(_entity_citation(entity.id.value, entity))
 
     used_chars = len(json.dumps(results, sort_keys=True, separators=(",", ":")))
     return SearchSymbolsResponse(
-        matches=tuple(
-            item["entity_id"] for item in results if isinstance(item.get("entity_id"), str)
-        ),
+        matches=tuple(matches),
         results=tuple(results),
         citations=tuple(citations),
         uncertainties=tuple(uncertainties),
@@ -253,7 +264,9 @@ def handle_explain_entity(
                 uncertainties.append(
                     Uncertainty(
                         code="inferred_component",
-                        message="Semantic component is inferred and should be treated as uncertain.",
+                        message=(
+                            "Semantic component is inferred and should be treated as uncertain."
+                        ),
                         subject_id=component.entity_id.value,
                     )
                 )
@@ -303,7 +316,9 @@ def handle_build_context_pack(
         uncertainties.append(
             Uncertainty(
                 code="budget_capped",
-                message=f"Requested budget {request.budget_chars} exceeded max {_MAX_CONTEXT_BUDGET}.",
+                message=(
+                    f"Requested budget {request.budget_chars} exceeded max {_MAX_CONTEXT_BUDGET}."
+                ),
             )
         )
 
@@ -328,7 +343,7 @@ def handle_build_context_pack(
 
     citations = tuple(
         Citation(
-            subject_kind=citation.subject_kind,
+            subject_kind=_normalize_subject_kind(citation.subject_kind),
             subject_id=citation.subject_id,
             path=citation.path,
             start_line=citation.start_line,
@@ -446,7 +461,7 @@ def handle_query_graph(
         )
 
     entity_payloads = tuple(_entity_payload(entity_by_id[entity_id]) for entity_id in selected_ids)
-    relation_payloads = tuple(
+    relation_payloads: tuple[dict[str, object], ...] = tuple(
         {
             "kind": relation.kind,
             "source_entity_id": relation.source_entity_id.value,
@@ -535,8 +550,7 @@ def handle_validate_patch_context(
     *,
     repo_root: Path | str | None = None,
 ) -> ValidatePatchContextResponse:
-    entities, relations = _load_index(request.db_path, repo_root=repo_root)
-    del relations
+    entities, _relations = _load_index(request.db_path, repo_root=repo_root)
 
     changed_paths = tuple(_normalize_changed_path(path) for path in request.changed_paths)
     referenced_ids = tuple(sorted(set(request.referenced_entity_ids)))
@@ -587,7 +601,7 @@ def handle_validate_patch_context(
         )
 
     suggested_query: str | None = None
-    suggested_tools: tuple[str, ...] = ()
+    suggested_tools: tuple[McpToolName, ...] = ()
     if missing_paths:
         path_terms = " ".join(sorted(set(missing_paths)))
         suggested_query = f"{request.task} {path_terms}".strip()
@@ -652,7 +666,9 @@ def handle_get_git_summary(
     )
 
 
-def _load_index(db_path: str, *, repo_root: Path | str | None) -> tuple[list[object], list[object]]:
+def _load_index(
+    db_path: str, *, repo_root: Path | str | None
+) -> tuple[list[Entity], list[Relation]]:
     resolved_db = _resolve_bounded_path(
         db_path, repo_root=repo_root, must_exist=True, label="db_path"
     )
@@ -689,14 +705,14 @@ def _resolve_bounded_path(
     if base is not None:
         try:
             resolved.relative_to(base)
-        except ValueError as exc:  # pragma: no cover - defensive branch
+        except ValueError as exc:
             raise ValueError(f"{label} must stay within repo_root") from exc
     if must_exist and not resolved.exists():
         raise ValueError(f"{label} does not exist: {resolved}")
     return resolved
 
 
-def _entity_payload(entity: object) -> dict[str, object]:
+def _entity_payload(entity: Entity) -> dict[str, object]:
     return {
         "entity_id": entity.id.value,
         "name": entity.name,
@@ -713,7 +729,7 @@ def _entity_payload(entity: object) -> dict[str, object]:
     }
 
 
-def _entity_citation(subject_id: str, entity: object) -> Citation:
+def _entity_citation(subject_id: str, entity: Entity) -> Citation:
     return Citation(
         subject_kind="entity",
         subject_id=subject_id,
@@ -773,9 +789,9 @@ def _normalize_changed_path(path: str) -> str:
 
 
 def _direct_relations_for_entity(
-    entity_id: str, relations: list[object]
+    entity_id: str, relations: list[Relation]
 ) -> list[dict[str, object]]:
-    items = [
+    items: list[dict[str, object]] = [
         {
             "kind": relation.kind,
             "source_entity_id": relation.source_entity_id.value,
@@ -792,7 +808,7 @@ def _direct_relations_for_entity(
             str(row["target_entity_id"]),
         )
     )
-    return items[:10]
+    return items[:_MAX_DIRECT_RELATIONS]
 
 
 def _dedupe_uncertainties(uncertainties: list[Uncertainty]) -> tuple[Uncertainty, ...]:
@@ -806,3 +822,15 @@ def _dedupe_uncertainties(uncertainties: list[Uncertainty]) -> tuple[Uncertainty
         deduped.append(item)
     deduped.sort(key=lambda item: (item.code, item.subject_id or "", item.message))
     return tuple(deduped)
+
+
+def _normalize_subject_kind(
+    subject_kind: str,
+) -> Literal["entity", "relation", "claim", "git_summary"]:
+    if subject_kind == "relation":
+        return "relation"
+    if subject_kind == "claim":
+        return "claim"
+    if subject_kind == "git_summary":
+        return "git_summary"
+    return "entity"
