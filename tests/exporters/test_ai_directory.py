@@ -142,6 +142,39 @@ def test_symbols_yaml_parses_and_contains_citations(tmp_path: Path) -> None:
     assert "src/mymod.py:1" in symbols[0]["source"]
 
 
+def test_symbols_yaml_can_include_markdown_doc_sections(tmp_path: Path) -> None:
+    entities = [
+        Entity(
+            id=StableId("markdown:docs/guide.md:section:install:3"),
+            kind="doc",
+            name="Install",
+            qualified_name="docs/guide.md#install",
+            source_range=SourceRange(path="docs/guide.md", start_line=3, end_line=8),
+            metadata={
+                "entity_type": "doc_section",
+                "section_level": 2,
+                "heading": "Install",
+                "anchor": "install",
+            },
+        )
+    ]
+    exporter = _make_exporter(tmp_path, entities, [])
+    exporter.export()
+
+    content = (tmp_path / ".ai" / "symbols.yaml").read_text(encoding="utf-8")
+    parsed = yaml.safe_load(content)
+
+    assert parsed["symbols"][0]["kind"] == "doc"
+    assert parsed["symbols"][0]["qualified_name"] == "docs/guide.md#install"
+    assert parsed["symbols"][0]["source"] == "docs/guide.md:3"
+    assert parsed["symbols"][0]["metadata"] == {
+        "entity_type": "doc_section",
+        "section_level": 2,
+        "heading": "Install",
+        "anchor": "install",
+    }
+
+
 def test_relations_yaml_parses(tmp_path: Path) -> None:
     entities = [
         _make_entity("python:mod_a", "module", "mod_a", "src/a.py"),

@@ -293,6 +293,22 @@ no LLM summarization
 
 Unresolved inheritance targets are represented explicitly and must not be treated as resolved graph facts.
 
+## Markdown outline extraction
+
+Markdown files are indexed as `doc` entities. ATX headings (`#` through `######`) are also
+represented as `doc` entities with metadata:
+
+- `entity_type: doc_section`
+- `section_level`
+- `heading`
+- `anchor`
+
+The Markdown outline extractor emits source ranges for heading sections and `contains`
+relations from the document to each section. Nested headings also receive parent-section
+`contains` relations. Section IDs are stable across runs because they are derived from the
+repository-relative path, heading anchor, and heading line. Full section bodies are not stored
+in entity metadata or context-pack output.
+
 ## Repo map
 
 The repo map is a compact Markdown representation of indexed symbols.
@@ -306,6 +322,8 @@ classes
 methods
 
 functions
+
+Markdown document section outlines
 
 compact imports
 

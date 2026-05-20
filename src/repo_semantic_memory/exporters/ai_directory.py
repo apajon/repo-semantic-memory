@@ -252,6 +252,12 @@ class AiDirectoryExporter:
             lines.append(f"    name: {entity.name!r}")
             lines.append(f"    qualified_name: {entity.qualified_name!r}")
             lines.append(f"    source: {citation!r}")
+            if entity.metadata.get("entity_type") == "doc_section":
+                lines.append("    metadata:")
+                for key in ("entity_type", "section_level", "heading", "anchor"):
+                    value = entity.metadata.get(key)
+                    if value is not None:
+                        lines.append(f"      {key}: {value!r}")
         lines.append("")
         return "\n".join(lines)
 
