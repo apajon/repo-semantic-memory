@@ -1073,6 +1073,8 @@ def _ensure_minimum_relation_coverage(
     for subsequent candidates.
     Relation inclusion follows pack semantics: a relation is eligible when at least
     one endpoint remains in the (trial) entity set after budget-driven pops.
+    On success the trial state (entity list, entity id set, and usage counter) is
+    committed back into the shared mutable ``kept_entities`` and ``kept_entity_ids``.
     """
     for relation in ordered_relations:
         estimate = _estimate_relation_chars(
@@ -1116,7 +1118,7 @@ def _relation_budget_priority(
       Secondary: structural kind priority.
       Tiebreaker: kind, source_id, target_id (stable strings).
 
-    In non-structural mode: preserves the original behaviour (unresolved
+    In non-structural mode: preserves the original behavior (unresolved
     imports/inherits sorted first as a proxy for task relevance).
     """
     resolved = relation.metadata.get("resolved") is True

@@ -1269,7 +1269,8 @@ def test_relation_helpers_classify_source_and_tooling_paths() -> None:
 
 
 def test_relation_task_priority_public_api_ranks_exports_over_tooling_contains() -> None:
-    """For public_api hints: exports < tests < source contains < .github/tooling contains."""
+    """For public_api hints: exports has priority 0 (highest), then tests, source contains,
+    .github/tooling contains (lowest).  Lower number = higher priority in the sort order."""
     from repo_semantic_memory.context.pack_builder import _relation_task_priority
 
     github_entity = Entity(
