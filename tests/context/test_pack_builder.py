@@ -424,7 +424,9 @@ def test_activation_gating_intent_prefers_source_for_implementation_and_tests_fo
     source_path = "src/lifecore_ros2/core/activation_gating.py"
     test_path = "tests/core/test_activation_gating.py"
 
-    implementation_paths = [entity.source_range.path for entity in implementation_pack.selected_entities]
+    implementation_paths = [
+        entity.source_range.path for entity in implementation_pack.selected_entities
+    ]
     regression_paths = [entity.source_range.path for entity in regression_pack.selected_entities]
     assert source_path in implementation_paths
     assert test_path in implementation_paths
@@ -433,7 +435,7 @@ def test_activation_gating_intent_prefers_source_for_implementation_and_tests_fo
     assert implementation_paths.index(source_path) < implementation_paths.index(test_path)
     assert regression_paths.index(test_path) < regression_paths.index(source_path)
     assert any(
-        reason.message == "implementation task hint -> downranked tests as primary context"
+        reason.message == "implementation task hint -> boosted source/package root"
         for breakdown in implementation_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )
