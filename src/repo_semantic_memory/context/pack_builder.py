@@ -959,7 +959,11 @@ def _relation_task_priority(
             return 1
         if kind in {"exports", "tests"} and not is_md_tooling:
             return 2
-        if kind in {"uses", "owns", "inherits", "requires", "calls"} and is_src and not is_md_tooling:
+        if (
+            kind in {"uses", "owns", "inherits", "requires", "calls"}
+            and is_src
+            and not is_md_tooling
+        ):
             return 3
         if kind == "imports":
             return 4
@@ -974,7 +978,11 @@ def _relation_task_priority(
             return 1
         if kind == "tests" and not is_md_tooling:
             return 2
-        if kind in {"uses", "owns", "inherits", "requires", "calls"} and is_src and not is_md_tooling:
+        if (
+            kind in {"uses", "owns", "inherits", "requires", "calls"}
+            and is_src
+            and not is_md_tooling
+        ):
             return 3
         if kind == "contains" and is_markdown and not is_md_tooling:
             return 4
@@ -1218,6 +1226,20 @@ def _relation_budget_priority(
     resolved = relation.metadata.get("resolved") is True
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+    if not prefer_structural_relations:
+        # Non-structural mode: keep original ordering (unresolved imports/inherits first).
+        kind_priority = 0 if relation.kind in {"imports", "inherits"} and not resolved else 1
+        return (
+            kind_priority,
+            0,
+            0,
+            0,
+            relation.kind,
+            relation.source_entity_id.value,
+            relation.target_entity_id.value,
+        )
+
+    # Structural (explain_ranking) mode: task-intent + kind priority.
     _kept_entity_ids: set[str] | frozenset[str] = (
         kept_entity_ids if kept_entity_ids is not None else frozenset()
     )
@@ -1235,21 +1257,6 @@ def _relation_budget_priority(
         kept_priority = 2
     else:
         kept_priority = 3
-
-    if not prefer_structural_relations:
-        # Non-structural mode: keep original ordering (unresolved imports/inherits first).
-        kind_priority = 0 if relation.kind in {"imports", "inherits"} and not resolved else 1
-        return (
-            selected_priority,
-            kept_priority,
-            kind_priority,
-            0,
-            relation.kind,
-            relation.source_entity_id.value,
-            relation.target_entity_id.value,
-        )
-
-    # Structural (explain_ranking) mode: task-intent + kind priority.
     task_priority = _relation_task_priority(
         relation, task_hints=_task_hints, entity_by_id=_entity_by_id
     )
@@ -1267,9 +1274,9 @@ def _relation_budget_priority(
         kind_priority = 4
 
     return (
+        task_priority,
         selected_priority,
         kept_priority,
-        task_priority,
         kind_priority,
         relation.kind,
         relation.source_entity_id.value,

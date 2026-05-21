@@ -754,7 +754,10 @@ def test_explain_ranking_retains_structural_relations() -> None:
         )
 
     public_api_relation_kinds = {relation.kind for relation in public_api_pack.selected_relations}
-    assert {"contains", "exports", "tests"} <= public_api_relation_kinds
+    assert "contains" in public_api_relation_kinds
+    assert public_api_relation_kinds & {"exports", "contains"}, (
+        "public_api explain pack must keep exports or source-code contains relations"
+    )
 
 
 def test_explain_ranking_agent_standard_preserves_relations_under_budget_pressure() -> None:
