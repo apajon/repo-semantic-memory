@@ -7,6 +7,7 @@ from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
 from repo_semantic_memory.context.compression import available_profile_names, resolve_profile
+from repo_semantic_memory.context.context_pack import relation_key
 from repo_semantic_memory.context.pack_builder import (
     _build_bm25_index,
     _component_labels_by_entity,
@@ -21,6 +22,8 @@ from repo_semantic_memory.extractors import (
     extract_filesystem_entities,
     extract_markdown_file,
     extract_markdown_outline_path,
+    extract_test_relationships,
+    index_python_exports,
     index_python_path,
 )
 from repo_semantic_memory.memory import infer_semantic_components
@@ -78,6 +81,22 @@ def _ranking_fixture_entities_and_relations() -> tuple[list[Entity], list[Relati
         *markdown_outline.relations,
         *python_relations,
     ]
+
+
+def _ranking_fixture_entities_and_all_relations() -> tuple[list[Entity], list[Relation]]:
+    fixture_root = _ranking_fixture_root()
+    filesystem_entities = [
+        entity
+        for entity in extract_filesystem_entities(fixture_root)
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
+    markdown_outline = extract_markdown_outline_path(fixture_root)
+    python_entities, python_relations = index_python_path(fixture_root)
+    export_relations = index_python_exports(fixture_root)
+    entities = [*filesystem_entities, *markdown_outline.entities, *python_entities]
+    relations = [*markdown_outline.relations, *python_relations, *export_relations]
+    test_relations = extract_test_relationships(fixture_root, entities, relations)
+    return entities, [*relations, *test_relations]
 
 
 def test_pack_selects_symbol_by_name() -> None:
@@ -622,6 +641,68 @@ def test_ranking_breakdown_is_deterministic() -> None:
     assert first.to_dict(include_ranking=True) == second.to_dict(include_ranking=True)
 
 
+def test_explain_ranking_limits_breakdowns_and_reasons_by_profile() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    standard_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+        profile="agent_standard",
+    )
+    debug_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+        profile="agent_debug",
+    )
+    full_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+        profile="full",
+    )
+
+    assert 0 < len(standard_pack.ranking_breakdowns) <= 12
+    assert 0 < len(debug_pack.ranking_breakdowns) <= 20
+    assert 0 < len(full_pack.ranking_breakdowns) <= 40
+    assert len(standard_pack.ranking_breakdowns) <= len(debug_pack.ranking_breakdowns)
+    assert len(debug_pack.ranking_breakdowns) <= len(full_pack.ranking_breakdowns)
+    assert all(len(reasons) <= 2 for reasons in standard_pack.why_selected.values())
+    assert all(len(reasons) <= 4 for reasons in debug_pack.why_selected.values())
+    assert all(len(reasons) <= 8 for reasons in full_pack.why_selected.values())
+    assert all(
+        len(breakdown.reasons) <= 4 for breakdown in standard_pack.ranking_breakdowns.values()
+    )
+    assert all(len(breakdown.reasons) <= 6 for breakdown in debug_pack.ranking_breakdowns.values())
+    assert all(len(breakdown.reasons) <= 10 for breakdown in full_pack.ranking_breakdowns.values())
+
+
+def test_explain_ranking_why_selected_only_covers_included_items() -> None:
+    entities, relations = _ranking_fixture_entities_and_relations()
+
+    pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+    )
+
+    included_keys = {
+        *(entity.id.value for entity in pack.selected_entities),
+        *(relation_key(relation) for relation in pack.selected_relations),
+    }
+
+    assert set(pack.why_selected.keys()) <= included_keys
+
+
 def test_selected_entity_ranking_breakdown_includes_matched_fields() -> None:
     entities, relations = _indexed_entities_and_relations()
 
@@ -638,6 +719,42 @@ def test_selected_entity_ranking_breakdown_includes_matched_fields() -> None:
     assert breakdown.matched_terms
     assert breakdown.matched_fields
     assert "name" in breakdown.matched_fields or "qualified_name" in breakdown.matched_fields
+
+
+def test_explain_ranking_keeps_non_import_relations_in_ranked_fixture() -> None:
+    entities, relations = _ranking_fixture_entities_and_all_relations()
+
+    cleanup_pack = build_context_pack(
+        task="Find lifecycle component ownership and cleanup rules",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+    )
+    activation_pack = build_context_pack(
+        task="Find where activation gating is implemented",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+    )
+    public_api_pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=8000,
+        explain_ranking=True,
+    )
+
+    for pack in (cleanup_pack, activation_pack):
+        assert pack.selected_relations
+        assert any(
+            relation.kind in {"contains", "exports", "tests"}
+            for relation in pack.selected_relations
+        )
+
+    public_api_relation_kinds = {relation.kind for relation in public_api_pack.selected_relations}
+    assert {"contains", "exports", "tests"} <= public_api_relation_kinds
 
 
 def test_generated_artifact_penalty_appears_in_breakdown() -> None:

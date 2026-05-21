@@ -301,6 +301,10 @@ def build_context_pack(
         ),
     )
     selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
+    capped_reasons_by_key = _cap_reason_messages(
+        reasons_by_key,
+        max_reasons_per_item=resolved_profile.max_score_reasons_per_item,
+    )
 
     (
         budgeted_entities,
@@ -311,7 +315,8 @@ def build_context_pack(
         budget_chars=budget_chars,
         selected_entities=selected_entities,
         selected_relations=selected_relations,
-        reasons_by_key=reasons_by_key,
+        reasons_by_key=capped_reasons_by_key,
+        prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
     )
 
     suggested_files = _suggested_files(budgeted_entities)
@@ -335,12 +340,22 @@ def build_context_pack(
     include_compact_reasons = explain_ranking or resolved_profile.include_compact_score_reasons
     why_selected = {}
     if include_compact_reasons:
-        for key in sorted(reasons_by_key.keys()):
-            if not reasons_by_key[key]:
+        included_reason_keys = {
+            *(entity.id.value for entity in budgeted_entities),
+            *(relation_key(relation) for relation in budgeted_relations),
+        }
+        for key in sorted(included_reason_keys):
+            reasons = capped_reasons_by_key.get(key, ())
+            if not reasons:
                 continue
-            unique_reasons = tuple(dict.fromkeys(reasons_by_key[key]))
-            why_selected[key] = unique_reasons
+            why_selected[key] = reasons
     include_ranking_breakdown = explain_ranking or resolved_profile.include_ranking_breakdown
+    budgeted_breakdowns = _select_ranking_breakdowns(
+        budgeted_entities=budgeted_entities,
+        ranking_breakdowns_by_id=ranking_breakdowns_by_id,
+        max_breakdowns=resolved_profile.max_ranking_breakdowns,
+        max_reasons_per_item=resolved_profile.max_ranking_reasons_per_item,
+    )
 
     return ContextPack(
         task=task,
@@ -349,15 +364,7 @@ def build_context_pack(
         selected_relations=tuple(budgeted_relations),
         source_citations=tuple(citations),
         why_selected=why_selected,
-        ranking_breakdowns=(
-            {
-                entity.id.value: ranking_breakdowns_by_id[entity.id.value]
-                for entity in budgeted_entities
-                if entity.id.value in ranking_breakdowns_by_id
-            }
-            if include_ranking_breakdown
-            else {}
-        ),
+        ranking_breakdowns=budgeted_breakdowns if include_ranking_breakdown else {},
         semantic_components=semantic_components,
         uncertainties=tuple(uncertainties),
         suggested_files_to_inspect=tuple(suggested_files),
@@ -708,6 +715,111 @@ def dedupe_stable_reasons(
     return tuple(deduped.values())
 
 
+def _cap_reason_messages(
+    reasons_by_key: dict[str, list[str]],
+    *,
+    max_reasons_per_item: int | None,
+) -> dict[str, tuple[str, ...]]:
+    capped: dict[str, tuple[str, ...]] = {}
+    for key in sorted(reasons_by_key.keys()):
+        unique_reasons = tuple(dict.fromkeys(reasons_by_key[key]))
+        if max_reasons_per_item is None:
+            capped[key] = unique_reasons
+            continue
+        capped[key] = unique_reasons[:max_reasons_per_item]
+    return capped
+
+
+def _select_ranking_breakdowns(
+    *,
+    budgeted_entities: Sequence[Entity],
+    ranking_breakdowns_by_id: dict[str, RankingBreakdown],
+    max_breakdowns: int | None,
+    max_reasons_per_item: int | None,
+) -> dict[str, RankingBreakdown]:
+    selected_ids = [
+        entity.id.value
+        for entity in budgeted_entities
+        if entity.id.value in ranking_breakdowns_by_id
+    ]
+    selected_ids = _prioritize_breakdown_ids(
+        selected_ids,
+        ranking_breakdowns_by_id=ranking_breakdowns_by_id,
+    )
+    if max_breakdowns is not None:
+        selected_ids = selected_ids[:max_breakdowns]
+    return {
+        entity_id: _trim_ranking_breakdown(
+            ranking_breakdowns_by_id[entity_id],
+            max_reasons_per_item=max_reasons_per_item,
+        )
+        for entity_id in selected_ids
+    }
+
+
+def _prioritize_breakdown_ids(
+    entity_ids: Sequence[str],
+    *,
+    ranking_breakdowns_by_id: dict[str, RankingBreakdown],
+) -> list[str]:
+    prioritized_ids: list[str] = []
+    seen: set[str] = set()
+    for predicate in (
+        lambda breakdown: breakdown.graph > 0,
+        lambda breakdown: any(
+            reason.category in {"task_intent", "path_role", "component", "penalty"}
+            for reason in breakdown.reasons
+        ),
+        lambda _breakdown: True,
+    ):
+        for entity_id in entity_ids:
+            if entity_id in seen:
+                continue
+            breakdown = ranking_breakdowns_by_id[entity_id]
+            if not predicate(breakdown):
+                continue
+            prioritized_ids.append(entity_id)
+            seen.add(entity_id)
+    return prioritized_ids
+
+
+def _trim_ranking_breakdown(
+    breakdown: RankingBreakdown,
+    *,
+    max_reasons_per_item: int | None,
+) -> RankingBreakdown:
+    reasons = breakdown.reasons
+    if max_reasons_per_item is not None and len(reasons) > max_reasons_per_item:
+        ranked_reasons = sorted(
+            enumerate(reasons),
+            key=lambda item: (_ranking_reason_priority(item[1]), item[0]),
+        )
+        reasons = tuple(reason for _, reason in ranked_reasons[:max_reasons_per_item])
+    return build_breakdown(
+        lexical=breakdown.lexical,
+        path_role=breakdown.path_role,
+        task_intent=breakdown.task_intent,
+        component=breakdown.component,
+        graph=breakdown.graph,
+        penalty=breakdown.penalty,
+        matched_terms=breakdown.matched_terms,
+        matched_fields=breakdown.matched_fields,
+        reasons=reasons,
+    )
+
+
+def _ranking_reason_priority(reason: RankingReason) -> int:
+    priority = {
+        "task_intent": 0,
+        "path_role": 1,
+        "component": 2,
+        "graph": 3,
+        "penalty": 4,
+        "lexical": 5,
+    }
+    return priority.get(reason.category, 6)
+
+
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:
     grouped: dict[str, list[Relation]] = defaultdict(list)
     for relation in relations:
@@ -751,7 +863,8 @@ def _truncate_to_budget(
     budget_chars: int,
     selected_entities: Sequence[Entity],
     selected_relations: Sequence[Relation],
-    reasons_by_key: dict[str, list[str]],
+    reasons_by_key: dict[str, Sequence[str]],
+    prefer_structural_relations: bool = False,
 ) -> tuple[list[Entity], list[Relation], bool]:
     # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
     used = len(task) + _PACK_FIXED_OVERHEAD_CHARS
@@ -768,7 +881,13 @@ def _truncate_to_budget(
         kept_entity_ids.add(entity.id.value)
         used += estimate
 
-    ordered_relations = sorted(selected_relations, key=_relation_budget_priority)
+    ordered_relations = sorted(
+        selected_relations,
+        key=lambda relation: _relation_budget_priority(
+            relation,
+            prefer_structural_relations=prefer_structural_relations,
+        ),
+    )
     kept_relations: list[Relation] = []
     for relation in ordered_relations:
         if (
@@ -788,10 +907,34 @@ def _truncate_to_budget(
     return kept_entities, kept_relations, truncated
 
 
-def _relation_budget_priority(relation: Relation) -> tuple[int, str, str, str]:
+def _relation_budget_priority(
+    relation: Relation,
+    *,
+    prefer_structural_relations: bool = False,
+) -> tuple[int, str, str, str]:
     resolved = relation.metadata.get("resolved") is True
-    unresolved_import_or_inherits = relation.kind in {"imports", "inherits"} and not resolved
-    priority = 0 if unresolved_import_or_inherits else 1
+    if (
+        not prefer_structural_relations
+        and relation.kind in {"imports", "inherits"}
+        and not resolved
+    ):
+        priority = 0
+    elif prefer_structural_relations and relation.kind in {"tests", "exports"}:
+        priority = 0
+    elif prefer_structural_relations and relation.kind in {
+        "contains",
+        "calls",
+        "uses",
+        "owns",
+        "requires",
+    }:
+        priority = 1
+    elif prefer_structural_relations and relation.kind in {"documents", "violates"}:
+        priority = 2
+    elif prefer_structural_relations and relation.kind in {"imports", "inherits"} and resolved:
+        priority = 3
+    else:
+        priority = 1 if not prefer_structural_relations else 4
     return (
         priority,
         relation.kind,

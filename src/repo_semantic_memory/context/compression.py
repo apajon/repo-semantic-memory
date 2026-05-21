@@ -64,6 +64,9 @@ class CompressionProfile:
     max_related_symbols: int | None
     max_uncertainties: int | None
     include_compact_score_reasons: bool
+    max_score_reasons_per_item: int | None
+    max_ranking_reasons_per_item: int | None
+    max_ranking_breakdowns: int | None
 
 
 _PROFILES: Final[dict[str, CompressionProfile]] = {
@@ -79,6 +82,9 @@ _PROFILES: Final[dict[str, CompressionProfile]] = {
         max_related_symbols=20,
         max_uncertainties=6,
         include_compact_score_reasons=False,
+        max_score_reasons_per_item=1,
+        max_ranking_reasons_per_item=3,
+        max_ranking_breakdowns=8,
     ),
     "agent_standard": CompressionProfile(
         name="agent_standard",
@@ -92,6 +98,9 @@ _PROFILES: Final[dict[str, CompressionProfile]] = {
         max_related_symbols=40,
         max_uncertainties=12,
         include_compact_score_reasons=False,
+        max_score_reasons_per_item=2,
+        max_ranking_reasons_per_item=4,
+        max_ranking_breakdowns=12,
     ),
     "agent_debug": CompressionProfile(
         name="agent_debug",
@@ -105,6 +114,9 @@ _PROFILES: Final[dict[str, CompressionProfile]] = {
         max_related_symbols=80,
         max_uncertainties=30,
         include_compact_score_reasons=True,
+        max_score_reasons_per_item=4,
+        max_ranking_reasons_per_item=6,
+        max_ranking_breakdowns=20,
     ),
     "human_review": CompressionProfile(
         name="human_review",
@@ -118,6 +130,9 @@ _PROFILES: Final[dict[str, CompressionProfile]] = {
         max_related_symbols=50,
         max_uncertainties=15,
         include_compact_score_reasons=False,
+        max_score_reasons_per_item=2,
+        max_ranking_reasons_per_item=4,
+        max_ranking_breakdowns=12,
     ),
     "ci_summary": CompressionProfile(
         name="ci_summary",
@@ -131,6 +146,9 @@ _PROFILES: Final[dict[str, CompressionProfile]] = {
         max_related_symbols=24,
         max_uncertainties=8,
         include_compact_score_reasons=False,
+        max_score_reasons_per_item=1,
+        max_ranking_reasons_per_item=3,
+        max_ranking_breakdowns=8,
     ),
     "full": CompressionProfile(
         name="full",
@@ -144,6 +162,9 @@ _PROFILES: Final[dict[str, CompressionProfile]] = {
         max_related_symbols=None,
         max_uncertainties=None,
         include_compact_score_reasons=True,
+        max_score_reasons_per_item=8,
+        max_ranking_reasons_per_item=10,
+        max_ranking_breakdowns=40,
     ),
 }
 
