@@ -950,6 +950,8 @@ def _ensure_minimum_relation_coverage(
 
     This helper intentionally mutates ``kept_entities`` and ``kept_entity_ids`` in place
     while returning relation/usage/truncation outputs for the caller.
+    Relation inclusion follows pack semantics: a relation is eligible when at least one
+    endpoint remains selected as context.
     """
     for relation in ordered_relations:
         estimate = _estimate_relation_chars(

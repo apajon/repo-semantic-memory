@@ -38,7 +38,7 @@ def test_resolve_package_version_does_not_access_version_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _ExplodesIfAccessed:
-        def __getattr__(self, _: str) -> str:
+        def __getattr__(self, _: str) -> NoReturn:
             raise AssertionError("_version module should not be accessed")
 
     monkeypatch.setattr(
