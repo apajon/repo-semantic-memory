@@ -475,6 +475,8 @@ def _score_entity(
             entity.kind in _IMPLEMENTATION_PRIORITIZED_ENTITY_KINDS
             and lexical_score > _SOURCE_CITATION_BONUS
         ):
+            # Require lexical relevance beyond the default source-citation floor
+            # so generic source entities do not crowd out relation-driven test context.
             component_score += _IMPLEMENTATION_SOURCE_ENTITY_KIND_BONUS
             reasons.append(
                 (

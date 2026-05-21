@@ -26,6 +26,21 @@ from repo_semantic_memory.extractors import (
 from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
+_ACTIVATION_GATING_SOURCE = (
+    "class ActivationGating:\n"
+    "    def should_activate(self, watchdog_ok: bool) -> bool:\n"
+    "        return watchdog_ok\n"
+)
+_ACTIVATION_GATING_TESTS = (
+    "from lifecore_ros2.core.activation_gating import ActivationGating\n\n"
+    "class TestPublisherActivationGating:\n"
+    "    def test_watchdog_allows_activation(self) -> None:\n"
+    "        assert ActivationGating().should_activate(True)\n\n"
+    "class TestSubscriberActivationGating:\n"
+    "    def test_watchdog_blocks_activation(self) -> None:\n"
+    "        assert not ActivationGating().should_activate(False)\n"
+)
+
 
 def _fixture_root() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
@@ -380,19 +395,11 @@ def test_activation_gating_intent_ranks_source_for_implementation(
     (repo / "tests" / "core").mkdir(parents=True)
 
     (repo / "src" / "lifecore_ros2" / "core" / "activation_gating.py").write_text(
-        "class ActivationGating:\n"
-        "    def should_activate(self, watchdog_ok: bool) -> bool:\n"
-        "        return watchdog_ok\n",
+        _ACTIVATION_GATING_SOURCE,
         encoding="utf-8",
     )
     (repo / "tests" / "core" / "test_activation_gating.py").write_text(
-        "from lifecore_ros2.core.activation_gating import ActivationGating\n\n"
-        "class TestPublisherActivationGating:\n"
-        "    def test_watchdog_allows_activation(self) -> None:\n"
-        "        assert ActivationGating().should_activate(True)\n\n"
-        "class TestSubscriberActivationGating:\n"
-        "    def test_watchdog_blocks_activation(self) -> None:\n"
-        "        assert not ActivationGating().should_activate(False)\n",
+        _ACTIVATION_GATING_TESTS,
         encoding="utf-8",
     )
 
