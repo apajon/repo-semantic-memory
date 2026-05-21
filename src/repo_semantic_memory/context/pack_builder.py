@@ -310,13 +310,12 @@ def build_context_pack(
     selected_entities = [
         entity_by_id[entity_id] for entity_id in selected_entity_ids if entity_id in entity_by_id
     ]
-    selected_relations = sorted(
-        selected_relations,
-        key=lambda relation: (
-            relation.kind,
-            relation.source_entity_id.value,
-            relation.target_entity_id.value,
-        ),
+    selected_relations = _order_relations_for_profile_cap(
+        selected_relations=selected_relations,
+        prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
+        task_hints=frozenset(task_hints),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(selected_entity_ids),
     )
     selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
     score_capped_reasons_by_key = _cap_reasons_per_item(
@@ -1285,6 +1284,37 @@ def _relation_budget_priority(
         relation.kind,
         relation.source_entity_id.value,
         relation.target_entity_id.value,
+    )
+
+
+def _order_relations_for_profile_cap(
+    *,
+    selected_relations: Sequence[Relation],
+    prefer_structural_relations: bool,
+    task_hints: set[str] | frozenset[str],
+    entity_by_id: Mapping[str, Entity],
+    selected_entity_ids: set[str] | frozenset[str],
+) -> list[Relation]:
+    """Deterministically order relations before profile-level relation cap is applied."""
+    if not prefer_structural_relations:
+        return sorted(
+            selected_relations,
+            key=lambda relation: (
+                relation.kind,
+                relation.source_entity_id.value,
+                relation.target_entity_id.value,
+            ),
+        )
+    return sorted(
+        selected_relations,
+        key=lambda relation: _relation_budget_priority(
+            relation,
+            prefer_structural_relations=True,
+            task_hints=task_hints,
+            entity_by_id=entity_by_id,
+            kept_entity_ids=selected_entity_ids,
+            selected_entity_ids=selected_entity_ids,
+        ),
     )
 
 
