@@ -2,11 +2,11 @@
 
 Current deterministic versions:
 
-- Package version: tracks Python package releases.
+- Package version: tag-driven from Git history (hatch-vcs) and tracks Python package releases.
 - Schema version: tracks semantic artifact schema evolution.
 - Context pack version: tracks serialized context pack contract evolution.
 
-Version identifiers are explicit constants and must not be inferred from each other.
+`SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` are explicit compatibility constants and must not be inferred from package version.
 
 ## MVP file/module representation
 

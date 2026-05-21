@@ -1,6 +1,6 @@
 """Version constants for package and semantic artifacts.
 
-``PACKAGE_VERSION`` is resolved from installed package metadata.
+``PACKAGE_VERSION`` prefers hatch-vcs generated ``_version.py`` and then installed metadata.
 ``SCHEMA_VERSION`` and ``CONTEXT_PACK_VERSION`` remain independently managed.
 """
 
@@ -12,12 +12,29 @@ from importlib.metadata import PackageNotFoundError, version
 _PACKAGE_DISTRIBUTION_NAME = "repo-semantic-memory"
 
 
+def _resolve_generated_package_version() -> str | None:
+    """Resolve package version from hatch-vcs generated module when available."""
+    try:
+        from . import _version
+    except ImportError:
+        return None
+
+    candidate = getattr(_version, "__version__", None) or getattr(_version, "version", None)
+    if isinstance(candidate, str) and candidate:
+        return candidate
+    return None
+
+
 def _resolve_package_version() -> str:
     """Resolve installed distribution version with a development-safe fallback."""
+    generated = _resolve_generated_package_version()
+    if generated is not None:
+        return generated
+
     try:
         return version(_PACKAGE_DISTRIBUTION_NAME)
     except PackageNotFoundError:
-        return "0.0.0.dev0"
+        return "0.0.0+unknown"
 
 
 PACKAGE_VERSION = _resolve_package_version()

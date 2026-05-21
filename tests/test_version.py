@@ -1,5 +1,7 @@
 """Tests for version metadata constants."""
 
+import sys
+from types import ModuleType
 from importlib.metadata import PackageNotFoundError, version
 from typing import NoReturn
 
@@ -30,8 +32,19 @@ def test_get_version_info_returns_expected_values() -> None:
 def test_resolve_package_version_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.delitem(sys.modules, "repo_semantic_memory._version", raising=False)
     monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
     assert version_module._resolve_package_version() == "1.2.3"
+
+
+def test_resolve_package_version_prefers_generated_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generated = ModuleType("repo_semantic_memory._version")
+    generated.__version__ = "9.8.7"
+    monkeypatch.setitem(sys.modules, "repo_semantic_memory._version", generated)
+    monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
+    assert version_module._resolve_package_version() == "9.8.7"
 
 
 def test_package_version_fallback_when_not_installed(
@@ -40,5 +53,6 @@ def test_package_version_fallback_when_not_installed(
     def _raise_package_not_found(_: str) -> NoReturn:
         raise PackageNotFoundError
 
+    monkeypatch.delitem(sys.modules, "repo_semantic_memory._version", raising=False)
     monkeypatch.setattr(version_module, "version", _raise_package_not_found)
-    assert version_module._resolve_package_version() == "0.0.0.dev0"
+    assert version_module._resolve_package_version() == "0.0.0+unknown"
