@@ -26,6 +26,21 @@ from repo_semantic_memory.extractors import (
 from repo_semantic_memory.memory import infer_semantic_components
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
+_ACTIVATION_GATING_SOURCE = (
+    "class ActivationGating:\n"
+    "    def should_activate(self, watchdog_ok: bool) -> bool:\n"
+    "        return watchdog_ok\n"
+)
+_ACTIVATION_GATING_TESTS = (
+    "from lifecore_ros2.core.activation_gating import ActivationGating\n\n"
+    "class TestPublisherActivationGating:\n"
+    "    def test_watchdog_allows_activation(self) -> None:\n"
+    "        assert ActivationGating().should_activate(True)\n\n"
+    "class TestSubscriberActivationGating:\n"
+    "    def test_watchdog_blocks_activation(self) -> None:\n"
+    "        assert not ActivationGating().should_activate(False)\n"
+)
+
 
 def _fixture_root() -> Path:
     return Path(__file__).resolve().parents[1] / "fixtures" / "simple_repo"
@@ -372,6 +387,79 @@ def test_implementation_cleanup_task_excludes_test_files() -> None:
     assert "tests/public_api_checks.py" not in selected_paths
 
 
+def test_activation_gating_intent_ranks_source_for_implementation(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    (repo / "src" / "lifecore_ros2" / "core").mkdir(parents=True)
+    (repo / "tests" / "core").mkdir(parents=True)
+
+    (repo / "src" / "lifecore_ros2" / "core" / "activation_gating.py").write_text(
+        _ACTIVATION_GATING_SOURCE,
+        encoding="utf-8",
+    )
+    (repo / "tests" / "core" / "test_activation_gating.py").write_text(
+        _ACTIVATION_GATING_TESTS,
+        encoding="utf-8",
+    )
+
+    filesystem_entities = [
+        entity
+        for entity in extract_filesystem_entities(repo)
+        # Keep filesystem coverage entities while avoiding duplicate python module
+        # entities that are already provided by index_python_path().
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
+    markdown_outline = extract_markdown_outline_path(repo)
+    python_entities, python_relations = index_python_path(repo)
+    entities = [*filesystem_entities, *markdown_outline.entities, *python_entities]
+    relations = [*markdown_outline.relations, *python_relations]
+
+    implementation_pack = build_context_pack(
+        task="Find where activation gating is implemented",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+    regression_pack = build_context_pack(
+        task="Find regression tests for activation gating behavior",
+        entities=entities,
+        relations=relations,
+        budget_chars=6000,
+        explain_ranking=True,
+    )
+
+    source_path = "src/lifecore_ros2/core/activation_gating.py"
+    test_path = "tests/core/test_activation_gating.py"
+
+    implementation_paths = [
+        entity.source_range.path for entity in implementation_pack.selected_entities
+    ]
+    regression_paths = [entity.source_range.path for entity in regression_pack.selected_entities]
+    assert source_path in implementation_paths
+    assert test_path in implementation_paths
+    assert source_path in regression_paths
+    assert test_path in regression_paths
+    assert implementation_paths.index(source_path) < implementation_paths.index(test_path)
+    assert regression_paths.index(test_path) < regression_paths.index(source_path)
+    assert any(
+        reason.message == "implementation task hint -> boosted source/package root"
+        for breakdown in implementation_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        reason.message == "implementation task hint -> boosted source entity kind"
+        for breakdown in implementation_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
+        reason.message == "test-like task intent boost"
+        for breakdown in regression_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+
+
 def test_build_filtering_is_path_segment_aware() -> None:
     entities = [
         Entity(
@@ -639,6 +727,11 @@ def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
         for breakdown in test_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )
+
+
+def test_task_hints_detect_implementation_from_core_logic_terms() -> None:
+    hints = _task_hints(_tokenize("Find core and logic implementation details"))
+    assert "implementation" in hints
 
 
 def test_default_markdown_output_remains_compact_without_explain_lines() -> None:
