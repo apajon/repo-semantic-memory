@@ -22,6 +22,7 @@ from repo_semantic_memory.context.graph_selection import (
 from repo_semantic_memory.context.path_roles import (
     DOC_ROLE,
     SOURCE_ROLE,
+    TEST_ROLE,
     TOOL_ROLE,
     classify_path_role,
     infer_source_roots,
@@ -58,9 +59,9 @@ _CODE_TASK_TOKENS = frozenset(
     }
 )
 _IMPLEMENTATION_TASK_TOKENS = frozenset(
-    {"implementation", "source", "ownership", "component", "cleanup"}
+    {"implementation", "implemented", "source", "ownership", "component", "cleanup"}
 )
-_TEST_TASK_TOKENS = frozenset({"test", "tests", "behavior", "coverage", "pytest"})
+_TEST_TASK_TOKENS = frozenset({"test", "tests", "behavior", "coverage", "pytest", "regression"})
 _PUBLIC_API_TASK_TOKENS = frozenset({"public", "api", "export", "exports", "__init__", "init"})
 _FORBIDDEN_ASSUMPTIONS = (
     (
@@ -86,6 +87,10 @@ _COARSE_ENTITY_PENALTY = -6
 _CITATION_RANGE_OVERHEAD_CHARS = 24
 _IMPLEMENTATION_PATH_ROLE_BONUS = 14
 _IMPLEMENTATION_TASK_INTENT_BONUS = 6
+_IMPLEMENTATION_SOURCE_ENTITY_KIND_BONUS = 6
+_IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS = 2
+_IMPLEMENTATION_TEST_SUPPORT_TASK_INTENT_BONUS = 1
+_IMPLEMENTATION_TEST_PATH_DOWNRANK = -6
 _TEST_PATH_ROLE_BONUS = 14
 _TEST_TASK_INTENT_BONUS = 6
 _PUBLIC_API_PATH_ROLE_BONUS = 16
@@ -466,6 +471,15 @@ def _score_entity(
     if "implementation" in task_hints and path_role == SOURCE_ROLE:
         path_role_score += _IMPLEMENTATION_PATH_ROLE_BONUS
         task_intent_score += _IMPLEMENTATION_TASK_INTENT_BONUS
+        if entity.kind in {"module", "class", "function", "method"}:
+            component_score += _IMPLEMENTATION_SOURCE_ENTITY_KIND_BONUS
+            reasons.append(
+                (
+                    "component",
+                    "implementation task hint -> boosted source code entity kind",
+                    _IMPLEMENTATION_SOURCE_ENTITY_KIND_BONUS,
+                )
+            )
         reasons.append(
             (
                 "path_role",
@@ -481,11 +495,39 @@ def _score_entity(
             )
         )
 
+    if "implementation" in task_hints and path_role == TEST_ROLE:
+        penalty_score += _IMPLEMENTATION_TEST_PATH_DOWNRANK
+        reasons.append(
+            (
+                "penalty",
+                "implementation task hint -> downranked tests as primary context",
+                _IMPLEMENTATION_TEST_PATH_DOWNRANK,
+            )
+        )
+
     if "tests" in task_hints and source_path.startswith("tests/"):
-        path_role_score += _TEST_PATH_ROLE_BONUS
-        task_intent_score += _TEST_TASK_INTENT_BONUS
-        reasons.append(("path_role", 'test task hint -> boosted "tests/"', _TEST_PATH_ROLE_BONUS))
-        reasons.append(("task_intent", "test-like task intent boost", _TEST_TASK_INTENT_BONUS))
+        if "implementation" in task_hints:
+            path_role_score += _IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS
+            task_intent_score += _IMPLEMENTATION_TEST_SUPPORT_TASK_INTENT_BONUS
+            reasons.append(
+                (
+                    "path_role",
+                    'implementation + test task hints -> kept "tests/" as supporting context',
+                    _IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS,
+                )
+            )
+            reasons.append(
+                (
+                    "task_intent",
+                    "implementation + test task hints -> supporting test context boost",
+                    _IMPLEMENTATION_TEST_SUPPORT_TASK_INTENT_BONUS,
+                )
+            )
+        else:
+            path_role_score += _TEST_PATH_ROLE_BONUS
+            task_intent_score += _TEST_TASK_INTENT_BONUS
+            reasons.append(("path_role", 'test task hint -> boosted "tests/"', _TEST_PATH_ROLE_BONUS))
+            reasons.append(("task_intent", "test-like task intent boost", _TEST_TASK_INTENT_BONUS))
 
     if "public_api" in task_hints:
         if path_role == SOURCE_ROLE and source_path.endswith(".py"):
@@ -622,16 +664,19 @@ def _tokenize(text: str) -> tuple[str, ...]:
 
 def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
     return any(
-        token in _CODE_TASK_TOKENS or any(token.endswith(suffix) for suffix in _CODE_PATH_SUFFIXES)
+        token in _CODE_TASK_TOKENS
+        or token in _IMPLEMENTATION_TASK_TOKENS
+        or any(token.endswith(suffix) for suffix in _CODE_PATH_SUFFIXES)
         for token in task_tokens
     )
 
 
 def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     hints: set[str] = set()
+    has_core_logic_phrase = "core" in task_tokens and "logic" in task_tokens
     if any(
         token in _CODE_TASK_TOKENS or token in _IMPLEMENTATION_TASK_TOKENS for token in task_tokens
-    ):
+    ) or has_core_logic_phrase:
         hints.add("implementation")
     if any(token in _TEST_TASK_TOKENS for token in task_tokens):
         hints.add("tests")
