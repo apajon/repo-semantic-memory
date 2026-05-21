@@ -721,7 +721,7 @@ def test_selected_entity_ranking_breakdown_includes_matched_fields() -> None:
     assert "name" in breakdown.matched_fields or "qualified_name" in breakdown.matched_fields
 
 
-def test_explain_ranking_keeps_non_import_relations_in_ranked_fixture() -> None:
+def test_explain_ranking_retains_structural_relations() -> None:
     entities, relations = _ranking_fixture_entities_and_all_relations()
 
     cleanup_pack = build_context_pack(

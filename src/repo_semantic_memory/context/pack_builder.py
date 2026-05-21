@@ -113,6 +113,17 @@ _PUBLIC_API_COPILOT_TOOLING_DOWNRANK = -8
 _PUBLIC_API_IMPORT_TEST_BOOST = 4
 # Detection of generated artifacts is delegated to path_roles.is_generated_artifact_path.
 _GENERATED_ARTIFACT_PENALTY = -80
+_PRIORITIZED_BREAKDOWN_REASON_CATEGORIES = frozenset(
+    {"task_intent", "path_role", "component", "penalty"}
+)
+_RANKING_REASON_PRIORITY = {
+    "task_intent": 0,
+    "path_role": 1,
+    "component": 2,
+    "graph": 3,
+    "penalty": 4,
+    "lexical": 5,
+}
 
 
 def build_context_pack(
@@ -301,7 +312,7 @@ def build_context_pack(
         ),
     )
     selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
-    capped_reasons_by_key = _cap_reason_messages(
+    capped_reasons_by_key = _cap_reasons_per_item(
         reasons_by_key,
         max_reasons_per_item=resolved_profile.max_score_reasons_per_item,
     )
@@ -715,7 +726,7 @@ def dedupe_stable_reasons(
     return tuple(deduped.values())
 
 
-def _cap_reason_messages(
+def _cap_reasons_per_item(
     reasons_by_key: dict[str, list[str]],
     *,
     max_reasons_per_item: int | None,
@@ -765,11 +776,8 @@ def _prioritize_breakdown_ids(
     prioritized_ids: list[str] = []
     seen: set[str] = set()
     for predicate in (
-        lambda breakdown: breakdown.graph > 0,
-        lambda breakdown: any(
-            reason.category in {"task_intent", "path_role", "component", "penalty"}
-            for reason in breakdown.reasons
-        ),
+        _has_graph_signal,
+        _has_prioritized_breakdown_reason,
         lambda _breakdown: True,
     ):
         for entity_id in entity_ids:
@@ -781,6 +789,17 @@ def _prioritize_breakdown_ids(
             prioritized_ids.append(entity_id)
             seen.add(entity_id)
     return prioritized_ids
+
+
+def _has_graph_signal(breakdown: RankingBreakdown) -> bool:
+    return breakdown.graph > 0
+
+
+def _has_prioritized_breakdown_reason(breakdown: RankingBreakdown) -> bool:
+    return any(
+        reason.category in _PRIORITIZED_BREAKDOWN_REASON_CATEGORIES
+        for reason in breakdown.reasons
+    )
 
 
 def _trim_ranking_breakdown(
@@ -809,15 +828,7 @@ def _trim_ranking_breakdown(
 
 
 def _ranking_reason_priority(reason: RankingReason) -> int:
-    priority = {
-        "task_intent": 0,
-        "path_role": 1,
-        "component": 2,
-        "graph": 3,
-        "penalty": 4,
-        "lexical": 5,
-    }
-    return priority.get(reason.category, 6)
+    return _RANKING_REASON_PRIORITY.get(reason.category, 6)
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:
