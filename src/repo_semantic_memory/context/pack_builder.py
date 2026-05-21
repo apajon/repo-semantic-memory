@@ -124,6 +124,7 @@ _RANKING_REASON_PRIORITY = {
     "penalty": 4,
     "lexical": 5,
 }
+_DEFAULT_RANKING_REASON_PRIORITY = 6
 
 
 def build_context_pack(
@@ -312,7 +313,7 @@ def build_context_pack(
         ),
     )
     selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
-    capped_reasons_by_key = _cap_reasons_per_item(
+    score_capped_reasons_by_key = _cap_reasons_per_item(
         reasons_by_key,
         max_reasons_per_item=resolved_profile.max_score_reasons_per_item,
     )
@@ -326,7 +327,7 @@ def build_context_pack(
         budget_chars=budget_chars,
         selected_entities=selected_entities,
         selected_relations=selected_relations,
-        reasons_by_key=capped_reasons_by_key,
+        reasons_by_key=score_capped_reasons_by_key,
         prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
     )
 
@@ -356,7 +357,7 @@ def build_context_pack(
             *(relation_key(relation) for relation in budgeted_relations),
         }
         for key in sorted(included_reason_keys):
-            reasons = capped_reasons_by_key.get(key, ())
+            reasons = score_capped_reasons_by_key.get(key, ())
             if not reasons:
                 continue
             why_selected[key] = reasons
@@ -731,14 +732,14 @@ def _cap_reasons_per_item(
     *,
     max_reasons_per_item: int | None,
 ) -> dict[str, tuple[str, ...]]:
-    capped: dict[str, tuple[str, ...]] = {}
+    capped_reasons: dict[str, tuple[str, ...]] = {}
     for key in sorted(reasons_by_key.keys()):
         unique_reasons = tuple(dict.fromkeys(reasons_by_key[key]))
         if max_reasons_per_item is None:
-            capped[key] = unique_reasons
+            capped_reasons[key] = unique_reasons
             continue
-        capped[key] = unique_reasons[:max_reasons_per_item]
-    return capped
+        capped_reasons[key] = unique_reasons[:max_reasons_per_item]
+    return capped_reasons
 
 
 def _select_ranking_breakdowns(
@@ -810,7 +811,10 @@ def _trim_ranking_breakdown(
     if max_reasons_per_item is not None and len(reasons) > max_reasons_per_item:
         ranked_reasons = sorted(
             enumerate(reasons),
-            key=lambda item: (_ranking_reason_priority(item[1]), item[0]),
+            key=lambda enum_item: (
+                _ranking_reason_priority(enum_item[1]),
+                enum_item[0],
+            ),
         )
         reasons = tuple(reason for _, reason in ranked_reasons[:max_reasons_per_item])
     return build_breakdown(
@@ -827,7 +831,7 @@ def _trim_ranking_breakdown(
 
 
 def _ranking_reason_priority(reason: RankingReason) -> int:
-    return _RANKING_REASON_PRIORITY.get(reason.category, 6)
+    return _RANKING_REASON_PRIORITY.get(reason.category, _DEFAULT_RANKING_REASON_PRIORITY)
 
 
 def _relations_by_entity_id(relations: Sequence[Relation]) -> dict[str, tuple[Relation, ...]]:
