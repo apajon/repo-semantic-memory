@@ -34,7 +34,7 @@ def test_resolve_package_version_from_metadata(
     assert version_module._resolve_package_version() == "1.2.3"
 
 
-def test_resolve_package_version_ignores_generated_module_file(
+def test_resolve_package_version_does_not_access_version_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class _ExplodesIfAccessed:

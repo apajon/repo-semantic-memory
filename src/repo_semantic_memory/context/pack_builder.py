@@ -946,7 +946,11 @@ def _ensure_minimum_relation_coverage(
     budget_chars: int,
     truncated: bool,
 ) -> tuple[list[Relation], int, bool]:
-    """Prefer keeping one relation in explain mode by mutating kept_entities/ids in place."""
+    """Prefer keeping one relation in explain mode.
+
+    This helper intentionally mutates ``kept_entities`` and ``kept_entity_ids`` in place
+    while returning relation/usage/truncation outputs for the caller.
+    """
     for relation in ordered_relations:
         estimate = _estimate_relation_chars(
             relation, reasons_by_key.get(relation_key(relation), ())
