@@ -447,6 +447,11 @@ def test_activation_gating_intent_ranks_source_for_implementation(
         for reason in breakdown.reasons
     )
     assert any(
+        reason.message == "implementation task hint -> boosted source entity kind"
+        for breakdown in implementation_pack.ranking_breakdowns.values()
+        for reason in breakdown.reasons
+    )
+    assert any(
         reason.message == "test-like task intent boost"
         for breakdown in regression_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
