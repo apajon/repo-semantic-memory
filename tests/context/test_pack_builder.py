@@ -372,7 +372,7 @@ def test_implementation_cleanup_task_excludes_test_files() -> None:
     assert "tests/public_api_checks.py" not in selected_paths
 
 
-def test_activation_gating_intent_prefers_source_for_implementation_and_tests_for_regression(
+def test_activation_gating_intent_ranks_source_for_implementation(
     tmp_path: Path,
 ) -> None:
     repo = tmp_path / "repo"

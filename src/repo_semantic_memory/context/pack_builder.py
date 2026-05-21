@@ -60,6 +60,8 @@ _CODE_TASK_TOKENS = frozenset(
 _IMPLEMENTATION_TASK_TOKENS = frozenset(
     {"implementation", "implemented", "source", "ownership", "cleanup"}
 )
+_IMPLEMENTATION_CORE_LOGIC_TOKENS = frozenset({"core", "logic"})
+_IMPLEMENTATION_PRIORITIZED_ENTITY_KINDS = frozenset({"module", "class", "function", "method"})
 _TEST_TASK_TOKENS = frozenset({"test", "tests", "behavior", "coverage", "pytest", "regression"})
 _PUBLIC_API_TASK_TOKENS = frozenset({"public", "api", "export", "exports", "__init__", "init"})
 _FORBIDDEN_ASSUMPTIONS = (
@@ -470,7 +472,7 @@ def _score_entity(
         path_role_score += _IMPLEMENTATION_PATH_ROLE_BONUS
         task_intent_score += _IMPLEMENTATION_TASK_INTENT_BONUS
         if (
-            entity.kind in {"module", "class", "function", "method"}
+            entity.kind in _IMPLEMENTATION_PRIORITIZED_ENTITY_KINDS
             and lexical_score > _SOURCE_CITATION_BONUS
         ):
             component_score += _IMPLEMENTATION_SOURCE_ENTITY_KIND_BONUS
@@ -666,7 +668,7 @@ def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
 
 def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     hints: set[str] = set()
-    has_core_logic_phrase = "core" in task_tokens and "logic" in task_tokens
+    has_core_logic_phrase = _IMPLEMENTATION_CORE_LOGIC_TOKENS.issubset(task_tokens)
     if (
         any(
             token in _CODE_TASK_TOKENS or token in _IMPLEMENTATION_TASK_TOKENS
