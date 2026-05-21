@@ -56,6 +56,9 @@ _ACTIVATION_GATING_TESTS = (
     "    def test_watchdog_blocks_activation(self) -> None:\n"
     "        assert not ActivationGating().should_activate(False)\n"
 )
+_DIAGNOSTIC_USEFUL_RELATION_KINDS = frozenset(
+    {"contains", "tests", "exports", "uses", "owns", "inherits", "imports"}
+)
 
 
 def _fixture_root() -> Path:
@@ -1217,7 +1220,17 @@ def _relation_budget_diagnostic_for_selected(
     selected_relations: list[Relation],
     profile: str = "agent_standard",
 ) -> dict[str, object]:
-    """Debug-only helper to inspect relation budgeting stages for selected items."""
+    """Debug-only helper to inspect relation budgeting stages for selected items.
+
+    Failure mode mapping:
+    - A: useful relations absent from candidates
+    - B: useful relations exist but no both-endpoint-selected candidate
+    - C: useful both-endpoint-selected candidates exist, but none survive kept-entity truncation
+    - D: top-ranked candidate is markdown/tooling contains despite useful both-selected alternatives
+    - E: useful both-endpoint-selected candidates are filtered out before relation budgeting
+    - F: fallback rejects all candidates due estimated relation cost
+    - resolved: none of A-F triggered
+    """
     resolved_profile = resolve_profile(profile)
     task_hints = frozenset(_task_hints(_tokenize(task)))
     entity_by_id = {entity.id.value: entity for entity in selected_entities}
@@ -1357,11 +1370,10 @@ def _relation_budget_diagnostic_for_selected(
             )
             break
 
-    useful_kinds = {"contains", "tests", "exports", "uses", "owns", "inherits", "imports"}
-
     def _is_useful(relation: Relation) -> bool:
-        return relation.kind in useful_kinds and not _is_markdown_or_tooling_relation(
-            relation, entity_by_id
+        return (
+            relation.kind in _DIAGNOSTIC_USEFUL_RELATION_KINDS
+            and not _is_markdown_or_tooling_relation(relation, entity_by_id)
         )
 
     useful_relations = [rel for rel in ordered_prefilter if _is_useful(rel)]
