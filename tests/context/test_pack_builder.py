@@ -1247,30 +1247,13 @@ def _relation_budget_diagnostic_for_selected(
     filtered_relations = filter_related_relations(ordered_prefilter, profile=resolved_profile)
     filtered_relation_keys = {relation_key(rel) for rel in filtered_relations}
 
-    top_candidates: list[dict[str, object]] = []
-    for relation in ordered_prefilter[:20]:
-        src = entity_by_id.get(relation.source_entity_id.value)
-        tgt = entity_by_id.get(relation.target_entity_id.value)
-        top_candidates.append(
-            {
-                "kind": relation.kind,
-                "source_id": relation.source_entity_id.value,
-                "target_id": relation.target_entity_id.value,
-                "source_path": src.source_range.path if src else "<missing>",
-                "target_path": tgt.source_range.path if tgt else "<missing>",
-                "task_priority": _relation_budget_priority(
-                    relation,
-                    prefer_structural_relations=True,
-                    task_hints=task_hints,
-                    entity_by_id=entity_by_id,
-                    kept_entity_ids=selected_ids,
-                    selected_entity_ids=selected_ids,
-                )[0],
-                "selected_endpoint_coverage": _relation_endpoint_coverage(relation, selected_ids),
-                "estimated_chars": _estimate_relation_chars(relation, ()),
-                "filtered_out": relation_key(relation) not in filtered_relation_keys,
-            }
-        )
+    top_candidates = _top_relation_candidates(
+        ordered_relations=ordered_prefilter,
+        selected_ids=selected_ids,
+        filtered_relation_keys=filtered_relation_keys,
+        entity_by_id=entity_by_id,
+        task_hints=task_hints,
+    )
 
     kept_entities, _kept_relations, _ = _truncate_to_budget(
         task=task,
@@ -1288,15 +1271,15 @@ def _relation_budget_diagnostic_for_selected(
         entity.id.value for entity in selected_entities if entity.id.value not in kept_ids
     ]
 
-    both_endpoints_kept = sum(
-        1 for relation in filtered_relations if _relation_endpoint_coverage(relation, kept_ids) == 2
-    )
-    one_kept_one_selected = sum(
-        1
-        for relation in filtered_relations
-        if _relation_endpoint_coverage(relation, kept_ids) == 1
-        and _relation_endpoint_coverage(relation, selected_ids) == 2
-    )
+    both_endpoints_kept = 0
+    one_kept_one_selected = 0
+    for relation in filtered_relations:
+        kept_coverage = _relation_endpoint_coverage(relation, kept_ids)
+        selected_coverage = _relation_endpoint_coverage(relation, selected_ids)
+        if kept_coverage == 2:
+            both_endpoints_kept += 1
+        if kept_coverage == 1 and selected_coverage == 2:
+            one_kept_one_selected += 1
 
     ordered_after_entity_budget = sorted(
         filtered_relations,
@@ -1310,7 +1293,6 @@ def _relation_budget_diagnostic_for_selected(
         ),
     )
 
-    fallback_attempts: list[dict[str, object]] = []
     used_after_entities = (
         len(task)
         + _PACK_FIXED_OVERHEAD_CHARS
@@ -1328,47 +1310,14 @@ def _relation_budget_diagnostic_for_selected(
         normal_kept.append(relation)
         used += estimate
 
-    if not normal_kept:
-        for relation in ordered_after_entity_budget:
-            estimate = _estimate_relation_chars(relation, ())
-            trial_entities = list(kept_entities)
-            trial_ids = set(kept_ids)
-            trial_used = used_after_entities
-            dropped_tail_ids: list[str] = []
-            while trial_entities and trial_used + estimate > budget_chars:
-                removed = trial_entities.pop()
-                dropped_tail_ids.append(removed.id.value)
-                trial_used -= _estimate_entity_chars(removed, ())
-                trial_ids.discard(removed.id.value)
-            if trial_used + estimate > budget_chars:
-                fallback_attempts.append(
-                    {
-                        "candidate": relation_key(relation),
-                        "result": "rejected",
-                        "reason": "estimated cost too high",
-                        "dropped_tail_entity_ids": dropped_tail_ids,
-                    }
-                )
-                continue
-            if _relation_endpoint_coverage(relation, frozenset(trial_ids)) == 0:
-                fallback_attempts.append(
-                    {
-                        "candidate": relation_key(relation),
-                        "result": "rejected",
-                        "reason": "endpoint missing",
-                        "dropped_tail_entity_ids": dropped_tail_ids,
-                    }
-                )
-                continue
-            fallback_attempts.append(
-                {
-                    "candidate": relation_key(relation),
-                    "result": "accepted",
-                    "reason": "fits after fallback",
-                    "dropped_tail_entity_ids": dropped_tail_ids,
-                }
-            )
-            break
+    fallback_attempts = _simulate_fallback_attempts(
+        ordered_relations=ordered_after_entity_budget,
+        kept_entities=kept_entities,
+        kept_ids=kept_ids,
+        used_after_entities=used_after_entities,
+        budget_chars=budget_chars,
+        normal_kept=normal_kept,
+    )
 
     def _is_useful(relation: Relation) -> bool:
         return (
@@ -1386,28 +1335,14 @@ def _relation_budget_diagnostic_for_selected(
     useful_filtered_out = [
         rel for rel in useful_both_selected if relation_key(rel) not in filtered_relation_keys
     ]
-    if not useful_relations:
-        failure_mode = "A"
-    elif not useful_both_selected:
-        failure_mode = "B"
-    elif useful_both_selected and not useful_both_kept:
-        failure_mode = "C"
-    elif useful_filtered_out:
-        failure_mode = "E"
-    elif (
-        top_candidates
-        and top_candidates[0]["kind"] == "contains"
-        and isinstance(top_candidates[0]["source_path"], str)
-        and str(top_candidates[0]["source_path"]).startswith(".github/")
-        and useful_both_selected
-    ):
-        failure_mode = "D"
-    elif fallback_attempts and all(
-        attempt["reason"] == "estimated cost too high" for attempt in fallback_attempts
-    ):
-        failure_mode = "F"
-    else:
-        failure_mode = "resolved"
+    failure_mode = _classify_failure_mode(
+        useful_relations=useful_relations,
+        useful_both_selected=useful_both_selected,
+        useful_both_kept=useful_both_kept,
+        useful_filtered_out=useful_filtered_out,
+        top_candidates=top_candidates,
+        fallback_attempts=fallback_attempts,
+    )
 
     return {
         "before_truncation": {
@@ -1435,6 +1370,128 @@ def _relation_budget_diagnostic_for_selected(
         },
         "failure_mode": failure_mode,
     }
+
+
+def _top_relation_candidates(
+    *,
+    ordered_relations: list[Relation],
+    selected_ids: frozenset[str],
+    filtered_relation_keys: set[str],
+    entity_by_id: dict[str, Entity],
+    task_hints: frozenset[str],
+) -> list[dict[str, object]]:
+    top_candidates: list[dict[str, object]] = []
+    for relation in ordered_relations[:20]:
+        src = entity_by_id.get(relation.source_entity_id.value)
+        tgt = entity_by_id.get(relation.target_entity_id.value)
+        top_candidates.append(
+            {
+                "kind": relation.kind,
+                "source_id": relation.source_entity_id.value,
+                "target_id": relation.target_entity_id.value,
+                "source_path": src.source_range.path if src else "<missing>",
+                "target_path": tgt.source_range.path if tgt else "<missing>",
+                "task_priority": _relation_budget_priority(
+                    relation,
+                    prefer_structural_relations=True,
+                    task_hints=task_hints,
+                    entity_by_id=entity_by_id,
+                    kept_entity_ids=selected_ids,
+                    selected_entity_ids=selected_ids,
+                )[0],
+                "selected_endpoint_coverage": _relation_endpoint_coverage(relation, selected_ids),
+                "estimated_chars": _estimate_relation_chars(relation, ()),
+                "filtered_out": relation_key(relation) not in filtered_relation_keys,
+            }
+        )
+    return top_candidates
+
+
+def _simulate_fallback_attempts(
+    *,
+    ordered_relations: list[Relation],
+    kept_entities: list[Entity],
+    kept_ids: frozenset[str],
+    used_after_entities: int,
+    budget_chars: int,
+    normal_kept: list[Relation],
+) -> list[dict[str, object]]:
+    if normal_kept:
+        return []
+    fallback_attempts: list[dict[str, object]] = []
+    for relation in ordered_relations:
+        estimate = _estimate_relation_chars(relation, ())
+        trial_entities = list(kept_entities)
+        trial_ids = set(kept_ids)
+        trial_used = used_after_entities
+        dropped_tail_ids: list[str] = []
+        while trial_entities and trial_used + estimate > budget_chars:
+            removed = trial_entities.pop()
+            dropped_tail_ids.append(removed.id.value)
+            trial_used -= _estimate_entity_chars(removed, ())
+            trial_ids.discard(removed.id.value)
+        if trial_used + estimate > budget_chars:
+            fallback_attempts.append(
+                {
+                    "candidate": relation_key(relation),
+                    "result": "rejected",
+                    "reason": "estimated cost too high",
+                    "dropped_tail_entity_ids": dropped_tail_ids,
+                }
+            )
+            continue
+        if _relation_endpoint_coverage(relation, frozenset(trial_ids)) == 0:
+            fallback_attempts.append(
+                {
+                    "candidate": relation_key(relation),
+                    "result": "rejected",
+                    "reason": "endpoint missing",
+                    "dropped_tail_entity_ids": dropped_tail_ids,
+                }
+            )
+            continue
+        fallback_attempts.append(
+            {
+                "candidate": relation_key(relation),
+                "result": "accepted",
+                "reason": "fits after fallback",
+                "dropped_tail_entity_ids": dropped_tail_ids,
+            }
+        )
+        break
+    return fallback_attempts
+
+
+def _classify_failure_mode(
+    *,
+    useful_relations: list[Relation],
+    useful_both_selected: list[Relation],
+    useful_both_kept: list[Relation],
+    useful_filtered_out: list[Relation],
+    top_candidates: list[dict[str, object]],
+    fallback_attempts: list[dict[str, object]],
+) -> str:
+    if not useful_relations:
+        return "A"
+    if not useful_both_selected:
+        return "B"
+    if useful_both_selected and not useful_both_kept:
+        return "C"
+    if useful_filtered_out:
+        return "E"
+    if (
+        top_candidates
+        and top_candidates[0]["kind"] == "contains"
+        and isinstance(top_candidates[0]["source_path"], str)
+        and str(top_candidates[0]["source_path"]).startswith(".github/")
+        and useful_both_selected
+    ):
+        return "D"
+    if fallback_attempts and all(
+        attempt["reason"] == "estimated cost too high" for attempt in fallback_attempts
+    ):
+        return "F"
+    return "resolved"
 
 
 def test_relation_budget_diagnostic_helper_reports_requested_fields() -> None:

@@ -1291,9 +1291,9 @@ def _order_relations_for_profile_cap(
     *,
     selected_relations: Sequence[Relation],
     prefer_structural_relations: bool,
-    task_hints: set[str] | frozenset[str],
+    task_hints: frozenset[str],
     entity_by_id: Mapping[str, Entity],
-    selected_entity_ids: set[str] | frozenset[str],
+    selected_entity_ids: frozenset[str],
 ) -> list[Relation]:
     """Deterministically order relations before profile-level relation cap is applied."""
     if not prefer_structural_relations:
