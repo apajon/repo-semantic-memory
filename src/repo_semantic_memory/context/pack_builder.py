@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from repo_semantic_memory.context.bm25 import FieldedBM25Index, FieldedDocument, tokenize_text
 from repo_semantic_memory.context.compression import (
@@ -863,7 +863,7 @@ def _truncate_to_budget(
     budget_chars: int,
     selected_entities: Sequence[Entity],
     selected_relations: Sequence[Relation],
-    reasons_by_key: dict[str, Sequence[str]],
+    reasons_by_key: Mapping[str, Sequence[str]],
     prefer_structural_relations: bool = False,
 ) -> tuple[list[Entity], list[Relation], bool]:
     # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
