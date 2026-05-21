@@ -56,6 +56,8 @@ _ACTIVATION_GATING_TESTS = (
     "    def test_watchdog_blocks_activation(self) -> None:\n"
     "        assert not ActivationGating().should_activate(False)\n"
 )
+# Relation kinds considered task-relevant in diagnostics:
+# structural source-code links + behavioral links that should survive relation budgeting.
 _DIAGNOSTIC_USEFUL_RELATION_KINDS = frozenset(
     {"contains", "tests", "exports", "uses", "owns", "inherits", "imports"}
 )
@@ -1483,7 +1485,7 @@ def _classify_failure_mode(
         top_candidates
         and top_candidates[0]["kind"] == "contains"
         and isinstance(top_candidates[0]["source_path"], str)
-        and str(top_candidates[0]["source_path"]).startswith(".github/")
+        and top_candidates[0]["source_path"].startswith(".github/")
         and useful_both_selected
     ):
         return "D"
