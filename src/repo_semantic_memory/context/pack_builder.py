@@ -1082,26 +1082,25 @@ def _truncate_to_budget(
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
     selected_entity_ids = frozenset(entity.id.value for entity in selected_entities)
-    ordered_relations = sorted(
-        selected_relations,
-        key=lambda relation: _relation_budget_priority(
-            relation,
-            prefer_structural_relations=prefer_structural_relations,
-            task_hints=_task_hints,
-            entity_by_id=_entity_by_id,
-            kept_entity_ids=selected_entity_ids,
-            selected_entity_ids=selected_entity_ids,
-        ),
-    )
     relation_budget_reservation = 0
-    if preserve_at_least_one_relation and ordered_relations:
-        top_relation = ordered_relations[0]
+    if preserve_at_least_one_relation and selected_relations:
+        top_relation = min(
+            selected_relations,
+            key=lambda relation: _relation_budget_priority(
+                relation,
+                prefer_structural_relations=prefer_structural_relations,
+                task_hints=_task_hints,
+                entity_by_id=_entity_by_id,
+                kept_entity_ids=selected_entity_ids,
+                selected_entity_ids=selected_entity_ids,
+            ),
+        )
         relation_budget_reservation = _estimate_relation_chars(
             top_relation, reasons_by_key.get(relation_key(top_relation), ())
         )
         available_budget = max(0, budget_chars - used)
         relation_budget_reservation = min(relation_budget_reservation, available_budget)
-    entity_budget_limit = max(used, budget_chars - relation_budget_reservation)
+    entity_budget_limit = budget_chars - relation_budget_reservation
 
     for entity in selected_entities:
         estimate = _estimate_entity_chars(entity, reasons_by_key.get(entity.id.value, ()))
@@ -1254,6 +1253,8 @@ def _relation_budget_priority(
     # 3: no budgeted endpoints
     if kept_coverage == 2:
         kept_priority = 0
+    # selected_coverage == 2 means both endpoints were selected before truncation;
+    # with one endpoint still budgeted, this is our preferred fallback over other 1-endpoint cases.
     elif kept_coverage == 1 and selected_coverage == 2:
         kept_priority = 1
     elif kept_coverage == 1:
