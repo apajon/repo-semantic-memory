@@ -1269,7 +1269,7 @@ def test_relation_helpers_classify_source_and_tooling_paths() -> None:
 
 
 def test_relation_task_priority_public_api_ranks_exports_over_tooling_contains() -> None:
-    """For public_api hints: exports has priority 0 (highest), then tests, source contains,
+    """For public_api hints: exports has priority 0 (highest), then source contains, tests,
     .github/tooling contains (lowest).  Lower number = higher priority in the sort order."""
     from repo_semantic_memory.context.pack_builder import _relation_task_priority
 
@@ -1322,13 +1322,79 @@ def test_relation_task_priority_public_api_ranks_exports_over_tooling_contains()
     p_github = _relation_task_priority(github_contains, task_hints=hints, entity_by_id=entity_by_id)
 
     assert p_exports == 0, f"exports should have highest priority (0); got {p_exports}"
-    assert p_tests == 1, f"tests should have priority 1; got {p_tests}"
-    assert p_src_contains == 2, f"source contains should have priority 2; got {p_src_contains}"
+    assert p_src_contains == 1, f"source contains should have priority 1; got {p_src_contains}"
+    assert p_tests == 2, f"tests should have priority 2; got {p_tests}"
     assert p_github > p_src_contains, (
         f".github contains ({p_github}) must rank lower than source contains ({p_src_contains})"
     )
     assert p_github > p_exports, (
         f".github contains ({p_github}) must rank lower than exports ({p_exports})"
+    )
+
+
+def test_relation_task_priority_implementation_prefers_source_contains_before_tests() -> None:
+    from repo_semantic_memory.context.pack_builder import _relation_task_priority
+
+    src_entity = Entity(
+        id=StableId("python:module:src.activation"),
+        kind="module",
+        name="activation",
+        qualified_name="src.activation",
+        source_range=SourceRange(path="src/activation.py", start_line=1, end_line=1),
+    )
+    entity_by_id = {src_entity.id.value: src_entity}
+    src_contains = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:src.activation"),
+        target_entity_id=StableId("python:function:src.activation.require_active"),
+    )
+    tests_rel = Relation(
+        kind="tests",
+        source_entity_id=StableId("python:module:tests.test_activation"),
+        target_entity_id=StableId("python:module:src.activation"),
+    )
+
+    hints: frozenset[str] = frozenset({"implementation"})
+    p_src_contains = _relation_task_priority(
+        src_contains, task_hints=hints, entity_by_id=entity_by_id
+    )
+    p_tests = _relation_task_priority(tests_rel, task_hints=hints, entity_by_id=entity_by_id)
+
+    assert p_src_contains < p_tests, (
+        f"implementation should prefer source contains over tests ({p_src_contains=} {p_tests=})"
+    )
+
+
+def test_relation_task_priority_cleanup_prefers_tests_then_source_contains() -> None:
+    from repo_semantic_memory.context.pack_builder import _relation_task_priority
+
+    src_entity = Entity(
+        id=StableId("python:module:src.lifecycle"),
+        kind="module",
+        name="lifecycle",
+        qualified_name="src.lifecycle",
+        source_range=SourceRange(path="src/lifecycle.py", start_line=1, end_line=1),
+    )
+    entity_by_id = {src_entity.id.value: src_entity}
+    src_contains = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:src.lifecycle"),
+        target_entity_id=StableId("python:class:src.lifecycle.LifecycleComponent"),
+    )
+    tests_rel = Relation(
+        kind="tests",
+        source_entity_id=StableId("python:module:tests.test_lifecycle"),
+        target_entity_id=StableId("python:module:src.lifecycle"),
+    )
+
+    hints: frozenset[str] = frozenset({"cleanup_ownership"})
+    p_tests = _relation_task_priority(tests_rel, task_hints=hints, entity_by_id=entity_by_id)
+    p_src_contains = _relation_task_priority(
+        src_contains, task_hints=hints, entity_by_id=entity_by_id
+    )
+
+    assert p_tests < p_src_contains, (
+        f"cleanup/ownership should prefer tests over source contains ({p_tests=} {p_src_contains=})"
     )
 
 
@@ -1405,6 +1471,69 @@ def test_ensure_minimum_relation_coverage_nondestructive() -> None:
     # The commit for R_small should NOT have popped e_a (it fitted without popping).
     assert e_a.id.value in kept_entity_ids, "e_a must remain in kept_entity_ids after R_small"
     assert e_b.id.value in kept_entity_ids, "e_b must remain in kept_entity_ids after R_small"
+
+
+def test_truncate_to_budget_trades_tail_entity_to_keep_useful_relation() -> None:
+    from repo_semantic_memory.context.pack_builder import (
+        _PACK_FIXED_OVERHEAD_CHARS,
+        _estimate_entity_chars,
+        _truncate_to_budget,
+    )
+
+    e_a = Entity(
+        id=StableId("python:module:src.lifecycle_component"),
+        kind="module",
+        name="lifecycle_component",
+        qualified_name="src.lifecycle_component",
+        source_range=SourceRange(path="src/lifecycle_component.py", start_line=1, end_line=20),
+    )
+    e_b = Entity(
+        id=StableId("python:class:src.lifecycle_component.LifecycleComponent"),
+        kind="class",
+        name="LifecycleComponent",
+        qualified_name="src.lifecycle_component.LifecycleComponent",
+        source_range=SourceRange(path="src/lifecycle_component.py", start_line=22, end_line=90),
+    )
+    e_tail = Entity(
+        id=StableId("python:class:src.lifecycle_component." + "Tail" * 48),
+        kind="class",
+        name="Tail",
+        qualified_name="src.lifecycle_component." + "Tail" * 48,
+        source_range=SourceRange(path="src/lifecycle_component.py", start_line=100, end_line=180),
+    )
+    useful_relation = Relation(
+        kind="contains",
+        source_entity_id=e_a.id,
+        target_entity_id=e_b.id,
+    )
+
+    task = "Find lifecycle component ownership and cleanup rules"
+    used_base = len(task) + _PACK_FIXED_OVERHEAD_CHARS
+    budget = (
+        used_base
+        + _estimate_entity_chars(e_a, ())
+        + _estimate_entity_chars(e_b, ())
+        + _estimate_entity_chars(e_tail, ())
+    )
+
+    kept_entities, kept_relations, truncated = _truncate_to_budget(
+        task=task,
+        budget_chars=budget,
+        selected_entities=[e_a, e_b, e_tail],
+        selected_relations=[useful_relation],
+        reasons_by_key={},
+        prefer_structural_relations=True,
+        preserve_at_least_one_relation=True,
+        task_hints={"cleanup_ownership", "implementation"},
+        entity_by_id={e.id.value: e for e in (e_a, e_b, e_tail)},
+    )
+
+    kept_entity_ids = {entity.id.value for entity in kept_entities}
+    assert useful_relation in kept_relations
+    assert e_a.id.value in kept_entity_ids
+    assert e_b.id.value in kept_entity_ids
+    assert e_tail.id.value not in kept_entity_ids, "tail entity should be traded to fit relation"
+    assert truncated
 
 
 def test_explain_ranking_github_tooling_contains_does_not_outrank_source_relations(

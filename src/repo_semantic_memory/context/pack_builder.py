@@ -64,6 +64,8 @@ _IMPLEMENTATION_CORE_LOGIC_TOKENS = frozenset({"core", "logic"})
 _IMPLEMENTATION_PRIORITIZED_ENTITY_KINDS = frozenset({"module", "class", "function", "method"})
 _TEST_TASK_TOKENS = frozenset({"test", "tests", "behavior", "coverage", "pytest", "regression"})
 _PUBLIC_API_TASK_TOKENS = frozenset({"public", "api", "export", "exports", "__init__", "init"})
+_CLEANUP_OWNERSHIP_TASK_TOKENS = frozenset({"cleanup", "ownership", "owner", "owns"})
+_DOCUMENTATION_TASK_TOKENS = frozenset({"doc", "docs", "documentation", "readme", "markdown"})
 _FORBIDDEN_ASSUMPTIONS = (
     (
         "Do not assume inheritance targets are resolved unless relation metadata says "
@@ -711,6 +713,10 @@ def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
         hints.add("tests")
     if any(token in _PUBLIC_API_TASK_TOKENS for token in task_tokens):
         hints.add("public_api")
+    if any(token in _CLEANUP_OWNERSHIP_TASK_TOKENS for token in task_tokens):
+        hints.add("cleanup_ownership")
+    if any(token in _DOCUMENTATION_TASK_TOKENS for token in task_tokens):
+        hints.add("documentation")
     return hints
 
 
@@ -904,6 +910,18 @@ def _is_markdown_or_tooling_relation(
     return False
 
 
+def _is_markdown_relation(relation: Relation, entity_by_id: Mapping[str, Entity]) -> bool:
+    """True when any endpoint path is markdown."""
+    for eid in (relation.source_entity_id.value, relation.target_entity_id.value):
+        entity = entity_by_id.get(eid)
+        if entity is None:
+            continue
+        path = entity.source_range.path.replace("\\", "/").lower()
+        if path.endswith(".md"):
+            return True
+    return False
+
+
 def _relation_endpoint_coverage(
     relation: Relation,
     kept_entity_ids: set[str] | frozenset[str],
@@ -922,44 +940,89 @@ def _relation_task_priority(
 ) -> int:
     """Task-intent-aware relation priority (lower = higher priority).
 
-    For public_api tasks: exports > tests > source contains > doc/tool contains.
-    For implementation/cleanup tasks: tests > source contains > owns > uses/inherits.
+    For public_api tasks: exports > source contains > tests > source structural.
+    For cleanup/ownership tasks: tests > source contains > owns > uses/inherits > imports.
+    For implementation tasks: source contains > tests > uses/inherits > imports.
+    For documentation tasks: markdown contains can rank high.
     For test tasks: tests > source contains > uses/inherits.
     Markdown/tooling relations (.github, tools/copilot) are always deprioritized.
     """
     kind = relation.kind
     is_md_tooling = _is_markdown_or_tooling_relation(relation, entity_by_id)
     is_src = _is_source_code_relation(relation, entity_by_id)
+    is_markdown = _is_markdown_relation(relation, entity_by_id)
+
+    if "documentation" in task_hints:
+        if kind == "contains" and is_markdown and not is_md_tooling:
+            return 0
+        if kind in {"contains", "documents"} and not is_md_tooling:
+            return 1
+        if kind in {"exports", "tests"} and not is_md_tooling:
+            return 2
+        if kind in {"uses", "owns", "inherits", "requires", "calls"} and is_src and not is_md_tooling:
+            return 3
+        if kind == "imports":
+            return 4
+        if kind == "contains" and is_md_tooling:
+            return 6
+        return 5
 
     if "public_api" in task_hints:
         if kind == "exports":
             return 0
-        if kind == "tests" and not is_md_tooling:
-            return 1
         if kind == "contains" and is_src and not is_md_tooling:
+            return 1
+        if kind == "tests" and not is_md_tooling:
             return 2
-        if kind in {"uses", "inherits"} and not is_md_tooling:
+        if kind in {"uses", "owns", "inherits", "requires", "calls"} and is_src and not is_md_tooling:
             return 3
-        if kind == "contains" and not is_md_tooling:
+        if kind == "contains" and is_markdown and not is_md_tooling:
             return 4
         if kind == "imports":
             return 5
-        return 6  # markdown/tooling or other
+        if kind == "contains" and not is_md_tooling:
+            return 6
+        if kind == "contains" and is_md_tooling:
+            return 8
+        return 7
 
-    if "implementation" in task_hints:
+    if "cleanup_ownership" in task_hints:
         if kind == "tests" and not is_md_tooling:
             return 0
         if kind == "contains" and is_src and not is_md_tooling:
             return 1
         if kind == "owns" and not is_md_tooling:
             return 2
-        if kind in {"uses", "inherits"} and not is_md_tooling:
+        if kind == "uses" and not is_md_tooling:
             return 3
-        if kind == "exports":
+        if kind == "inherits" and not is_md_tooling:
             return 4
         if kind == "imports":
             return 5
-        return 6  # markdown/tooling or other
+        if kind == "contains" and is_markdown and not is_md_tooling:
+            return 6
+        if kind == "contains" and is_md_tooling:
+            return 8
+        return 7
+
+    if "implementation" in task_hints:
+        if kind == "contains" and is_src and not is_md_tooling:
+            return 0
+        if kind == "tests" and not is_md_tooling:
+            return 1
+        if kind == "uses" and not is_md_tooling:
+            return 2
+        if kind == "inherits" and not is_md_tooling:
+            return 3
+        if kind == "imports":
+            return 4
+        if kind in {"owns", "requires", "calls"} and is_src and not is_md_tooling:
+            return 5
+        if kind == "contains" and is_markdown and not is_md_tooling:
+            return 6
+        if kind == "contains" and is_md_tooling:
+            return 8
+        return 7
 
     if "tests" in task_hints:
         if kind == "tests" and not is_md_tooling:
@@ -972,7 +1035,9 @@ def _relation_task_priority(
             return 3
         if kind == "imports":
             return 4
-        return 5  # markdown/tooling or other
+        if kind == "contains" and is_md_tooling:
+            return 6
+        return 5
 
     # Default: source-code structural relations first; markdown/tooling last.
     if kind in {"exports", "tests"} and not is_md_tooling:
@@ -983,6 +1048,8 @@ def _relation_task_priority(
         return 2
     if kind == "imports":
         return 3
+    if kind == "contains" and is_md_tooling:
+        return 5
     return 4  # markdown/tooling or other
 
 
@@ -1004,17 +1071,9 @@ def _truncate_to_budget(
     kept_entity_ids: set[str] = set()
     truncated = False
 
-    for entity in selected_entities:
-        estimate = _estimate_entity_chars(entity, reasons_by_key.get(entity.id.value, ()))
-        if used + estimate > budget_chars:
-            truncated = True
-            break
-        kept_entities.append(entity)
-        kept_entity_ids.add(entity.id.value)
-        used += estimate
-
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+    selected_entity_ids = frozenset(entity.id.value for entity in selected_entities)
     ordered_relations = sorted(
         selected_relations,
         key=lambda relation: _relation_budget_priority(
@@ -1022,6 +1081,40 @@ def _truncate_to_budget(
             prefer_structural_relations=prefer_structural_relations,
             task_hints=_task_hints,
             entity_by_id=_entity_by_id,
+            kept_entity_ids=selected_entity_ids,
+            selected_entity_ids=selected_entity_ids,
+        ),
+    )
+    relation_budget_reservation = 0
+    if preserve_at_least_one_relation and ordered_relations:
+        top_relation = ordered_relations[0]
+        relation_budget_reservation = _estimate_relation_chars(
+            top_relation, reasons_by_key.get(relation_key(top_relation), ())
+        )
+        relation_budget_reservation = min(
+            relation_budget_reservation,
+            max(0, budget_chars - used),
+        )
+    entity_budget_limit = max(used, budget_chars - relation_budget_reservation)
+
+    for entity in selected_entities:
+        estimate = _estimate_entity_chars(entity, reasons_by_key.get(entity.id.value, ()))
+        if used + estimate > entity_budget_limit:
+            truncated = True
+            break
+        kept_entities.append(entity)
+        kept_entity_ids.add(entity.id.value)
+        used += estimate
+
+    ordered_relations = sorted(
+        selected_relations,
+        key=lambda relation: _relation_budget_priority(
+            relation,
+            prefer_structural_relations=prefer_structural_relations,
+            task_hints=_task_hints,
+            entity_by_id=_entity_by_id,
+            kept_entity_ids=kept_entity_ids,
+            selected_entity_ids=selected_entity_ids,
         ),
     )
     kept_relations: list[Relation] = []
@@ -1110,7 +1203,8 @@ def _relation_budget_priority(
     task_hints: set[str] | frozenset[str] | None = None,
     entity_by_id: Mapping[str, Entity] | None = None,
     kept_entity_ids: set[str] | frozenset[str] | None = None,
-) -> tuple[int, int, str, str, str]:
+    selected_entity_ids: set[str] | frozenset[str] | None = None,
+) -> tuple[int, int, int, int, str, str, str]:
     """Compute a sort key for relation budget ordering (lower = higher priority).
 
     In structural (explain_ranking) mode:
@@ -1124,11 +1218,30 @@ def _relation_budget_priority(
     resolved = relation.metadata.get("resolved") is True
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+    _kept_entity_ids: set[str] | frozenset[str] = (
+        kept_entity_ids if kept_entity_ids is not None else frozenset()
+    )
+    _selected_entity_ids: set[str] | frozenset[str] = (
+        selected_entity_ids if selected_entity_ids is not None else frozenset()
+    )
+    selected_coverage = _relation_endpoint_coverage(relation, _selected_entity_ids)
+    selected_priority = 0 if selected_coverage == 2 else 1 if selected_coverage == 1 else 2
+    kept_coverage = _relation_endpoint_coverage(relation, _kept_entity_ids)
+    if kept_coverage == 2:
+        kept_priority = 0
+    elif kept_coverage == 1 and selected_coverage == 2:
+        kept_priority = 1
+    elif kept_coverage == 1:
+        kept_priority = 2
+    else:
+        kept_priority = 3
 
     if not prefer_structural_relations:
         # Non-structural mode: keep original ordering (unresolved imports/inherits first).
         kind_priority = 0 if relation.kind in {"imports", "inherits"} and not resolved else 1
         return (
+            selected_priority,
+            kept_priority,
             kind_priority,
             0,
             relation.kind,
@@ -1154,6 +1267,8 @@ def _relation_budget_priority(
         kind_priority = 4
 
     return (
+        selected_priority,
+        kept_priority,
         task_priority,
         kind_priority,
         relation.kind,
