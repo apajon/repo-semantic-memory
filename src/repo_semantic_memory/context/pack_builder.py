@@ -125,6 +125,10 @@ _RANKING_REASON_PRIORITY = {
     "lexical": 5,
 }
 _DEFAULT_RANKING_REASON_PRIORITY = 6
+# Path prefixes treated as markdown/tooling noise for relation-priority purposes.
+_MARKDOWN_OR_TOOLING_PATH_PREFIXES = (".github/", "tools/copilot/", ".devcontainer/")
+# File-extension suffixes that identify source-code entities.
+_SOURCE_CODE_SUFFIXES = (".py",)
 
 
 def build_context_pack(
@@ -330,6 +334,8 @@ def build_context_pack(
         reasons_by_key=score_capped_reasons_by_key,
         prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
         preserve_at_least_one_relation=explain_ranking,
+        task_hints=task_hints,
+        entity_by_id=entity_by_id,
     )
 
     suggested_files = _suggested_files(budgeted_entities)
@@ -872,6 +878,114 @@ def _is_graph_seed_eligible(breakdown: RankingBreakdown) -> bool:
     )
 
 
+def _is_source_code_relation(relation: Relation, entity_by_id: Mapping[str, Entity]) -> bool:
+    """True when at least one endpoint is a source-code entity (e.g. .py file)."""
+    for eid in (relation.source_entity_id.value, relation.target_entity_id.value):
+        entity = entity_by_id.get(eid)
+        if entity is None:
+            continue
+        path = entity.source_range.path.replace("\\", "/").lower()
+        if path.endswith(_SOURCE_CODE_SUFFIXES):
+            return True
+    return False
+
+
+def _is_markdown_or_tooling_relation(
+    relation: Relation, entity_by_id: Mapping[str, Entity]
+) -> bool:
+    """True when any endpoint lives in a markdown/tooling path (.github, tools/copilot, etc.)."""
+    for eid in (relation.source_entity_id.value, relation.target_entity_id.value):
+        entity = entity_by_id.get(eid)
+        if entity is None:
+            continue
+        path = entity.source_range.path.replace("\\", "/").lower()
+        if any(path.startswith(prefix) for prefix in _MARKDOWN_OR_TOOLING_PATH_PREFIXES):
+            return True
+    return False
+
+
+def _relation_endpoint_coverage(
+    relation: Relation,
+    kept_entity_ids: set[str] | frozenset[str],
+) -> int:
+    """Returns 2 if both endpoints in kept set, 1 if one endpoint, 0 if neither."""
+    src_kept = relation.source_entity_id.value in kept_entity_ids
+    tgt_kept = relation.target_entity_id.value in kept_entity_ids
+    return (1 if src_kept else 0) + (1 if tgt_kept else 0)
+
+
+def _relation_task_priority(
+    relation: Relation,
+    *,
+    task_hints: set[str] | frozenset[str],
+    entity_by_id: Mapping[str, Entity],
+) -> int:
+    """Task-intent-aware relation priority (lower = higher priority).
+
+    For public_api tasks: exports > tests > source contains > doc/tool contains.
+    For implementation/cleanup tasks: tests > source contains > owns > uses/inherits.
+    For test tasks: tests > source contains > uses/inherits.
+    Markdown/tooling relations (.github, tools/copilot) are always deprioritized.
+    """
+    kind = relation.kind
+    is_md_tooling = _is_markdown_or_tooling_relation(relation, entity_by_id)
+    is_src = _is_source_code_relation(relation, entity_by_id)
+
+    if "public_api" in task_hints:
+        if kind == "exports":
+            return 0
+        if kind == "tests" and not is_md_tooling:
+            return 1
+        if kind == "contains" and is_src and not is_md_tooling:
+            return 2
+        if kind in {"uses", "inherits"} and not is_md_tooling:
+            return 3
+        if kind == "contains" and not is_md_tooling:
+            return 4
+        if kind == "imports":
+            return 5
+        return 6  # markdown/tooling or other
+
+    if "implementation" in task_hints:
+        if kind == "tests" and not is_md_tooling:
+            return 0
+        if kind == "contains" and is_src and not is_md_tooling:
+            return 1
+        if kind == "owns" and not is_md_tooling:
+            return 2
+        if kind in {"uses", "inherits"} and not is_md_tooling:
+            return 3
+        if kind == "exports":
+            return 4
+        if kind == "imports":
+            return 5
+        return 6  # markdown/tooling or other
+
+    if "tests" in task_hints:
+        if kind == "tests" and not is_md_tooling:
+            return 0
+        if kind in {"contains", "calls"} and is_src and not is_md_tooling:
+            return 1
+        if kind in {"uses", "inherits"} and not is_md_tooling:
+            return 2
+        if kind == "exports":
+            return 3
+        if kind == "imports":
+            return 4
+        return 5  # markdown/tooling or other
+
+    # Default: source-code structural relations first; markdown/tooling last.
+    if kind in {"exports", "tests"} and not is_md_tooling:
+        return 0
+    if kind in {"contains", "calls", "uses", "owns"} and is_src and not is_md_tooling:
+        return 1
+    if kind in {"contains", "calls", "uses", "owns"} and not is_md_tooling:
+        return 2
+    if kind == "imports":
+        return 3
+    return 4  # markdown/tooling or other
+
+
 def _truncate_to_budget(
     *,
     task: str,
@@ -881,6 +995,8 @@ def _truncate_to_budget(
     reasons_by_key: Mapping[str, Sequence[str]],
     prefer_structural_relations: bool = False,
     preserve_at_least_one_relation: bool = False,
+    task_hints: set[str] | None = None,
+    entity_by_id: Mapping[str, Entity] | None = None,
 ) -> tuple[list[Entity], list[Relation], bool]:
     # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
     used = len(task) + _PACK_FIXED_OVERHEAD_CHARS
@@ -897,11 +1013,15 @@ def _truncate_to_budget(
         kept_entity_ids.add(entity.id.value)
         used += estimate
 
+    _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
+    _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
     ordered_relations = sorted(
         selected_relations,
         key=lambda relation: _relation_budget_priority(
             relation,
             prefer_structural_relations=prefer_structural_relations,
+            task_hints=_task_hints,
+            entity_by_id=_entity_by_id,
         ),
     )
     kept_relations: list[Relation] = []
@@ -946,27 +1066,40 @@ def _ensure_minimum_relation_coverage(
     budget_chars: int,
     truncated: bool,
 ) -> tuple[list[Relation], int, bool]:
-    """Prefer keeping one relation in explain mode.
+    """Try each candidate non-destructively; mutate shared state only on success.
 
-    This helper intentionally mutates ``kept_entities`` and ``kept_entity_ids`` in place
-    while returning relation/usage/truncation outputs for the caller.
-    Relation inclusion follows pack semantics: a relation is eligible when at least one
-    endpoint remains selected as context.
+    Each relation is tried against a fresh trial copy of the entity set so that
+    a failed candidate does not corrupt ``kept_entities`` or ``kept_entity_ids``
+    for subsequent candidates.
+    Relation inclusion follows pack semantics: a relation is eligible when at least
+    one endpoint remains in the (trial) entity set after budget-driven pops.
+    On success the trial state (entity list, entity id set, and usage counter) is
+    committed back into the shared mutable ``kept_entities`` and ``kept_entity_ids``.
     """
     for relation in ordered_relations:
         estimate = _estimate_relation_chars(
             relation, reasons_by_key.get(relation_key(relation), ())
         )
-        while kept_entities and used + estimate > budget_chars:
-            removed = kept_entities.pop()
-            used -= _estimate_entity_chars(removed, reasons_by_key.get(removed.id.value, ()))
-            kept_entity_ids.remove(removed.id.value)
-            truncated = True
+        # Use trial copies so a failed candidate does not remove entities needed
+        # for later, cheaper candidates.
+        trial_entities = list(kept_entities)
+        trial_entity_ids = set(kept_entity_ids)
+        trial_used = used
+        trial_truncated = truncated
+        while trial_entities and trial_used + estimate > budget_chars:
+            removed = trial_entities.pop()
+            trial_used -= _estimate_entity_chars(removed, reasons_by_key.get(removed.id.value, ()))
+            trial_entity_ids.discard(removed.id.value)
+            trial_truncated = True
         if (
-            relation.source_entity_id.value in kept_entity_ids
-            or relation.target_entity_id.value in kept_entity_ids
-        ) and used + estimate <= budget_chars:
-            return [relation], used + estimate, truncated
+            relation.source_entity_id.value in trial_entity_ids
+            or relation.target_entity_id.value in trial_entity_ids
+        ) and trial_used + estimate <= budget_chars:
+            # Commit: write trial state back into the shared mutable objects.
+            kept_entities[:] = trial_entities
+            kept_entity_ids.clear()
+            kept_entity_ids.update(trial_entity_ids)
+            return [relation], trial_used + estimate, trial_truncated
     return [], used, truncated
 
 
@@ -974,32 +1107,55 @@ def _relation_budget_priority(
     relation: Relation,
     *,
     prefer_structural_relations: bool = False,
-) -> tuple[int, str, str, str]:
+    task_hints: set[str] | frozenset[str] | None = None,
+    entity_by_id: Mapping[str, Entity] | None = None,
+    kept_entity_ids: set[str] | frozenset[str] | None = None,
+) -> tuple[int, int, str, str, str]:
+    """Compute a sort key for relation budget ordering (lower = higher priority).
+
+    In structural (explain_ranking) mode:
+      Primary: task-intent-aware priority via ``_relation_task_priority``.
+      Secondary: structural kind priority.
+      Tiebreaker: kind, source_id, target_id (stable strings).
+
+    In non-structural mode: preserves the original behavior (unresolved
+    imports/inherits sorted first as a proxy for task relevance).
+    """
     resolved = relation.metadata.get("resolved") is True
-    if (
-        not prefer_structural_relations
-        and relation.kind in {"imports", "inherits"}
-        and not resolved
-    ):
-        priority = 0
-    elif prefer_structural_relations and relation.kind in {"tests", "exports"}:
-        priority = 0
-    elif prefer_structural_relations and relation.kind in {
-        "contains",
-        "calls",
-        "uses",
-        "owns",
-        "requires",
-    }:
-        priority = 1
-    elif prefer_structural_relations and relation.kind in {"documents", "violates"}:
-        priority = 2
-    elif prefer_structural_relations and relation.kind in {"imports", "inherits"} and resolved:
-        priority = 3
+    _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
+    _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+
+    if not prefer_structural_relations:
+        # Non-structural mode: keep original ordering (unresolved imports/inherits first).
+        kind_priority = 0 if relation.kind in {"imports", "inherits"} and not resolved else 1
+        return (
+            kind_priority,
+            0,
+            relation.kind,
+            relation.source_entity_id.value,
+            relation.target_entity_id.value,
+        )
+
+    # Structural (explain_ranking) mode: task-intent + kind priority.
+    task_priority = _relation_task_priority(
+        relation, task_hints=_task_hints, entity_by_id=_entity_by_id
+    )
+
+    # Traditional kind priority as a secondary tiebreaker within the same task-intent tier.
+    if relation.kind in {"tests", "exports"}:
+        kind_priority = 0
+    elif relation.kind in {"contains", "calls", "uses", "owns", "requires"}:
+        kind_priority = 1
+    elif relation.kind in {"documents", "violates"}:
+        kind_priority = 2
+    elif relation.kind in {"imports", "inherits"} and resolved:
+        kind_priority = 3
     else:
-        priority = 1 if not prefer_structural_relations else 4
+        kind_priority = 4
+
     return (
-        priority,
+        task_priority,
+        kind_priority,
         relation.kind,
         relation.source_entity_id.value,
         relation.target_entity_id.value,

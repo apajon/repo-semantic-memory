@@ -1187,3 +1187,310 @@ def test_generated_artifacts_remain_suppressed_under_compact_profiles() -> None:
     selected_paths = {entity.source_range.path for entity in pack.selected_entities}
     assert all(not path.startswith("docs/_build/") for path in selected_paths)
     assert all(".egg-info/" not in path for path in selected_paths)
+
+
+# ---------------------------------------------------------------------------
+# Relation-preservation helpers and fix tests
+# ---------------------------------------------------------------------------
+
+
+def test_relation_helpers_classify_source_and_tooling_paths() -> None:
+    """_is_source_code_relation and _is_markdown_or_tooling_relation classify paths correctly."""
+    from repo_semantic_memory.context.pack_builder import (
+        _is_markdown_or_tooling_relation,
+        _is_source_code_relation,
+    )
+
+    src_entity = Entity(
+        id=StableId("python:module:mymod"),
+        kind="module",
+        name="mymod",
+        qualified_name="mymod",
+        source_range=SourceRange(path="src/mymod.py", start_line=1, end_line=1),
+    )
+    github_entity = Entity(
+        id=StableId("file:.github/instructions/policy.md"),
+        kind="file",
+        name="policy.md",
+        qualified_name="policy.md",
+        source_range=SourceRange(path=".github/instructions/policy.md", start_line=1, end_line=1),
+    )
+    copilot_entity = Entity(
+        id=StableId("file:tools/copilot/playbook.md"),
+        kind="file",
+        name="playbook.md",
+        qualified_name="playbook.md",
+        source_range=SourceRange(path="tools/copilot/playbook.md", start_line=1, end_line=1),
+    )
+    doc_entity = Entity(
+        id=StableId("file:docs/guide.md"),
+        kind="file",
+        name="guide.md",
+        qualified_name="guide.md",
+        source_range=SourceRange(path="docs/guide.md", start_line=1, end_line=1),
+    )
+    entity_by_id = {
+        src_entity.id.value: src_entity,
+        github_entity.id.value: github_entity,
+        copilot_entity.id.value: copilot_entity,
+        doc_entity.id.value: doc_entity,
+    }
+
+    src_rel = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:mymod"),
+        target_entity_id=StableId("python:class:mymod.Cls"),
+    )
+    github_rel = Relation(
+        kind="contains",
+        source_entity_id=StableId("file:.github/instructions/policy.md"),
+        target_entity_id=StableId("markdown:.github/instructions/policy.md:section:x:1"),
+    )
+    copilot_rel = Relation(
+        kind="contains",
+        source_entity_id=StableId("file:tools/copilot/playbook.md"),
+        target_entity_id=StableId("markdown:tools/copilot/playbook.md:section:x:1"),
+    )
+    doc_rel = Relation(
+        kind="contains",
+        source_entity_id=StableId("file:docs/guide.md"),
+        target_entity_id=StableId("markdown:docs/guide.md:section:x:1"),
+    )
+
+    assert _is_source_code_relation(src_rel, entity_by_id)
+    assert not _is_source_code_relation(github_rel, entity_by_id)
+    assert not _is_source_code_relation(doc_rel, entity_by_id)
+
+    assert not _is_markdown_or_tooling_relation(src_rel, entity_by_id)
+    assert _is_markdown_or_tooling_relation(github_rel, entity_by_id)
+    assert _is_markdown_or_tooling_relation(copilot_rel, entity_by_id)
+    # docs/ is NOT a tooling path.
+    assert not _is_markdown_or_tooling_relation(doc_rel, entity_by_id)
+
+
+def test_relation_task_priority_public_api_ranks_exports_over_tooling_contains() -> None:
+    """For public_api hints: exports has priority 0 (highest), then tests, source contains,
+    .github/tooling contains (lowest).  Lower number = higher priority in the sort order."""
+    from repo_semantic_memory.context.pack_builder import _relation_task_priority
+
+    github_entity = Entity(
+        id=StableId("file:.github/instructions/policy.md"),
+        kind="file",
+        name="policy.md",
+        qualified_name="policy.md",
+        source_range=SourceRange(path=".github/instructions/policy.md", start_line=1, end_line=1),
+    )
+    src_entity = Entity(
+        id=StableId("python:module:src.mymod"),
+        kind="module",
+        name="mymod",
+        qualified_name="src.mymod",
+        source_range=SourceRange(path="src/mymod.py", start_line=1, end_line=1),
+    )
+    entity_by_id = {
+        github_entity.id.value: github_entity,
+        src_entity.id.value: src_entity,
+    }
+
+    exports_rel = Relation(
+        kind="exports",
+        source_entity_id=StableId("python:module:src.mymod"),
+        target_entity_id=StableId("unresolved:export:src.mymod:Cls"),
+    )
+    tests_rel = Relation(
+        kind="tests",
+        source_entity_id=StableId("python:module:tests.test_mod"),
+        target_entity_id=StableId("python:module:src.mymod"),
+    )
+    src_contains = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:src.mymod"),
+        target_entity_id=StableId("python:class:src.mymod.Cls"),
+    )
+    github_contains = Relation(
+        kind="contains",
+        source_entity_id=StableId("file:.github/instructions/policy.md"),
+        target_entity_id=StableId("markdown:.github/instructions/policy.md:section:x:1"),
+    )
+
+    hints: frozenset[str] = frozenset({"public_api"})
+    p_exports = _relation_task_priority(exports_rel, task_hints=hints, entity_by_id=entity_by_id)
+    p_tests = _relation_task_priority(tests_rel, task_hints=hints, entity_by_id=entity_by_id)
+    p_src_contains = _relation_task_priority(
+        src_contains, task_hints=hints, entity_by_id=entity_by_id
+    )
+    p_github = _relation_task_priority(github_contains, task_hints=hints, entity_by_id=entity_by_id)
+
+    assert p_exports == 0, f"exports should have highest priority (0); got {p_exports}"
+    assert p_tests == 1, f"tests should have priority 1; got {p_tests}"
+    assert p_src_contains == 2, f"source contains should have priority 2; got {p_src_contains}"
+    assert p_github > p_src_contains, (
+        f".github contains ({p_github}) must rank lower than source contains ({p_src_contains})"
+    )
+    assert p_github > p_exports, (
+        f".github contains ({p_github}) must rank lower than exports ({p_exports})"
+    )
+
+
+def test_ensure_minimum_relation_coverage_nondestructive() -> None:
+    """Failed R_big trial must not corrupt kept_entities before R_small is tried."""
+    from repo_semantic_memory.context.pack_builder import (
+        _ensure_minimum_relation_coverage,
+        _estimate_entity_chars,
+        _estimate_relation_chars,
+    )
+
+    # E_a is a cheap entity whose id is the endpoint for both relations.
+    e_a = Entity(
+        id=StableId("python:class:mod.A"),
+        kind="class",
+        name="A",
+        qualified_name="mod.A",
+        source_range=SourceRange(path="src/mod.py", start_line=1, end_line=3),
+    )
+    # E_b is heavy (long qualified name → large budget estimate).
+    e_b = Entity(
+        id=StableId("python:class:mod." + "B" * 180),
+        kind="class",
+        name="B",
+        qualified_name="mod." + "B" * 180,
+        source_range=SourceRange(path="src/mod.py", start_line=4, end_line=10),
+    )
+
+    # R_big: expensive relation (long source id) → forces both entities to be popped,
+    # leaving e_a's id absent from the trial entity set → R_big fails.
+    big_source_id = "external:" + "X" * 180
+    r_big = Relation(
+        kind="exports",
+        source_entity_id=StableId(big_source_id),
+        target_entity_id=StableId(e_a.id.value),
+    )
+    # R_small: cheap relation, same target endpoint (e_a).  Fits without any pops.
+    r_small = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:mod"),
+        target_entity_id=StableId(e_a.id.value),
+    )
+
+    e_a_cost = _estimate_entity_chars(e_a, ())
+    e_b_cost = _estimate_entity_chars(e_b, ())
+    r_big_cost = _estimate_relation_chars(r_big, ())
+    r_small_cost = _estimate_relation_chars(r_small, ())
+    used = e_a_cost + e_b_cost
+    budget = used + r_small_cost  # only enough room for r_small (not r_big)
+
+    assert used + r_big_cost > budget, "R_big must require entity popping"
+    assert r_big_cost <= budget, "R_big must eventually fit after all entities are popped"
+    assert used + r_small_cost <= budget, "R_small must fit without any popping"
+
+    # kept_entities ordered so e_a is last → it gets popped first in R_big's trial.
+    kept_entities: list[Entity] = [e_b, e_a]
+    kept_entity_ids: set[str] = {e_a.id.value, e_b.id.value}
+
+    result, _result_used, _ = _ensure_minimum_relation_coverage(
+        ordered_relations=[r_big, r_small],
+        kept_entities=kept_entities,
+        kept_entity_ids=kept_entity_ids,
+        reasons_by_key={},
+        used=used,
+        budget_chars=budget,
+        truncated=False,
+    )
+
+    # With the non-destructive fix: R_big trial fails (e_a popped in trial → endpoint gone)
+    # but R_small trial starts fresh → e_a is still present → R_small succeeds.
+    assert result == [r_small], (
+        f"R_small should be selected after R_big's trial fails. Got: {[r.kind for r in result]}"
+    )
+    # The commit for R_small should NOT have popped e_a (it fitted without popping).
+    assert e_a.id.value in kept_entity_ids, "e_a must remain in kept_entity_ids after R_small"
+    assert e_b.id.value in kept_entity_ids, "e_b must remain in kept_entity_ids after R_small"
+
+
+def test_explain_ranking_github_tooling_contains_does_not_outrank_source_relations(
+    tmp_path: Path,
+) -> None:
+    """For public_api tasks, .github markdown contains must not outrank exports or tests."""
+    repo = tmp_path / "repo"
+    (repo / "src" / "mypkg").mkdir(parents=True)
+    (repo / ".github" / "instructions").mkdir(parents=True)
+    (repo / "tests").mkdir(parents=True)
+
+    (repo / "src" / "mypkg" / "__init__.py").write_text(
+        "from .core import MyClass\n\n__all__ = ['MyClass']\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "mypkg" / "core.py").write_text(
+        "class MyClass:\n    pass\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "test_mypkg.py").write_text(
+        "from mypkg import MyClass\n\ndef test_myclass() -> None:\n    assert MyClass\n",
+        encoding="utf-8",
+    )
+    # The .github file intentionally mentions task keywords so it competes for selection.
+    (repo / ".github" / "instructions" / "policy.md").write_text(
+        "# Copilot Policy\n\nThis policy governs public API and exports for MyClass usage.\n",
+        encoding="utf-8",
+    )
+
+    filesystem_entities = [
+        entity
+        for entity in extract_filesystem_entities(repo)
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
+    markdown_outline = extract_markdown_outline_path(repo)
+    python_entities, python_relations = index_python_path(repo)
+    export_relations = index_python_exports(repo)
+    test_relations = extract_test_relationships(repo, [*filesystem_entities, *python_entities])
+    entities = [*filesystem_entities, *markdown_outline.entities, *python_entities]
+    relations = [
+        *markdown_outline.relations,
+        *python_relations,
+        *export_relations,
+        *test_relations,
+    ]
+
+    pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        explain_ranking=True,
+    )
+
+    selected_relation_kinds = {r.kind for r in pack.selected_relations}
+    assert selected_relation_kinds & {"exports", "tests", "contains"}, (
+        f"Expected source/structural relations; got only: {selected_relation_kinds}"
+    )
+
+    # Specifically: for a public_api task, exports or tests must be present.
+    assert selected_relation_kinds & {"exports", "tests"}, (
+        "public_api pack must include exports or tests relation, "
+        f"not only .github markdown contains. Got: {selected_relation_kinds}"
+    )
+
+
+def test_explain_ranking_cleanup_and_activation_nonempty_relations_tight_budget() -> None:
+    """cleanup/activation-style packs must retain non-empty selected_relations at tight budget."""
+    entities, relations = _ranking_fixture_entities_and_all_relations()
+
+    for task in (
+        "Find lifecycle component ownership and cleanup rules",
+        "Find where activation gating is implemented",
+    ):
+        pack = build_context_pack(
+            task=task,
+            entities=entities,
+            relations=relations,
+            budget_chars=1400,
+            explain_ranking=True,
+        )
+        assert pack.selected_relations, f"selected_relations must be non-empty for task: {task!r}"
+        assert any(
+            r.kind in {"contains", "exports", "tests", "owns", "uses"}
+            for r in pack.selected_relations
+        ), (
+            f"Expected source/structural relations for task: {task!r}; "
+            f"got: {[r.kind for r in pack.selected_relations]}"
+        )
