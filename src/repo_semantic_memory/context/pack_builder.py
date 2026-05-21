@@ -20,7 +20,9 @@ from repo_semantic_memory.context.graph_selection import (
     select_graph_neighbors,
 )
 from repo_semantic_memory.context.path_roles import (
+    DOC_ROLE,
     SOURCE_ROLE,
+    TOOL_ROLE,
     classify_path_role,
     infer_source_roots,
     is_generated_artifact_path,
@@ -89,6 +91,12 @@ _TEST_TASK_INTENT_BONUS = 6
 _PUBLIC_API_PATH_ROLE_BONUS = 16
 _PUBLIC_API_TASK_INTENT_BONUS = 8
 _PUBLIC_API_COMPONENT_BONUS = 16
+_PUBLIC_API_EXPORT_SOURCE_BONUS = 14
+_PUBLIC_API_EXPORT_TARGET_BONUS = 6
+_PUBLIC_API_SOURCE_PACKAGE_BONUS = 8
+_PUBLIC_API_DOC_DOWNRANK = -5
+_PUBLIC_API_TOOLING_DOWNRANK = -6
+_PUBLIC_API_COPILOT_TOOLING_DOWNRANK = -8
 # Boost for test files that test public imports (e.g. test_*.py with public/api/import tokens).
 # Applied when public_api task hint is active and entity is in a tests/ path.
 _PUBLIC_API_IMPORT_TEST_BOOST = 4
@@ -133,6 +141,12 @@ def build_context_pack(
         for component in inferred_components
         if component.component_type == "PublicAPI"
     }
+    export_source_entity_ids = {
+        relation.source_entity_id.value for relation in normalized_relations if relation.kind == "exports"
+    }
+    export_target_entity_ids = {
+        relation.target_entity_id.value for relation in normalized_relations if relation.kind == "exports"
+    }
 
     ranked = _rank_entities(
         entities=normalized_entities,
@@ -142,6 +156,8 @@ def build_context_pack(
         is_code_task=is_code_task,
         task_hints=task_hints,
         public_api_entity_ids=public_api_entity_ids,
+        export_source_entity_ids=export_source_entity_ids,
+        export_target_entity_ids=export_target_entity_ids,
         source_roots=source_roots,
     )
 
@@ -344,6 +360,8 @@ def _rank_entities(
     is_code_task: bool,
     task_hints: set[str],
     public_api_entity_ids: set[str],
+    export_source_entity_ids: set[str],
+    export_target_entity_ids: set[str],
     source_roots: Sequence[str],
 ) -> list[tuple[Entity, RankingBreakdown]]:
     # Ranked by deterministic breakdown.total, then stable entity id.
@@ -363,6 +381,8 @@ def _rank_entities(
             is_code_task=is_code_task,
             task_hints=task_hints,
             public_api_entity_ids=public_api_entity_ids,
+            export_source_entity_ids=export_source_entity_ids,
+            export_target_entity_ids=export_target_entity_ids,
             source_roots=source_roots,
         )
         if breakdown.total < 1:
@@ -379,6 +399,8 @@ def _score_entity(
     is_code_task: bool,
     task_hints: set[str],
     public_api_entity_ids: set[str],
+    export_source_entity_ids: set[str],
+    export_target_entity_ids: set[str],
     source_roots: Sequence[str],
 ) -> RankingBreakdown:
     name = entity.name.lower()
@@ -456,6 +478,15 @@ def _score_entity(
         reasons.append(("task_intent", "test-like task intent boost", _TEST_TASK_INTENT_BONUS))
 
     if "public_api" in task_hints:
+        if path_role == SOURCE_ROLE and source_path.endswith(".py"):
+            path_role_score += _PUBLIC_API_SOURCE_PACKAGE_BONUS
+            reasons.append(
+                (
+                    "path_role",
+                    "public API task hint -> boosted source package/module path",
+                    _PUBLIC_API_SOURCE_PACKAGE_BONUS,
+                )
+            )
         if source_path.endswith("/__init__.py") or source_path == "__init__.py":
             path_role_score += _PUBLIC_API_PATH_ROLE_BONUS
             task_intent_score += _PUBLIC_API_TASK_INTENT_BONUS
@@ -488,6 +519,53 @@ def _score_entity(
                     "task_intent",
                     "public API task intent boost",
                     _PUBLIC_API_TASK_INTENT_BONUS,
+                )
+            )
+        if entity.id.value in export_source_entity_ids:
+            component_score += _PUBLIC_API_EXPORT_SOURCE_BONUS
+            task_intent_score += _PUBLIC_API_TASK_INTENT_BONUS
+            reasons.append(
+                (
+                    "component",
+                    "public API task hint -> boosted explicit exports source",
+                    _PUBLIC_API_EXPORT_SOURCE_BONUS,
+                )
+            )
+            reasons.append(
+                (
+                    "task_intent",
+                    "public API task intent boost",
+                    _PUBLIC_API_TASK_INTENT_BONUS,
+                )
+            )
+        if entity.id.value in export_target_entity_ids:
+            component_score += _PUBLIC_API_EXPORT_TARGET_BONUS
+            reasons.append(
+                (
+                    "component",
+                    "public API task hint -> boosted explicit exports target",
+                    _PUBLIC_API_EXPORT_TARGET_BONUS,
+                )
+            )
+        if path_role == DOC_ROLE:
+            penalty_score += _PUBLIC_API_DOC_DOWNRANK
+            reasons.append(
+                (
+                    "penalty",
+                    "public API task hint -> downranked docs/prose context",
+                    _PUBLIC_API_DOC_DOWNRANK,
+                )
+            )
+        if path_role == TOOL_ROLE:
+            tooling_penalty = _PUBLIC_API_COPILOT_TOOLING_DOWNRANK
+            if not source_path.startswith("tools/copilot/"):
+                tooling_penalty = _PUBLIC_API_TOOLING_DOWNRANK
+            penalty_score += tooling_penalty
+            reasons.append(
+                (
+                    "penalty",
+                    "public API task hint -> downranked tooling context",
+                    tooling_penalty,
                 )
             )
         # Boost test files that test public imports (e.g. public_api_checks.py).

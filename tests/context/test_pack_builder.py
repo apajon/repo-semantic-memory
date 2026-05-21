@@ -418,6 +418,102 @@ def test_public_api_ranking_selects_non_src_package_exports() -> None:
     assert "docs/_build/generated_api.py" not in selected_paths
 
 
+def test_public_api_ranking_prefers_source_exports_over_docs_and_tools(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / "src" / "lifecore_ros2" / "core").mkdir(parents=True)
+    (repo / "src" / "lifecore_ros2" / "testing").mkdir(parents=True)
+    (repo / "tests").mkdir(parents=True)
+    (repo / "docs").mkdir(parents=True)
+    (repo / "tools" / "copilot").mkdir(parents=True)
+
+    (repo / "README.md").write_text(
+        "# Public API Overview\n\n"
+        "This prose explains the public API and exports in broad terms.\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "public_api.md").write_text(
+        "# Public API Notes\n\n"
+        "The public API is documented here for users.\n",
+        encoding="utf-8",
+    )
+    (repo / "tools" / "copilot" / "public_api_playbook.md").write_text(
+        "# Public API Copilot Notes\n\n"
+        "Tooling guidance about lifecore_ros2 public API exports and init modules.\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "lifecore_ros2" / "__init__.py").write_text(
+        "from .core import PublicNode\n"
+        "from .testing import assert_public_imports\n\n"
+        '__all__ = ["PublicNode", "assert_public_imports"]\n',
+        encoding="utf-8",
+    )
+    (repo / "src" / "lifecore_ros2" / "core" / "__init__.py").write_text(
+        "from .public_surface import PublicNode\n\n"
+        '__all__ = ["PublicNode"]\n',
+        encoding="utf-8",
+    )
+    (repo / "src" / "lifecore_ros2" / "core" / "public_surface.py").write_text(
+        "class PublicNode:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    (repo / "src" / "lifecore_ros2" / "testing" / "__init__.py").write_text(
+        "from .helpers import assert_public_imports\n\n"
+        '__all__ = ["assert_public_imports"]\n',
+        encoding="utf-8",
+    )
+    (repo / "src" / "lifecore_ros2" / "testing" / "helpers.py").write_text(
+        "def assert_public_imports() -> None:\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (repo / "tests" / "public_api_checks.py").write_text(
+        "from lifecore_ros2 import PublicNode\n\n"
+        "def test_public_import() -> None:\n"
+        "    assert PublicNode is not None\n",
+        encoding="utf-8",
+    )
+
+    filesystem_entities = [
+        entity
+        for entity in extract_filesystem_entities(repo)
+        if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
+    ]
+    markdown_outline = extract_markdown_outline_path(repo)
+    python_entities, python_relations = index_python_path(repo)
+    entities = [*filesystem_entities, *markdown_outline.entities, *python_entities]
+    relations = [*markdown_outline.relations, *python_relations]
+
+    pack = build_context_pack(
+        task="Find lifecore_ros2 public API exports and init modules",
+        entities=entities,
+        relations=relations,
+        budget_chars=20000,
+    )
+    selected_paths = [entity.source_range.path for entity in pack.selected_entities]
+
+    assert "src/lifecore_ros2/__init__.py" in selected_paths
+    assert "src/lifecore_ros2/core/__init__.py" in selected_paths
+    assert "src/lifecore_ros2/testing/__init__.py" in selected_paths
+    assert "tests/public_api_checks.py" in selected_paths
+
+    def first_index(path: str) -> int:
+        return next(i for i, selected_path in enumerate(selected_paths) if selected_path == path)
+
+    root_init_index = first_index("src/lifecore_ros2/__init__.py")
+    core_init_index = first_index("src/lifecore_ros2/core/__init__.py")
+    testing_init_index = first_index("src/lifecore_ros2/testing/__init__.py")
+    readme_index = first_index("README.md")
+    docs_index = first_index("docs/public_api.md")
+    tools_index = first_index("tools/copilot/public_api_playbook.md")
+
+    assert root_init_index < readme_index
+    assert root_init_index < docs_index
+    assert root_init_index < tools_index
+    assert core_init_index < readme_index
+    assert testing_init_index < docs_index
+
+
 def test_ranking_breakdown_is_deterministic() -> None:
     entities, relations = _ranking_fixture_entities_and_relations()
 
@@ -479,6 +575,8 @@ def test_generated_artifact_penalty_appears_in_breakdown() -> None:
         is_code_task=_is_code_task(task_tokens),
         task_hints=_task_hints(task_tokens),
         public_api_entity_ids=set(),
+        export_source_entity_ids=set(),
+        export_target_entity_ids=set(),
         source_roots=("src",),
     )
 
@@ -600,6 +698,8 @@ def test_citation_only_entity_is_not_a_graph_seed() -> None:
         is_code_task=_is_code_task(task_tokens),
         task_hints=_task_hints(task_tokens),
         public_api_entity_ids=set(),
+        export_source_entity_ids=set(),
+        export_target_entity_ids=set(),
         source_roots=("src",),
     )
 
@@ -661,6 +761,8 @@ def test_graph_seed_threshold_is_strictly_above_citation_bonus() -> None:
         is_code_task=_is_code_task(task_tokens),
         task_hints=_task_hints(task_tokens),
         public_api_entity_ids=set(),
+        export_source_entity_ids=set(),
+        export_target_entity_ids=set(),
         source_roots=("src",),
     )
 
