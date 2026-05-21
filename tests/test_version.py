@@ -1,7 +1,6 @@
 """Tests for version metadata constants."""
 
 from importlib.metadata import PackageNotFoundError, version
-from types import SimpleNamespace
 from typing import NoReturn
 
 import pytest
@@ -38,10 +37,14 @@ def test_resolve_package_version_from_metadata(
 def test_resolve_package_version_ignores_generated_module_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    class _ExplodesIfAccessed:
+        def __getattr__(self, _: str) -> str:
+            raise AssertionError("_version module should not be accessed")
+
     monkeypatch.setattr(
         version_module,
         "_version",
-        SimpleNamespace(__version__="9.8.7"),
+        _ExplodesIfAccessed(),
         raising=False,
     )
     monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")

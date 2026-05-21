@@ -916,6 +916,8 @@ def _truncate_to_budget(
         )
         if used + estimate > budget_chars:
             truncated = True
+            if not preserve_at_least_one_relation:
+                break
             continue
         kept_relations.append(relation)
         used += estimate
@@ -944,7 +946,7 @@ def _ensure_minimum_relation_coverage(
     budget_chars: int,
     truncated: bool,
 ) -> tuple[list[Relation], int, bool]:
-    """Prefer keeping at least one selected relation in structural/explain modes."""
+    """Prefer keeping one relation in explain mode by mutating kept_entities/ids in place."""
     for relation in ordered_relations:
         estimate = _estimate_relation_chars(
             relation, reasons_by_key.get(relation_key(relation), ())

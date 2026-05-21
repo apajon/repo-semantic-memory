@@ -773,13 +773,15 @@ def test_explain_ranking_agent_standard_preserves_relations_under_budget_pressur
         *(entity.id.value for entity in pack.selected_entities),
         *(relation_key(relation) for relation in pack.selected_relations),
     }
+    profile = resolve_profile("agent_standard")
+    assert profile.max_ranking_breakdowns is not None
 
     assert pack.selected_relations
     assert any(
         relation.kind in {"exports", "tests", "contains"} for relation in pack.selected_relations
     )
     assert set(pack.why_selected.keys()) <= included_keys
-    assert 0 < len(pack.ranking_breakdowns) <= 12
+    assert 0 < len(pack.ranking_breakdowns) <= profile.max_ranking_breakdowns
 
 
 def test_generated_artifact_penalty_appears_in_breakdown() -> None:
