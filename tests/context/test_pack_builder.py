@@ -406,6 +406,8 @@ def test_activation_gating_intent_ranks_source_for_implementation(
     filesystem_entities = [
         entity
         for entity in extract_filesystem_entities(repo)
+        # Keep filesystem coverage entities while avoiding duplicate python module
+        # entities that are already provided by index_python_path().
         if not (entity.kind == "module" and entity.source_range.path.endswith(".py"))
     ]
     markdown_outline = extract_markdown_outline_path(repo)
@@ -725,6 +727,11 @@ def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
         for breakdown in test_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )
+
+
+def test_task_hints_detect_implementation_from_core_logic_terms() -> None:
+    hints = _task_hints(_tokenize("Find core and logic implementation details"))
+    assert "implementation" in hints
 
 
 def test_default_markdown_output_remains_compact_without_explain_lines() -> None:

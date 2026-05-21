@@ -473,6 +473,7 @@ def _score_entity(
         task_intent_score += _IMPLEMENTATION_TASK_INTENT_BONUS
         if (
             entity.kind in _IMPLEMENTATION_PRIORITIZED_ENTITY_KINDS
+            # Must beat the citation-only lexical floor to count as task-relevant.
             and lexical_score > _SOURCE_CITATION_BONUS
         ):
             # Require lexical relevance beyond the default source-citation floor
@@ -670,6 +671,7 @@ def _is_code_task(task_tokens: tuple[str, ...]) -> bool:
 
 def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
     hints: set[str] = set()
+    # Token co-occurrence is sufficient; terms need not be adjacent.
     has_core_logic_phrase = _IMPLEMENTATION_CORE_LOGIC_TOKENS.issubset(task_tokens)
     if (
         any(
