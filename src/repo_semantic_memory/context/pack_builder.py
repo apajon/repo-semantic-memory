@@ -91,6 +91,12 @@ _TEST_TASK_INTENT_BONUS = 6
 _PUBLIC_API_PATH_ROLE_BONUS = 16
 _PUBLIC_API_TASK_INTENT_BONUS = 8
 _PUBLIC_API_COMPONENT_BONUS = 16
+# Public-API ranking hierarchy:
+# - explicit package surfaces (`__init__.py`, confirmed PublicAPI, exports source) get
+#   the strongest boosts so source-defined import surfaces lead public-api tasks;
+# - export targets are boosted, but less than export sources, to keep package surfaces first;
+# - source package roots receive a smaller boost for contextual support;
+# - docs/tooling receive mild penalties so they remain selectable supporting context.
 _PUBLIC_API_EXPORT_SOURCE_BONUS = 14
 _PUBLIC_API_EXPORT_TARGET_BONUS = 6
 _PUBLIC_API_SOURCE_PACKAGE_BONUS = 8
@@ -142,10 +148,14 @@ def build_context_pack(
         if component.component_type == "PublicAPI"
     }
     export_source_entity_ids = {
-        relation.source_entity_id.value for relation in normalized_relations if relation.kind == "exports"
+        relation.source_entity_id.value
+        for relation in normalized_relations
+        if relation.kind == "exports"
     }
     export_target_entity_ids = {
-        relation.target_entity_id.value for relation in normalized_relations if relation.kind == "exports"
+        relation.target_entity_id.value
+        for relation in normalized_relations
+        if relation.kind == "exports"
     }
 
     ranked = _rank_entities(
@@ -557,8 +567,9 @@ def _score_entity(
                 )
             )
         if path_role == TOOL_ROLE:
-            tooling_penalty = _PUBLIC_API_COPILOT_TOOLING_DOWNRANK
-            if not source_path.startswith("tools/copilot/"):
+            if source_path.startswith("tools/copilot/"):
+                tooling_penalty = _PUBLIC_API_COPILOT_TOOLING_DOWNRANK
+            else:
                 tooling_penalty = _PUBLIC_API_TOOLING_DOWNRANK
             penalty_score += tooling_penalty
             reasons.append(

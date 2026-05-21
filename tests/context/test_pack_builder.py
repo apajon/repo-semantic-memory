@@ -427,13 +427,11 @@ def test_public_api_ranking_prefers_source_exports_over_docs_and_tools(tmp_path:
     (repo / "tools" / "copilot").mkdir(parents=True)
 
     (repo / "README.md").write_text(
-        "# Public API Overview\n\n"
-        "This prose explains the public API and exports in broad terms.\n",
+        "# Public API Overview\n\nThis prose explains the public API and exports in broad terms.\n",
         encoding="utf-8",
     )
     (repo / "docs" / "public_api.md").write_text(
-        "# Public API Notes\n\n"
-        "The public API is documented here for users.\n",
+        "# Public API Notes\n\nThe public API is documented here for users.\n",
         encoding="utf-8",
     )
     (repo / "tools" / "copilot" / "public_api_playbook.md").write_text(
@@ -448,23 +446,19 @@ def test_public_api_ranking_prefers_source_exports_over_docs_and_tools(tmp_path:
         encoding="utf-8",
     )
     (repo / "src" / "lifecore_ros2" / "core" / "__init__.py").write_text(
-        "from .public_surface import PublicNode\n\n"
-        '__all__ = ["PublicNode"]\n',
+        'from .public_surface import PublicNode\n\n__all__ = ["PublicNode"]\n',
         encoding="utf-8",
     )
     (repo / "src" / "lifecore_ros2" / "core" / "public_surface.py").write_text(
-        "class PublicNode:\n"
-        "    pass\n",
+        "class PublicNode:\n    pass\n",
         encoding="utf-8",
     )
     (repo / "src" / "lifecore_ros2" / "testing" / "__init__.py").write_text(
-        "from .helpers import assert_public_imports\n\n"
-        '__all__ = ["assert_public_imports"]\n',
+        'from .helpers import assert_public_imports\n\n__all__ = ["assert_public_imports"]\n',
         encoding="utf-8",
     )
     (repo / "src" / "lifecore_ros2" / "testing" / "helpers.py").write_text(
-        "def assert_public_imports() -> None:\n"
-        "    return None\n",
+        "def assert_public_imports() -> None:\n    return None\n",
         encoding="utf-8",
     )
     (repo / "tests" / "public_api_checks.py").write_text(
@@ -497,21 +491,26 @@ def test_public_api_ranking_prefers_source_exports_over_docs_and_tools(tmp_path:
     assert "src/lifecore_ros2/testing/__init__.py" in selected_paths
     assert "tests/public_api_checks.py" in selected_paths
 
-    def first_index(path: str) -> int:
-        return next(i for i, selected_path in enumerate(selected_paths) if selected_path == path)
+    def find_selected_path_index(path: str) -> int:
+        for i, selected_path in enumerate(selected_paths):
+            if selected_path == path:
+                return i
+        msg = f"{path} not found in selected paths: {selected_paths}"
+        raise AssertionError(msg)
 
-    root_init_index = first_index("src/lifecore_ros2/__init__.py")
-    core_init_index = first_index("src/lifecore_ros2/core/__init__.py")
-    testing_init_index = first_index("src/lifecore_ros2/testing/__init__.py")
-    readme_index = first_index("README.md")
-    docs_index = first_index("docs/public_api.md")
-    tools_index = first_index("tools/copilot/public_api_playbook.md")
+    root_init_index = find_selected_path_index("src/lifecore_ros2/__init__.py")
+    core_init_index = find_selected_path_index("src/lifecore_ros2/core/__init__.py")
+    testing_init_index = find_selected_path_index("src/lifecore_ros2/testing/__init__.py")
+    readme_index = find_selected_path_index("README.md")
+    docs_index = find_selected_path_index("docs/public_api.md")
+    tools_index = find_selected_path_index("tools/copilot/public_api_playbook.md")
 
     assert root_init_index < readme_index
     assert root_init_index < docs_index
     assert root_init_index < tools_index
     assert core_init_index < readme_index
     assert testing_init_index < docs_index
+    assert testing_init_index < tools_index
 
 
 def test_ranking_breakdown_is_deterministic() -> None:
