@@ -797,8 +797,7 @@ def _has_graph_signal(breakdown: RankingBreakdown) -> bool:
 
 def _has_prioritized_breakdown_reason(breakdown: RankingBreakdown) -> bool:
     return any(
-        reason.category in _PRIORITIZED_BREAKDOWN_REASON_CATEGORIES
-        for reason in breakdown.reasons
+        reason.category in _PRIORITIZED_BREAKDOWN_REASON_CATEGORIES for reason in breakdown.reasons
     )
 
 
