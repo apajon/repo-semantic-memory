@@ -232,9 +232,11 @@ RSM does not claim global superiority over other tools or scientific generalizat
 
 ## Versioning and license
 
-- package versioning uses python-semantic-release
+- package version is dynamic and tag-driven via hatch-vcs (`[tool.hatch.version] source = "vcs"`)
+- Git tags/GitHub releases are the source of truth for package version
+- this is intentional: `main` is protected and release automation creates tags/releases without pushing version-bump commits
 - project remains in `0.x` (no accidental `1.0.0` path intended)
-- `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` are managed explicitly for compatibility
+- `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` remain manually managed compatibility contracts
 - license is Apache-2.0 across project metadata and repository license files
 
 ## Development checks

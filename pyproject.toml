@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling>=1.25.0"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "repo-semantic-memory"
-version = "0.6.0"
+dynamic = ["version"]
 description = "Semantic compiler foundation for repository memory artifacts."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -49,6 +49,12 @@ strict_equality = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/repo_semantic_memory"]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/repo_semantic_memory/_version.py"
 
 [tool.semantic_release]
 branch = "main"

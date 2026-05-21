@@ -4,7 +4,7 @@
 
 - Project/package scaffolding
 - Typed CLI entry point
-- Explicit version constants for package/schema/context pack
+- Tag-driven package version plus explicit schema/context-pack compatibility constants
 - CI baseline with formatting, linting, type checks, and tests
 
 ## Next phases (not implemented yet)

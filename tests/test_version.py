@@ -30,8 +30,17 @@ def test_get_version_info_returns_expected_values() -> None:
 def test_resolve_package_version_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(version_module, "_resolve_generated_package_version", lambda: None)
     monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
     assert version_module._resolve_package_version() == "1.2.3"
+
+
+def test_resolve_package_version_prefers_generated_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(version_module, "_resolve_generated_package_version", lambda: "9.8.7")
+    monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
+    assert version_module._resolve_package_version() == "9.8.7"
 
 
 def test_package_version_fallback_when_not_installed(
@@ -40,5 +49,6 @@ def test_package_version_fallback_when_not_installed(
     def _raise_package_not_found(_: str) -> NoReturn:
         raise PackageNotFoundError
 
+    monkeypatch.setattr(version_module, "_resolve_generated_package_version", lambda: None)
     monkeypatch.setattr(version_module, "version", _raise_package_not_found)
-    assert version_module._resolve_package_version() == "0.0.0.dev0"
+    assert version_module._resolve_package_version() == "0.0.0+unknown"
