@@ -1099,10 +1099,8 @@ def _truncate_to_budget(
         relation_budget_reservation = _estimate_relation_chars(
             top_relation, reasons_by_key.get(relation_key(top_relation), ())
         )
-        relation_budget_reservation = min(
-            relation_budget_reservation,
-            max(0, budget_chars - used),
-        )
+        available_budget = max(0, budget_chars - used)
+        relation_budget_reservation = min(relation_budget_reservation, available_budget)
     entity_budget_limit = max(used, budget_chars - relation_budget_reservation)
 
     for entity in selected_entities:
@@ -1249,6 +1247,11 @@ def _relation_budget_priority(
     selected_coverage = _relation_endpoint_coverage(relation, _selected_entity_ids)
     selected_priority = 0 if selected_coverage == 2 else 1 if selected_coverage == 1 else 2
     kept_coverage = _relation_endpoint_coverage(relation, _kept_entity_ids)
+    # kept_priority mapping (lower is better):
+    # 0: both endpoints budgeted
+    # 1: one endpoint budgeted and both endpoints selected overall
+    # 2: one endpoint budgeted only
+    # 3: no budgeted endpoints
     if kept_coverage == 2:
         kept_priority = 0
     elif kept_coverage == 1 and selected_coverage == 2:

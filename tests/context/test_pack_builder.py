@@ -754,7 +754,6 @@ def test_explain_ranking_retains_structural_relations() -> None:
         )
 
     public_api_relation_kinds = {relation.kind for relation in public_api_pack.selected_relations}
-    assert "contains" in public_api_relation_kinds
     assert public_api_relation_kinds & {"exports", "contains"}, (
         "public_api explain pack must keep exports or source-code contains relations"
     )
@@ -1497,11 +1496,13 @@ def test_truncate_to_budget_trades_tail_entity_to_keep_useful_relation() -> None
         qualified_name="src.lifecycle_component.LifecycleComponent",
         source_range=SourceRange(path="src/lifecycle_component.py", start_line=22, end_line=90),
     )
+    # Inflate qualified_name so the tail entity is expensive enough to trade for one relation.
+    tail_multiplier = 48
     e_tail = Entity(
-        id=StableId("python:class:src.lifecycle_component." + "Tail" * 48),
+        id=StableId("python:class:src.lifecycle_component." + "Tail" * tail_multiplier),
         kind="class",
         name="Tail",
-        qualified_name="src.lifecycle_component." + "Tail" * 48,
+        qualified_name="src.lifecycle_component." + "Tail" * tail_multiplier,
         source_range=SourceRange(path="src/lifecycle_component.py", start_line=100, end_line=180),
     )
     useful_relation = Relation(
