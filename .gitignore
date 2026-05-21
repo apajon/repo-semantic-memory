@@ -20,7 +20,6 @@ htmlcov/
 build/
 dist/
 *.egg-info/
-src/repo_semantic_memory/_version.py
 
 # Editors / OS
 .vscode/

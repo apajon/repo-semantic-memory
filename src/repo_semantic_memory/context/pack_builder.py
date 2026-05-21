@@ -914,11 +914,50 @@ def _truncate_to_budget(
         )
         if used + estimate > budget_chars:
             truncated = True
-            break
+            continue
         kept_relations.append(relation)
         used += estimate
 
+    if prefer_structural_relations and ordered_relations and not kept_relations:
+        kept_relations, used, truncated = _ensure_minimum_relation_coverage(
+            ordered_relations=ordered_relations,
+            kept_entities=kept_entities,
+            kept_entity_ids=kept_entity_ids,
+            reasons_by_key=reasons_by_key,
+            used=used,
+            budget_chars=budget_chars,
+            truncated=truncated,
+        )
+
     return kept_entities, kept_relations, truncated
+
+
+def _ensure_minimum_relation_coverage(
+    *,
+    ordered_relations: Sequence[Relation],
+    kept_entities: list[Entity],
+    kept_entity_ids: set[str],
+    reasons_by_key: Mapping[str, Sequence[str]],
+    used: int,
+    budget_chars: int,
+    truncated: bool,
+) -> tuple[list[Relation], int, bool]:
+    """Prefer keeping at least one selected relation in structural/explain modes."""
+    for relation in ordered_relations:
+        estimate = _estimate_relation_chars(
+            relation, reasons_by_key.get(relation_key(relation), ())
+        )
+        while kept_entities and used + estimate > budget_chars:
+            removed = kept_entities.pop()
+            used -= _estimate_entity_chars(removed, reasons_by_key.get(removed.id.value, ()))
+            kept_entity_ids.remove(removed.id.value)
+            truncated = True
+        if (
+            relation.source_entity_id.value in kept_entity_ids
+            or relation.target_entity_id.value in kept_entity_ids
+        ) and used + estimate <= budget_chars:
+            return [relation], used + estimate, truncated
+    return [], used, truncated
 
 
 def _relation_budget_priority(
