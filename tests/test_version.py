@@ -30,17 +30,25 @@ def test_get_version_info_returns_expected_values() -> None:
 def test_resolve_package_version_from_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(version_module, "_resolve_generated_package_version", lambda: None)
     monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
     assert version_module._resolve_package_version() == "1.2.3"
 
 
-def test_resolve_package_version_prefers_generated_module(
+def test_resolve_package_version_does_not_access_version_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(version_module, "_resolve_generated_package_version", lambda: "9.8.7")
+    class _ExplodesIfAccessed:
+        def __getattr__(self, _: str) -> NoReturn:
+            raise AssertionError("_version module should not be accessed")
+
+    monkeypatch.setattr(
+        version_module,
+        "_version",
+        _ExplodesIfAccessed(),
+        raising=False,
+    )
     monkeypatch.setattr(version_module, "version", lambda _: "1.2.3")
-    assert version_module._resolve_package_version() == "9.8.7"
+    assert version_module._resolve_package_version() == "1.2.3"
 
 
 def test_package_version_fallback_when_not_installed(
@@ -49,6 +57,5 @@ def test_package_version_fallback_when_not_installed(
     def _raise_package_not_found(_: str) -> NoReturn:
         raise PackageNotFoundError
 
-    monkeypatch.setattr(version_module, "_resolve_generated_package_version", lambda: None)
     monkeypatch.setattr(version_module, "version", _raise_package_not_found)
     assert version_module._resolve_package_version() == "0.0.0+unknown"

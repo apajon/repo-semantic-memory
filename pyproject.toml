@@ -53,9 +53,6 @@ packages = ["src/repo_semantic_memory"]
 [tool.hatch.version]
 source = "vcs"
 
-[tool.hatch.build.hooks.vcs]
-version-file = "src/repo_semantic_memory/_version.py"
-
 [tool.semantic_release]
 branch = "main"
 tag_format = "v{version}"

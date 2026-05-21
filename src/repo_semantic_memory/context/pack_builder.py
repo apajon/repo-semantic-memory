@@ -329,6 +329,7 @@ def build_context_pack(
         selected_relations=selected_relations,
         reasons_by_key=score_capped_reasons_by_key,
         prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
+        preserve_at_least_one_relation=explain_ranking,
     )
 
     suggested_files = _suggested_files(budgeted_entities)
@@ -879,6 +880,7 @@ def _truncate_to_budget(
     selected_relations: Sequence[Relation],
     reasons_by_key: Mapping[str, Sequence[str]],
     prefer_structural_relations: bool = False,
+    preserve_at_least_one_relation: bool = False,
 ) -> tuple[list[Entity], list[Relation], bool]:
     # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
     used = len(task) + _PACK_FIXED_OVERHEAD_CHARS
@@ -914,11 +916,58 @@ def _truncate_to_budget(
         )
         if used + estimate > budget_chars:
             truncated = True
-            break
+            if not preserve_at_least_one_relation:
+                break
+            continue
         kept_relations.append(relation)
         used += estimate
 
+    if preserve_at_least_one_relation and ordered_relations and not kept_relations:
+        kept_relations, used, truncated = _ensure_minimum_relation_coverage(
+            ordered_relations=ordered_relations,
+            kept_entities=kept_entities,
+            kept_entity_ids=kept_entity_ids,
+            reasons_by_key=reasons_by_key,
+            used=used,
+            budget_chars=budget_chars,
+            truncated=truncated,
+        )
+
     return kept_entities, kept_relations, truncated
+
+
+def _ensure_minimum_relation_coverage(
+    *,
+    ordered_relations: Sequence[Relation],
+    kept_entities: list[Entity],
+    kept_entity_ids: set[str],
+    reasons_by_key: Mapping[str, Sequence[str]],
+    used: int,
+    budget_chars: int,
+    truncated: bool,
+) -> tuple[list[Relation], int, bool]:
+    """Prefer keeping one relation in explain mode.
+
+    This helper intentionally mutates ``kept_entities`` and ``kept_entity_ids`` in place
+    while returning relation/usage/truncation outputs for the caller.
+    Relation inclusion follows pack semantics: a relation is eligible when at least one
+    endpoint remains selected as context.
+    """
+    for relation in ordered_relations:
+        estimate = _estimate_relation_chars(
+            relation, reasons_by_key.get(relation_key(relation), ())
+        )
+        while kept_entities and used + estimate > budget_chars:
+            removed = kept_entities.pop()
+            used -= _estimate_entity_chars(removed, reasons_by_key.get(removed.id.value, ()))
+            kept_entity_ids.remove(removed.id.value)
+            truncated = True
+        if (
+            relation.source_entity_id.value in kept_entity_ids
+            or relation.target_entity_id.value in kept_entity_ids
+        ) and used + estimate <= budget_chars:
+            return [relation], used + estimate, truncated
+    return [], used, truncated
 
 
 def _relation_budget_priority(

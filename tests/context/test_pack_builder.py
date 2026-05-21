@@ -757,6 +757,33 @@ def test_explain_ranking_retains_structural_relations() -> None:
     assert {"contains", "exports", "tests"} <= public_api_relation_kinds
 
 
+def test_explain_ranking_agent_standard_preserves_relations_under_budget_pressure() -> None:
+    entities, relations = _ranking_fixture_entities_and_all_relations()
+
+    pack = build_context_pack(
+        task="Find public API exported by the package",
+        entities=entities,
+        relations=relations,
+        budget_chars=1400,
+        explain_ranking=True,
+        profile="agent_standard",
+    )
+
+    included_keys = {
+        *(entity.id.value for entity in pack.selected_entities),
+        *(relation_key(relation) for relation in pack.selected_relations),
+    }
+    profile = resolve_profile("agent_standard")
+    assert profile.max_ranking_breakdowns is not None
+
+    assert pack.selected_relations
+    assert any(
+        relation.kind in {"exports", "tests", "contains"} for relation in pack.selected_relations
+    )
+    assert set(pack.why_selected.keys()) <= included_keys
+    assert 0 < len(pack.ranking_breakdowns) <= profile.max_ranking_breakdowns
+
+
 def test_generated_artifact_penalty_appears_in_breakdown() -> None:
     generated_entity = Entity(
         id=StableId("python:module:docs._build.generated"),
