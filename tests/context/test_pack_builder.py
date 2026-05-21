@@ -775,7 +775,9 @@ def test_explain_ranking_agent_standard_preserves_relations_under_budget_pressur
     }
 
     assert pack.selected_relations
-    assert any(relation.kind in {"exports", "tests", "contains"} for relation in pack.selected_relations)
+    assert any(
+        relation.kind in {"exports", "tests", "contains"} for relation in pack.selected_relations
+    )
     assert set(pack.why_selected.keys()) <= included_keys
     assert 0 < len(pack.ranking_breakdowns) <= 12
 

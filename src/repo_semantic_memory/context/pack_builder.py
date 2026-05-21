@@ -329,6 +329,7 @@ def build_context_pack(
         selected_relations=selected_relations,
         reasons_by_key=score_capped_reasons_by_key,
         prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
+        preserve_at_least_one_relation=explain_ranking,
     )
 
     suggested_files = _suggested_files(budgeted_entities)
@@ -879,6 +880,7 @@ def _truncate_to_budget(
     selected_relations: Sequence[Relation],
     reasons_by_key: Mapping[str, Sequence[str]],
     prefer_structural_relations: bool = False,
+    preserve_at_least_one_relation: bool = False,
 ) -> tuple[list[Entity], list[Relation], bool]:
     # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
     used = len(task) + _PACK_FIXED_OVERHEAD_CHARS
@@ -918,7 +920,7 @@ def _truncate_to_budget(
         kept_relations.append(relation)
         used += estimate
 
-    if prefer_structural_relations and ordered_relations and not kept_relations:
+    if preserve_at_least_one_relation and ordered_relations and not kept_relations:
         kept_relations, used, truncated = _ensure_minimum_relation_coverage(
             ordered_relations=ordered_relations,
             kept_entities=kept_entities,
