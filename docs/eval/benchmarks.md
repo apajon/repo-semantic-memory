@@ -1,4 +1,4 @@
-# Benchmark Plan
+# Benchmarks
 
 This benchmark remains a small internal dataset, but it is no longer only a smoke
 test. The goal is to expose regressions in retrieval quality across multiple task

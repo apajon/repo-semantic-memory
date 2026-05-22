@@ -1,4 +1,4 @@
-# Context noise taxonomy and compression profiles
+# Compression profiles
 
 This document defines deterministic context compression for `repo-semantic-memory`.
 

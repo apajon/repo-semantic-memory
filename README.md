@@ -1,249 +1,71 @@
 # repo-semantic-memory
 
-`repo-semantic-memory` (`rsm`) is an **experimental (pre-1.0)** deterministic repository context compiler for coding agents.
+`repo-semantic-memory` (`rsm`) is an **experimental pre-1.0** deterministic repository context compiler for coding agents.
 
-It indexes a repository and produces compact, source-cited artifacts (repo maps, task context packs, JSONL graph exports, `.ai/` snapshots) that are local-first and benchmarkable.
+It indexes source code, docs, tests, and optional local Git metadata, then emits compact, source-cited artifacts such as repo maps, task context packs, JSONL graph exports, and `.ai/` snapshots. RSM is local-first and intentionally avoids LLM calls, embeddings, vector databases, web UIs, and runtime servers in the MVP.
 
-This project is intentionally positioned as a repository context compiler, **not** a broad "AI knowledge graph platform".
-
-## Positioning
-
-RSM focuses on:
-
-- deterministic extraction and ranking
-- source-cited artifacts tied to code/docs/tests/git metadata
-- benchmarkable retrieval and compression behavior
-- local-first outputs that can be inspected in plain text
-
-Source of truth always remains the repository itself (code, docs, tests, git history).
-
-## Current status
-
-- MVP is functional
-- benchmark dataset has expanded (still small by category)
-- token-savings metrics are reported (approximate)
-- `.ai/` export exists
-- JSONL import/export exists
-- ranking explainability exists (`--explain-ranking`)
-- deterministic compression profiles exist
-- Markdown section extraction exists
-- public API export resolver exists
-- test relationship extraction exists
-- pure MCP handlers may exist depending on merge state
+RSM is not a documentation generator, Obsidian vault, generic vector database, or broad “AI knowledge graph platform.” The repository remains the source of truth.
 
 ## Quick start
 
 ```bash
-# install deps
 uv sync --all-groups
-
-# build local index
 uv run rsm index . --db .rsm/index.sqlite
-
-# compact repository map
 uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
-
-# task-specific context pack
-uv run rsm pack \
-  --db .rsm/index.sqlite \
-  --task "find where context pack ranking happens" \
-  --budget 4000 \
-  --profile agent_standard
-
-# deterministic .ai/ artifact export
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
-
-# JSONL graph portability
-uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
-uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
-
-# benchmark retrieval
-uv run rsm eval retrieval \
-  --db .rsm/index.sqlite \
-  --dataset benchmarks/tasks.yaml \
-  --json
-
-# compare repo-map baseline vs lexical context pack baseline
-uv run rsm eval compare \
-  --db .rsm/index.sqlite \
-  --dataset benchmarks/tasks.yaml \
-  --budget 4000 \
-  --json
+uv run rsm pack --db .rsm/index.sqlite --task "find where context pack ranking happens" --budget 8000 --profile agent_standard
 ```
 
-## Public API export semantics
-
-RSM extracts Python exports from `__init__.py` via static AST analysis and uses that evidence to mark `PublicAPI` components as `confirmed`.
-
-Important caveats:
-
-- `confirmed PublicAPI` means **explicitly exported in source** (for example via `__all__` or explicit re-exports in `__init__.py`)
-- it does **not** mean a long-term stability guarantee for users of that API
-
-## Test relationship extraction
-
-RSM infers `tests` relations between test entities and implementation entities using deterministic heuristics (for example direct imports, filename/path overlap, and symbol-name overlap). These are emitted as inferred relations with metadata and confidence labels.
-
-## Markdown section extraction
-
-RSM indexes Markdown headings as section entities (`doc_section`) with source ranges and stable IDs, then adds `contains` relations between documents and sections (including nested heading structure).
-
-## Compression profiles
-
-`rsm repo-map` and `rsm pack` support deterministic profiles:
-
-- `agent_brief`
-- `agent_standard` (default)
-- `agent_debug`
-- `human_review`
-- `ci_summary`
-- `full`
-
-Profiles control detail level and noise suppression while preserving deterministic ordering.
-
-## Benchmarks and token-savings caveats
-
-Use local benchmark commands:
+Optional exports and evaluation:
 
 ```bash
+uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
+uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
+uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
 uv run rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --json
 uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 --json
 ```
 
-When discussing results:
+For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quickstart.md`](docs/quickstart.md).
 
-- refer to results as **"on the current internal benchmark"**
-- benchmark categories are still small; results are directional
-- token estimate is approximate and deterministic (`estimated_tokens = chars / 4`)
-- token savings are only meaningful when gold coverage is preserved
-- do not claim scientific superiority
+## What it currently covers
 
-## Illustrative examples (generated, small, non-authoritative)
+- deterministic repository indexing
+- Python AST extraction
+- Markdown outline extraction
+- public API export extraction from `__init__.py`
+- test relationship extraction
+- repo-map and context-pack generation
+- ranking breakdowns, BM25 lexical scoring, and graph relation selection
+- deterministic compression profiles
+- approximate token-savings metrics
+- benchmark/eval commands
+- `.ai/` export
+- JSONL import/export
+- pure MCP-style handlers and contracts, with no runtime MCP server yet
 
-### 1) Context pack snippet
+## Documentation map
 
-```markdown
-# Context pack
-Task: Find explicit public API exports for lifecore_ros2 and related tests
+- [`docs/README.md`](docs/README.md) — documentation index by reader intent
+- [`docs/quickstart.md`](docs/quickstart.md) — setup and first commands
+- [`docs/concepts/`](docs/concepts/) — semantic index, repo maps, context packs, compression profiles, claims/invariants
+- [`docs/usage/`](docs/usage/) — CLI, agent workflows, `.ai/`, JSONL interchange
+- [`docs/eval/`](docs/eval/) — benchmarks and token-savings interpretation
+- [`docs/design/`](docs/design/) — data model, MCP design, future CLI output summarizer, roadmap/review notes
+- [`docs/release/versioning.md`](docs/release/versioning.md) — pre-1.0 versioning and release policy
+- [`docs/case_studies/lifecore_ros2.md`](docs/case_studies/lifecore_ros2.md) — real-repo validation case study
 
-## Selected symbols
-- tests.fixtures.ranking_repo.src.lifecore_ros2
-- tests.fixtures.ranking_repo.src.lifecore_ros2.components.lifecycle_component.LifecycleComponent
-
-## Suggested files to inspect
-- tests/fixtures/ranking_repo/src/lifecore_ros2/__init__.py
-- tests/fixtures/ranking_repo/src/lifecore_ros2/components/lifecycle_component.py
-```
-
-### 2) Repo-map snippet
-
-```markdown
-# Repo map
-## src/repo_semantic_memory/cli.py
-- module repo_semantic_memory.cli
-- function repo_semantic_memory.cli.build_parser
-- function repo_semantic_memory.cli.main
-```
-
-### 3) Benchmark report snippet
-
-```markdown
-# Baseline comparison report
-- dataset: benchmarks/tasks.yaml
-- tasks: 12
-- wins: repo_map=0, lexical_context_pack=11, inconclusive=1
-```
-
-### 4) Token-savings example (approximate)
-
-```text
-average_estimated_tokens_saved: 442.58
-average_compression_ratio: 0.5566
-coverage_preserved_tasks: file=12, symbol=12
-```
-
-### 5) `.ai/` export listing example
-
-```text
-.ai/
-  AGENT_COMMANDS.md
-  README.md
-  context_policy.md
-  INDEX.yaml
-  symbols.yaml
-  relations.yaml
-  components.yaml
-  repo_map.md
-```
-
-### 6) lifecore_ros2 case-study excerpt (fixture-based)
-
-```text
-task: package_public_api_exports
-category: public_api_localization
-fixture files include:
-- tests/fixtures/ranking_repo/src/lifecore_ros2/__init__.py
-- tests/fixtures/ranking_repo/src/lifecore_ros2/components/lifecycle_component.py
-```
-
-All examples above are illustrative snapshots and may become stale after re-indexing.
-
-## `.rsm/` and `.ai/` tracking policy
-
-- `.rsm/` (SQLite index) is local working state and must remain ignored
-- volatile `.ai/` snapshots are ignored by default:
-  - `.ai/INDEX.yaml`
-  - `.ai/symbols.yaml`
-  - `.ai/relations.yaml`
-  - `.ai/components.yaml`
-  - `.ai/repo_map.md`
-  - `.ai/invariants.yaml`
-- static `.ai` guide/policy templates are intentionally tracked:
-  - `.ai/AGENT_COMMANDS.md`
-  - `.ai/README.md`
-  - `.ai/context_policy.md`
-
-Generated outputs should not be committed accidentally unless a PR intentionally versions them.
-
-## Related work and scope boundaries
-
-Adjacent categories include:
-
-- broad repository knowledge graph tools
-- local document/search and code navigation tools
-- token/output compression tools for LLM workflows
-
-RSM’s differentiator is the combination of:
-
-- deterministic extraction and ranking
-- explicit source citations and uncertainty signaling
-- benchmarked context artifacts
-- local-first operation and inspectable outputs
-
-RSM does not claim global superiority over other tools or scientific generalization beyond current internal benchmark coverage.
+Agent/contributor operations live in [`AGENTS.md`](AGENTS.md). Static `.ai/` templates are agent-facing artifacts, not primary human docs.
 
 ## Limitations
 
-- pre-1.0: API/format ergonomics may evolve
-- benchmark categories are still small and not comprehensive
-- token metrics are approximate (`chars / 4`), not tokenizer-accurate
-- some relations/components are inferred and require source verification
-- extracted context is compact by design and may omit useful details for some tasks
+- Experimental pre-1.0 project; APIs, schemas, and context-pack formats may evolve.
+- All semantic claims should be verified against cited source evidence.
+- Some relations and components are inferred heuristically.
+- `confirmed PublicAPI` means explicitly exported in source, not a stable API guarantee.
+- Token estimates use approximate deterministic accounting (`chars / 4`) and are directional.
+- Internal benchmark results are small, repository-specific, and not broad superiority claims.
+- MCP handlers/contracts exist for local deterministic logic, but no runtime MCP server is shipped yet.
 
-## Versioning and license
+## License
 
-- package version is dynamic and tag-driven via hatch-vcs (`[tool.hatch.version] source = "vcs"`)
-- Git tags/GitHub releases are the source of truth for package version
-- this is intentional: `main` is protected and release automation creates tags/releases without pushing version-bump commits
-- project remains in `0.x` (no accidental `1.0.0` path intended)
-- `SCHEMA_VERSION` and `CONTEXT_PACK_VERSION` remain manually managed compatibility contracts
-- license is Apache-2.0 across project metadata and repository license files
-
-## Development checks
-
-```bash
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy src
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
-```
+Apache-2.0.

@@ -1,0 +1,50 @@
+# RSM documentation
+
+This directory contains the human-facing documentation for `repo-semantic-memory` (`rsm`). The root `README.md` is the short public entrypoint; `AGENTS.md` is the contributor/agent operations guide; `.ai/` contains static or generated agent-facing artifacts and is not the primary documentation source.
+
+## Start here
+
+- [Quickstart](quickstart.md) — install, index, build a repo map, build a context pack.
+- [CLI usage](usage/cli.md) — command reference and validation commands.
+- [Agent workflows](usage/agent_workflows.md) — how coding agents should use RSM without overloading context.
+
+## Concepts
+
+- [Semantic index](concepts/semantic_index.md) — entities, relations, evidence, and deterministic extraction.
+- [Repo maps](concepts/repo_maps.md) — compact structural repository summaries.
+- [Context packs](concepts/context_packs.md) — task-specific, source-cited context under a budget.
+- [Compression profiles](concepts/compression_profiles.md) — deterministic context-noise filtering profiles.
+- [Claims and invariants](concepts/claims_invariants.md) — evidence rules and current scope.
+
+## Usage
+
+- [CLI](usage/cli.md) — local commands for indexing, packing, export, import, eval, and checks.
+- [Agent workflows](usage/agent_workflows.md) — task-oriented agent usage patterns.
+- [.ai directory](usage/ai_directory.md) — generated/static artifact policy and staleness rules.
+- [JSONL interchange](usage/jsonl_interchange.md) — export/import role and caveats.
+
+## Evaluation
+
+- [Benchmarks](eval/benchmarks.md) — internal dataset scope and interpretation limits.
+- [Token savings](eval/token_savings.md) — approximate token metrics and when savings are meaningful.
+
+## Design notes
+
+- [Data model](design/data_model.md) — schema/version contracts, entity and relation semantics.
+- [MCP handlers and contracts](design/mcp_server.md) — current pure local handler surface and contract status.
+- [MCP runtime](design/mcp_runtime.md) — deferred runtime/server design and security boundaries.
+- [CLI output summarizer](design/cli_output_summarizer.md) — future design only.
+- [Architecture overview](design/architecture.md) — layered semantic compiler model.
+- [Roadmap](design/roadmap.md) and [MVP review](design/mvp_review.md) — historical planning/review notes.
+
+## Release/versioning
+
+- [Versioning](release/versioning.md) — hatch-vcs dynamic package versioning, schema/context-pack contracts, and protected-main release policy.
+
+## Case studies
+
+- [lifecore_ros2](case_studies/lifecore_ros2.md) — one real-repository validation case study.
+
+## Global caveats
+
+RSM is experimental and pre-1.0. It is local-first, deterministic, source-cited, and does not use LLM calls, embeddings, or vector databases in the MVP. Benchmark results are internal and directional; token estimates are approximate; `confirmed PublicAPI` means exported in source, not a compatibility promise; MCP handlers exist, but no runtime MCP server is shipped yet.
