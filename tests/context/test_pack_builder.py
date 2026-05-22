@@ -1245,6 +1245,9 @@ def _relation_budget_diagnostic_for_selected(
         task_hints=task_hints,
         entity_by_id=entity_by_id,
         selected_entity_ids=selected_ids,
+        selected_entity_ranks={
+            entity.id.value: index for index, entity in enumerate(selected_entities)
+        },
     )
     filtered_relations = filter_related_relations(ordered_prefilter, profile=resolved_profile)
     filtered_relation_keys = {relation_key(rel) for rel in filtered_relations}
@@ -1292,6 +1295,12 @@ def _relation_budget_diagnostic_for_selected(
             entity_by_id=entity_by_id,
             kept_entity_ids=kept_ids,
             selected_entity_ids=selected_ids,
+            kept_entity_ranks={
+                entity.id.value: index for index, entity in enumerate(kept_entities)
+            },
+            selected_entity_ranks={
+                entity.id.value: index for index, entity in enumerate(selected_entities)
+            },
         ),
     )
 
@@ -1393,14 +1402,20 @@ def _top_relation_candidates(
                 "target_id": relation.target_entity_id.value,
                 "source_path": src.source_range.path if src else "<missing>",
                 "target_path": tgt.source_range.path if tgt else "<missing>",
-                "task_priority": _relation_budget_priority(
+                "budget_priority": _relation_budget_priority(
                     relation,
                     prefer_structural_relations=True,
                     task_hints=task_hints,
                     entity_by_id=entity_by_id,
                     kept_entity_ids=selected_ids,
                     selected_entity_ids=selected_ids,
-                )[0],
+                    kept_entity_ranks={
+                        entity_id: index for index, entity_id in enumerate(selected_ids)
+                    },
+                    selected_entity_ranks={
+                        entity_id: index for index, entity_id in enumerate(selected_ids)
+                    },
+                ),
                 "selected_endpoint_coverage": _relation_endpoint_coverage(relation, selected_ids),
                 "estimated_chars": _estimate_relation_chars(relation, ()),
                 "filtered_out": relation_key(relation) not in filtered_relation_keys,
@@ -1587,10 +1602,72 @@ def test_profile_relation_cap_keeps_task_relevant_relation_before_tooling_contai
         task_hints=frozenset({"public_api"}),
         entity_by_id=entity_by_id,
         selected_entity_ids=selected_ids,
+        selected_entity_ranks={entity.id.value: index for index, entity in enumerate(entities)},
     )
     capped = filter_related_relations(ordered, profile=profile)
 
     assert useful_relation in capped[: profile.max_related_symbols]
+
+
+def test_relation_cap_prefers_higher_ranked_selected_relations() -> None:
+    activation_module = Entity(
+        id=StableId("python:module:src.pkg.activation"),
+        kind="module",
+        name="activation",
+        qualified_name="src.pkg.activation",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=1, end_line=20),
+    )
+    activation_func = Entity(
+        id=StableId("python:function:src.pkg.activation.require_active"),
+        kind="function",
+        name="require_active",
+        qualified_name="src.pkg.activation.require_active",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=22, end_line=40),
+    )
+    noise_module = Entity(
+        id=StableId("python:module:examples.alpha"),
+        kind="module",
+        name="alpha",
+        qualified_name="examples.alpha",
+        source_range=SourceRange(path="examples/alpha.py", start_line=1, end_line=20),
+    )
+    noise_func = Entity(
+        id=StableId("python:function:examples.alpha.before"),
+        kind="function",
+        name="before",
+        qualified_name="examples.alpha.before",
+        source_range=SourceRange(path="examples/alpha.py", start_line=22, end_line=30),
+    )
+    activation_contains = Relation(
+        kind="contains",
+        source_entity_id=activation_module.id,
+        target_entity_id=activation_func.id,
+    )
+    noise_contains = Relation(
+        kind="contains",
+        source_entity_id=noise_module.id,
+        target_entity_id=noise_func.id,
+    )
+
+    entities = [activation_module, activation_func, noise_module, noise_func]
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    selected_order = [
+        activation_module.id.value,
+        activation_func.id.value,
+        noise_module.id.value,
+        noise_func.id.value,
+    ]
+
+    ordered = _order_relations_for_profile_cap(
+        selected_relations=[noise_contains, activation_contains],
+        prefer_structural_relations=True,
+        task_hints=frozenset({"implementation"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(selected_order),
+        selected_entity_ranks={entity_id: index for index, entity_id in enumerate(selected_order)},
+    )
+
+    assert ordered[0] == activation_contains
 
 
 def test_relation_helpers_classify_source_and_tooling_paths() -> None:
