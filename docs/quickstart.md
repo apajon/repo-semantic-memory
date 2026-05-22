@@ -8,6 +8,9 @@ RSM is local-first. It reads the current repository and writes local artifacts; 
 uv sync --all-groups
 ```
 
+This creates the local environment used by the CLI and development checks. For a shorter
+overview, see the root [README](../README.md); this page keeps the first-run command flow.
+
 ## Build an index
 
 ```bash
@@ -44,6 +47,10 @@ uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
 uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
 ```
 
+`.ai/` output is generated agent-facing material. Static `.ai` templates may be tracked, but
+volatile generated snapshots should stay uncommitted in this repository. See
+[`.ai/` directory](usage/ai_directory.md).
+
 ## Optional evaluation
 
 ```bash
@@ -52,3 +59,18 @@ uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml -
 ```
 
 Interpret benchmark results as internal and directional, not broad superiority claims.
+
+## Clean up local artifacts
+
+`.rsm/` is local working state. Remove it when you want to rebuild from scratch:
+
+```bash
+rm -rf .rsm/
+```
+
+## Next reading
+
+- [CLI usage](usage/cli.md) for the full command surface
+- [Repo maps](concepts/repo_maps.md) for broad orientation output
+- [Context packs](concepts/context_packs.md) for task-specific output
+- [Benchmarks](eval/benchmarks.md) for eval dataset scope and limitations
