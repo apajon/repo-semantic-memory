@@ -29,7 +29,7 @@ This case study intentionally uses `lifecore_ros2` `main`, the release/PyPI-faci
 
 ## Commands used
 
-The run used one local index, one repo-map, and four task-specific context packs with an 8000-token budget and the `agent_standard` profile. The context packs used `--format yaml` and `--explain-ranking` for these tasks:
+The run used one local index, one repo-map, and four task-specific context packs with an 8000 budget units, currently character-based and the `agent_standard` profile. The context packs used `--format yaml` and `--explain-ranking` for these tasks:
 
 - “Find public API exported by the package”.
 - “Find where activation gating is implemented”.
