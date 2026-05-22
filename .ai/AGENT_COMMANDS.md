@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This static guide gives coding agents a compact command and workflow reference for RSM-assisted repository work. Source code, docs, tests, and Git history remain authoritative; `.ai/` files are derived artifacts and may be stale.
+This static guide gives coding agents a compact command and workflow reference for
+RSM-assisted repository work. Source code, docs, tests, and Git history remain
+authoritative; `.ai/` files are derived artifacts and may be stale.
 
 ## Core workflow
 

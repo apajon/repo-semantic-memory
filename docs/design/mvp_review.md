@@ -2,7 +2,10 @@
 
 Date: 2026-05-19
 
-Historical note: this review is preserved as a point-in-time design/release-readiness assessment; current docs and benchmark counts may have changed.
+> Historical note: this review is preserved as a point-in-time MVP assessment. It should
+> not be read as the current readiness verdict. For the current public-facing state, see
+> the README, docs index, and `docs/case_studies/lifecore_ros2.md`.
+
 Scope: current MVP state after 16.2 hardening and lifecore_ros2 validation pass.
 
 ## Executive summary

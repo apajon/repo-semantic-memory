@@ -1,10 +1,15 @@
 # repo-semantic-memory
 
-`repo-semantic-memory` (`rsm`) is an **experimental pre-1.0** deterministic repository context compiler for coding agents.
+`repo-semantic-memory` (`rsm`) is an **experimental pre-1.0** deterministic repository
+context compiler for coding agents.
 
-It indexes source code, docs, tests, and optional local Git metadata, then emits compact, source-cited artifacts such as repo maps, task context packs, JSONL graph exports, and `.ai/` snapshots. RSM is local-first and intentionally avoids LLM calls, embeddings, vector databases, web UIs, and runtime servers in the MVP.
+It indexes source code, docs, tests, and optional local Git metadata, then emits compact,
+source-cited artifacts such as repo maps, task context packs, JSONL graph exports, and
+`.ai/` snapshots. RSM is local-first and intentionally avoids LLM calls, embeddings,
+vector databases, web UIs, and runtime servers in the MVP.
 
-RSM is not a documentation generator, Obsidian vault, generic vector database, or broad “AI knowledge graph platform.” The repository remains the source of truth.
+RSM is not a documentation generator, Obsidian vault, generic vector database, or broad
+“AI knowledge graph platform.” The repository remains the source of truth.
 
 ## Quick start
 
@@ -41,7 +46,7 @@ For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quicks
 - benchmark/eval commands
 - `.ai/` export
 - JSONL import/export
-- pure MCP-style handlers and contracts, with no runtime MCP server yet
+- MCP-style handlers/contracts exist, but no MCP runtime server is shipped yet.
 
 ## Documentation map
 
@@ -64,7 +69,7 @@ Agent/contributor operations live in [`AGENTS.md`](AGENTS.md). Static `.ai/` tem
 - `confirmed PublicAPI` means explicitly exported in source, not a stable API guarantee.
 - Token estimates use approximate deterministic accounting (`chars / 4`) and are directional.
 - Internal benchmark results are small, repository-specific, and not broad superiority claims.
-- MCP handlers/contracts exist for local deterministic logic, but no runtime MCP server is shipped yet.
+- MCP-style handlers/contracts exist, but no MCP runtime server is shipped yet.
 
 ## License
 

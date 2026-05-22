@@ -1,6 +1,9 @@
 # RSM documentation
 
-This directory contains the human-facing documentation for `repo-semantic-memory` (`rsm`). The root `README.md` is the short public entrypoint; `AGENTS.md` is the contributor/agent operations guide; `.ai/` contains static or generated agent-facing artifacts and is not the primary documentation source.
+This directory contains the human-facing documentation for `repo-semantic-memory` (`rsm`).
+The root `README.md` is the short public entrypoint; `AGENTS.md` is the contributor/agent
+operations guide; `.ai/` contains static or generated agent-facing artifacts and is not
+the primary documentation source.
 
 ## Start here
 
@@ -47,4 +50,8 @@ This directory contains the human-facing documentation for `repo-semantic-memory
 
 ## Global caveats
 
-RSM is experimental and pre-1.0. It is local-first, deterministic, source-cited, and does not use LLM calls, embeddings, or vector databases in the MVP. Benchmark results are internal and directional; token estimates are approximate; `confirmed PublicAPI` means exported in source, not a compatibility promise; MCP handlers exist, but no runtime MCP server is shipped yet.
+RSM is experimental and pre-1.0. It is local-first, deterministic, source-cited, and does
+not use LLM calls, embeddings, or vector databases in the MVP. Benchmark results are
+internal and directional; token estimates are approximate; `confirmed PublicAPI` means
+exported in source, not a compatibility promise. MCP-style handlers/contracts exist,
+but no MCP runtime server is shipped yet.

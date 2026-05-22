@@ -1,6 +1,9 @@
 # MCP handlers and contracts
 
-RSM currently includes pure deterministic MCP-style handlers and typed contracts over local core logic. These are local building blocks, not a runtime server.
+MCP-style handlers/contracts exist, but no MCP runtime server is shipped yet.
+
+RSM currently includes pure deterministic MCP-style handlers and typed contracts over
+local core logic. These are local building blocks, not a runtime server.
 
 ## Current status
 

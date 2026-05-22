@@ -1,4 +1,4 @@
-# Context packs
+# Task context packs
 
 A context pack is a task-specific, source-cited selection of repository context under an explicit budget.
 

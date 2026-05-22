@@ -2,7 +2,9 @@
 
 ## Purpose
 
-This directory contains agent-facing semantic memory artifacts for RSM. These files are derived from the repository index and may be stale. They are not the primary human documentation source; code, docs, tests, and Git history remain authoritative.
+This directory contains agent-facing semantic memory artifacts for RSM. These files are
+derived from the repository index and may be stale. They are not the primary human
+documentation source; code, docs, tests, and Git history remain authoritative.
 
 ## Files
 

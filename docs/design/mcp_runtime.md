@@ -2,6 +2,11 @@
 
 A full MCP runtime server is intentionally deferred.
 
+Current state: MCP-style typed handlers exist, but no MCP runtime server is shipped yet.
+
+Target direction: a local stdio MCP server launched by the MCP client for the lifetime
+of an agent/client session, with no Docker, no cloud, and no OS-level daemon.
+
 ## Why defer runtime
 
 - Tool contracts are still pre-stable.
