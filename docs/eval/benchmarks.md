@@ -6,7 +6,25 @@ shapes without claiming broad scientific superiority.
 
 ## Current dataset scope
 
-`benchmarks/tasks.yaml` now covers these categories:
+`benchmarks/tasks.yaml` is a YAML file shaped like:
+
+```yaml
+tasks:
+  - id: unique_task_id
+    category: implementation_localization
+    prompt: "Find where compact repo map generation is implemented."
+    gold:
+      files:
+        - src/repo_semantic_memory/context/repo_map.py
+      symbols:
+        - repo_semantic_memory.context.repo_map.build_repo_map_markdown
+```
+
+Each task has one prompt plus gold targets. Gold files are repository-relative paths; gold
+symbols are indexed qualified names. Some tasks may later use additional fields such as
+`invariants`, but files and symbols are the current core scoring targets.
+
+The dataset currently covers these categories:
 
 - `public_api_localization`
 - `implementation_localization`
@@ -41,6 +59,14 @@ Tasks may use these gold fields:
 `doc_sections` and `relations` remain future extensions and are not scored in this
 phase.
 
+## Metrics
+
+`rsm eval retrieval` reports retrieval-oriented metrics such as recall and MRR over the internal
+gold targets, plus per-task and per-category breakdowns to localize regressions.
+
+`rsm eval compare` reports shared-budget comparison metrics between baselines, including gold
+file/symbol preservation and approximate token-savings style output when coverage is preserved.
+
 ## Report expectations
 
 Retrieval and compare reports should stay deterministic and should show:
@@ -60,9 +86,10 @@ Keep these limits explicit in every discussion of results:
 - Category counts are uneven, so per-category numbers are directional only.
 - Results measure retrieval alignment against internal gold targets, not end-to-end
   coding-task success.
-- Generated-artifact suppression metrics only cover artifacts detectable by current
-  path-role rules.
+- Generated-artifact false positives only cover artifacts detectable by current path-role rules,
+  so suppression numbers are incomplete by design.
 - No LLM judging is used in this phase.
+- No embeddings, vector DB, or runtime MCP server are involved in benchmark generation.
 
 ## Near-term benchmark candidates
 
