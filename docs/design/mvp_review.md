@@ -16,7 +16,8 @@ However, the project is not yet ready for a broad public announcement. The bigge
 
 ## Current implemented capabilities
 
-- Deterministic filesystem extraction with artifact filtering (`docs/_build`, `dist`, `build`, `*.egg-info`, caches).
+- Deterministic filesystem extraction with artifact filtering for documentation builds,
+  distribution outputs, package metadata, and caches.
 - Deterministic Python AST extraction (modules/classes/functions/methods, imports, inherits, ranges, metadata).
 - SQLite index with explicit schema lock and deterministic ordering.
 - Compact repo-map generation with source-role ordering and citations.

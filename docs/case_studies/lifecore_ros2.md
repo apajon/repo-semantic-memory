@@ -6,7 +6,10 @@ Validation type: local static dogfooding run
 
 ## Scope
 
-This report summarizes one fresh RSM run against `lifecore_ros2`, a Python ROS2 lifecycle-component library. It focuses on what RSM gives a coding agent beyond a broad repo-map, grep search, or README scan: task-specific context, source-backed entities, structural relations, and generated-artifact suppression.
+This report summarizes one fresh RSM run against `lifecore_ros2`, a Python ROS2
+lifecycle-component library. It focuses on what RSM gives a coding agent beyond
+a broad repo-map, grep search, or README scan: task-specific context,
+source-backed entities, structural relations, and generated-artifact suppression.
 
 Constraints:
 
@@ -42,11 +45,20 @@ No raw repo-map, terminal transcript, or context-pack output is reproduced here.
 
 ## What RSM adds beyond a repo map
 
-A repo-map is useful for broad orientation: it helps an agent see the main files, modules, and rough project shape. A context-pack is useful for task-specific work: it changes what is selected and ranked based on the prompt.
+A repo-map is useful for broad orientation: it helps an agent see the main files,
+modules, and rough project shape. A context-pack is useful for task-specific
+work: it changes what is selected and ranked based on the prompt.
 
-In this run, RSM selected exports, implementation code, and tests differently for different questions. It also preserved compact structural relations such as `exports`, `contains`, and `tests`, so an agent receives navigational structure rather than only file names or prose matches.
+In this run, RSM selected exports, implementation code, and tests differently
+for different questions. It also preserved compact structural relations such as
+`exports`, `contains`, and `tests`, so an agent receives navigational structure
+rather than only file names or prose matches.
 
-That matters because grep or a README scan can find shared words like “activation”, “lifecycle”, or “public API”, but they do not label whether a match is an exported package surface, an implementation symbol, or a regression test. RSM's value here is narrower: it gives a source-cited, task-shaped starting point that an agent can verify against the repository.
+That matters because grep or a README scan can find shared words like
+“activation”, “lifecycle”, or “public API”, but they do not label whether a
+match is an exported package surface, an implementation symbol, or a regression
+test. RSM's value here is narrower: it gives a source-cited, task-shaped
+starting point that an agent can verify against the repository.
 
 ## Task-centered findings
 
@@ -80,7 +92,10 @@ Index size for the `lifecore_ros2` run: 1923 entities and 3256 relations.
 
 ## Artifact leakage check
 
-Generated-artifact leakage checks passed for all generated outputs. The repo-map and context packs did not include forbidden build-output, coverage-output, package-metadata, local-index, shell-prompt, raw-pack, or volatile agent-snapshot markers.
+Generated-artifact leakage checks passed for all generated outputs. The repo-map
+and context packs did not include forbidden build-output, coverage-output,
+package-metadata, local-index, shell-prompt, raw-pack, or volatile
+agent-snapshot markers.
 
 ## Quality checks
 
