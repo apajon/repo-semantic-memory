@@ -1670,6 +1670,75 @@ def test_relation_cap_prefers_higher_ranked_selected_relations() -> None:
     assert ordered[0] == activation_contains
 
 
+def test_relation_budget_priority_prefers_both_kept_relation_over_one_kept_test_relation() -> None:
+    activation_module = Entity(
+        id=StableId("python:module:src.pkg.activation"),
+        kind="module",
+        name="activation",
+        qualified_name="src.pkg.activation",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=1, end_line=20),
+    )
+    activation_func = Entity(
+        id=StableId("python:function:src.pkg.activation.require_active"),
+        kind="function",
+        name="require_active",
+        qualified_name="src.pkg.activation.require_active",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=22, end_line=40),
+    )
+    test_module = Entity(
+        id=StableId("python:module:tests.test_activation"),
+        kind="module",
+        name="test_activation",
+        qualified_name="tests.test_activation",
+        source_range=SourceRange(path="tests/test_activation.py", start_line=1, end_line=20),
+    )
+    entity_by_id = {
+        entity.id.value: entity for entity in (activation_module, activation_func, test_module)
+    }
+    contains_relation = Relation(
+        kind="contains",
+        source_entity_id=activation_module.id,
+        target_entity_id=activation_func.id,
+    )
+    one_kept_test_relation = Relation(
+        kind="tests",
+        source_entity_id=test_module.id,
+        target_entity_id=activation_module.id,
+    )
+    selected_order = [
+        activation_module.id.value,
+        activation_func.id.value,
+        test_module.id.value,
+    ]
+    kept_order = [
+        activation_module.id.value,
+        activation_func.id.value,
+    ]
+
+    contains_priority = _relation_budget_priority(
+        contains_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"cleanup_ownership"}),
+        entity_by_id=entity_by_id,
+        kept_entity_ids=frozenset(kept_order),
+        selected_entity_ids=frozenset(selected_order),
+        kept_entity_ranks={entity_id: index for index, entity_id in enumerate(kept_order)},
+        selected_entity_ranks={entity_id: index for index, entity_id in enumerate(selected_order)},
+    )
+    one_kept_test_priority = _relation_budget_priority(
+        one_kept_test_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"cleanup_ownership"}),
+        entity_by_id=entity_by_id,
+        kept_entity_ids=frozenset(kept_order),
+        selected_entity_ids=frozenset(selected_order),
+        kept_entity_ranks={entity_id: index for index, entity_id in enumerate(kept_order)},
+        selected_entity_ranks={entity_id: index for index, entity_id in enumerate(selected_order)},
+    )
+
+    assert contains_priority < one_kept_test_priority
+
+
 def test_relation_helpers_classify_source_and_tooling_paths() -> None:
     """_is_source_code_relation and _is_markdown_or_tooling_relation classify paths correctly."""
     from repo_semantic_memory.context.pack_builder import (
