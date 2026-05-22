@@ -1,156 +1,51 @@
-# Agent Workflows
+# Agent workflows
 
-This document describes how coding agents should use `repo-semantic-memory` (RSM)
-to navigate repositories efficiently.
+This page explains how coding agents should use RSM without turning generated artifacts into a second documentation set.
 
-> **Note**: The canonical quick-reference guide is `.ai/AGENT_COMMANDS.md`.
-> This document provides additional rationale and context.
-
----
+For exact commands, use [`docs/usage/cli.md`](cli.md). For the short agent-facing command card, use `.ai/AGENT_COMMANDS.md`.
 
 ## Source of truth
 
-Code, docs, tests, and git history are always authoritative.
-`.ai/` files are derived snapshots. They may be stale after structural changes.
-Always verify claims against the cited source locations before editing.
+Code, docs, tests, and Git history are authoritative. RSM outputs are derived, compact, and sometimes stale. Verify important claims against cited source ranges before editing.
 
----
+## Task workflow
 
-## Setup
+1. Build or refresh the local index when needed.
+2. Generate a task-specific context pack before opening broad source files.
+3. Inspect the cited files, symbols, and relations.
+4. Treat inferred relations/components as navigation hints, not facts.
+5. Re-index after structural changes.
 
-Index the repository once after cloning, and again after significant structural changes:
+## Large-repository orientation
 
-```bash
-uv run rsm index . --db .rsm/index.sqlite
-```
+Use a repo map for broad structure and `.ai/` snapshots only when they are current. Load the smallest artifact that answers the task:
 
-Generate the `.ai/` snapshot (if the project commits it):
+- `repo_map.md` for structure
+- `symbols.yaml` for entity IDs and source ranges
+- `relations.yaml` for dependency/export/test links
+- `components.yaml` and `invariants.yaml` only when needed
 
-```bash
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
-```
+Do not load every `.ai/` file by default.
 
----
+## Public API tasks
 
-## Canonical workflows
+Public API work should start from context packs and cited `__init__.py` exports. `confirmed PublicAPI` means exported in source; it does not mean long-term API stability.
 
-### 1. New task
+## Debugging and ranking diagnostics
 
-Before reading any source files, run a context pack to identify what is relevant:
+Use the debug profile and ranking explanations only when normal context selection looks surprising. Debug output is intentionally larger and should not be the default for routine edits.
 
-```bash
-uv run rsm pack --db .rsm/index.sqlite --task "<describe the task>" --budget 8000
-```
+## Documentation tasks
 
-The pack output cites source files and symbols. Read only those. Do not open
-full modules speculatively.
+For documentation changes, use context packs to identify relevant doc sections, then verify against the linked source docs. Keep README, `docs/`, `AGENTS.md`, and `.ai/` roles distinct.
 
-### 2. Large repo orientation
+## Evaluation interpretation
 
-When first encountering an unfamiliar repository:
-
-1. Load `.ai/INDEX.yaml` — confirm generation timestamp and version.
-2. Load `.ai/repo_map.md` — structural overview at low token cost.
-3. Load `.ai/symbols.yaml` — only when resolving a specific entity by name or ID.
-4. Load `.ai/relations.yaml` — only when tracing import/inheritance/test dependencies.
-
-Do not load all `.ai/` files at once. Load only what the task needs.
-
-### 3. Public API task
-
-When working on exported symbols or public interfaces:
-
-```bash
-uv run rsm pack --db .rsm/index.sqlite --task "public API for <module>" --budget 8000
-```
-
-Then inspect:
-- `__init__.py` exports cited in the pack output.
-- Public import tests listed in `relations.yaml` (kind: `tests`, `exports`).
-
-### 4. Debug regression
-
-When investigating a failing test or unexpected behaviour:
-
-```bash
-uv run rsm pack --db .rsm/index.sqlite --task "<failing test or symptom>" --budget 8000
-```
-
-If the ranking seems wrong, add `--profile agent_debug` and `--explain-ranking`
-to see the scoring breakdown.
-
-### 5. Documentation task
-
-When updating or writing documentation:
-
-```bash
-uv run rsm pack --db .rsm/index.sqlite --task "<doc section topic>" --budget 8000
-```
-
-Inspect only the doc sections cited in the pack output. Do not read full
-documentation files before checking cited sections.
-
-### 6. After code structure change
-
-After renaming files, adding modules, or changing exports:
-
-```bash
-uv run rsm index . --db .rsm/index.sqlite
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
-```
-
-Verify `INDEX.yaml` → `generated_at` is current before relying on any `.ai/` file.
-
----
-
-## Compression profiles
-
-`rsm repo-map` and `rsm pack` accept a `--profile` flag:
-
-| Profile | Use when |
-|---|---|
-| `agent_brief` | Token budget is tight; narrow, well-defined tasks |
-| `agent_standard` | Default; balanced for most coding tasks |
-| `agent_debug` | Diagnosing pack ranking or unexpected output |
-| `human_review` | PR review or design review workflows |
-| `ci_summary` | CI pipeline; strict noise suppression |
-| `full` | Maximum verbosity for deep analysis |
-
-Example:
-
-```bash
-uv run rsm pack --db .rsm/index.sqlite --task "..." --budget 4000 --profile agent_brief
-```
-
----
-
-## Token-savings caveat
-
-A smaller context pack is only better if it preserves coverage of the relevant
-files and symbols for the task. Use `rsm eval compare` to measure:
-
-```bash
-uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000
-```
-
-Do not claim token savings are quality improvements unless coverage is preserved.
-
----
-
-## What NOT to do
-
-- Do not treat `.ai/` files as source truth.
-- Do not read full source files before checking the context pack.
-- Do not trust `inferred` components as confirmed claims.
-- Do not use stale `.ai/` without checking the timestamp.
-- Do not ignore citations when editing code.
-- Do not claim token savings are quality unless coverage is preserved.
-
----
+Token savings are approximate and directional. Smaller context is valuable only when benchmark gold file/symbol coverage is preserved. Internal benchmark results should not be presented as broad superiority claims.
 
 ## See also
 
-- `.ai/AGENT_COMMANDS.md` — quick-reference command guide (generated)
-- `.ai/context_policy.md` — loading policy and profile details (generated)
-- `AGENTS.md` — agent guardrails and commit conventions
-- `docs/design/architecture.md` — system architecture
+- [`docs/usage/cli.md`](cli.md) — human command reference
+- [`docs/usage/ai_directory.md`](ai_directory.md) — `.ai/` artifact policy
+- [`docs/concepts/compression_profiles.md`](../concepts/compression_profiles.md) — profile details
+- [`AGENTS.md`](../../AGENTS.md) — contributor/agent guardrails
