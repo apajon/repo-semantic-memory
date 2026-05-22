@@ -1,305 +1,115 @@
 # Case study: lifecore_ros2
 
 Date: 2026-05-22
-RSM version: 0.23.3
 Target repo: [apajon/lifecore_ros2](https://github.com/apajon/lifecore_ros2)
-Validation type: local dogfooding, static source only
-
----
+Validation type: local static dogfooding run
 
 ## Scope
 
-This case study records the results of running RSM against `lifecore_ros2`, a ROS2
-lifecycle-component library written in Python. All results were regenerated locally
-from the current repo state. No assumptions were carried forward from memory.
+This report summarizes a fresh RSM run against `lifecore_ros2`, a Python ROS2 lifecycle-component library. It intentionally keeps only compact facts from the generated repo-map and context packs.
 
-Validation constraints:
+Constraints:
 
-- local source-only, no LLM calls, no embeddings
-- no runtime imports, no runtime ROS introspection
-- static AST extraction only
-- `confirmed PublicAPI` means explicitly exported via `__init__.py`; it is not an
-  API stability promise
-- token estimates are approximate (`chars / 4`)
-- this is dogfooding evidence for the RSM toolchain, not a scientific benchmark
-
----
+- Static source extraction only; no runtime ROS introspection.
+- No LLM calls, embeddings, or external semantic services.
+- The source repository was cloned locally at `../lifecore_ros2` and indexed once before all derived outputs were generated.
+- Context-pack claims are interpreted with their explicit status: `confirmed` for source-backed exports, `inferred` for heuristic relations/components.
+- This is dogfooding evidence for RSM behavior, not a controlled benchmark.
 
 ## Commands used
 
-```bash
-# RSM version
-uv run python -c "import repo_semantic_memory; print(repo_semantic_memory.__version__)"
-# 0.23.3
+The following commands were run from the `repo-semantic-memory` repository root:
 
-# Index
+```bash
 uv run rsm index ../lifecore_ros2 --db .rsm/lifecore_ros2.sqlite
 
-# Repo-map
 uv run rsm repo-map \
   --db .rsm/lifecore_ros2.sqlite \
   --budget 8000 \
-  --profile agent_standard \
-  > /tmp/lifecore_repo_map.md
+  --profile agent_standard > /tmp/lifecore_repo_map.md
 
-# Context packs (all with --explain-ranking)
 uv run rsm pack \
   --task "Find public API exported by the package" \
-  --db .rsm/lifecore_ros2.sqlite --budget 8000 --profile agent_standard \
-  --format yaml --explain-ranking \
-  > /tmp/lifecore_public_api_pack.yaml
+  --db .rsm/lifecore_ros2.sqlite \
+  --budget 8000 \
+  --profile agent_standard \
+  --format yaml \
+  --explain-ranking > /tmp/lifecore_public_api_pack.yaml
 
 uv run rsm pack \
   --task "Find where activation gating is implemented" \
-  --db .rsm/lifecore_ros2.sqlite --budget 8000 --profile agent_standard \
-  --format yaml --explain-ranking \
-  > /tmp/lifecore_activation_impl_pack.yaml
+  --db .rsm/lifecore_ros2.sqlite \
+  --budget 8000 \
+  --profile agent_standard \
+  --format yaml \
+  --explain-ranking > /tmp/lifecore_activation_impl_pack.yaml
 
 uv run rsm pack \
   --task "Find regression tests for activation gating behavior" \
-  --db .rsm/lifecore_ros2.sqlite --budget 8000 --profile agent_standard \
-  --format yaml --explain-ranking \
-  > /tmp/lifecore_activation_regression_pack.yaml
+  --db .rsm/lifecore_ros2.sqlite \
+  --budget 8000 \
+  --profile agent_standard \
+  --format yaml \
+  --explain-ranking > /tmp/lifecore_activation_regression_pack.yaml
 
 uv run rsm pack \
   --task "Find lifecycle component ownership and cleanup rules" \
-  --db .rsm/lifecore_ros2.sqlite --budget 8000 --profile agent_standard \
-  --format yaml --explain-ranking \
-  > /tmp/lifecore_cleanup_pack.yaml
+  --db .rsm/lifecore_ros2.sqlite \
+  --budget 8000 \
+  --profile agent_standard \
+  --format yaml \
+  --explain-ranking > /tmp/lifecore_cleanup_pack.yaml
 ```
 
----
+No raw repo-map or context-pack output is reproduced here.
 
-## Index findings
+## Compact findings
 
-```
-entities=1923  relations=3256
-```
+- RSM version for this run: `0.23.4.dev1+g71a59888b`.
+- Index size for `lifecore_ros2`: 1923 entities and 3256 relations.
+- Repo-map generation completed at budget 8000 with `agent_standard`; the full repo-map is not pasted in this report.
+- Public API pack retained the expected relation signal: 1 `exports` relation.
+  - It selected 22 entities and 2 semantic components.
+  - `PublicAPI` was present once with `status: confirmed`.
+  - One uncertainty was reported for an unresolved export target: `ComponentDependencyError`.
+- Activation implementation pack retained the expected implementation relation signal: 1 `contains` relation.
+  - It selected 21 entities.
+  - It included `ExternalIntegration`, `LifecycleManaged`, `TestTarget`, and `TestFile` components, all inferred.
+- Activation regression pack retained the expected test relation signal: 1 `tests` relation.
+  - It selected 21 entities.
+  - The retained `tests` relation is inferred by the test-relationship extractor.
+- Cleanup ownership pack retained the expected relationship signal: 1 `tests` relation and no `contains` relation in the selected relation budget.
+  - It selected 19 entities.
+  - It included 8 inferred `LifecycleManaged` components.
+- Generated artifact leakage check passed for all generated outputs.
+  - No generated build docs, coverage output, package metadata, local index paths, or volatile `.ai` snapshot files appeared in the repo-map or context-pack outputs.
 
-The index covers modules, classes, functions, methods, docs, and config files.
-Relations include `contains`, `imports`, `inherits`, `exports`, `tests`, and others
-inferred by the test-relationships extractor.
+## Before/after lessons
 
----
-
-## Repo-map summary
-
-Generated at budget 8000, profile `agent_standard`.
-Top-ranked entries: `src/lifecore_ros2/__init__.py`, the components sub-package
-`__init__.py`, and the `lifecycle_parameter_component.py` module. Budget was
-reached before exhausting all symbols; a `[truncated: budget reached]` marker
-appears for lower-priority files.
-
----
-
-## Context-pack findings
-
-### Task: Find public API exported by the package
-
-| Metric                  | Value |
-|-------------------------|-------|
-| Entities selected        | 22    |
-| Relations selected       | 1 (`exports`) |
-| Semantic components      | 2 (`PublicAPI ×1`, `TestTarget ×1`) |
-| Source citations         | 23    |
-| Suggested files          | 12    |
-| Truncated                | yes   |
-| Uncertainties            | 1     |
-
-The single `exports` relation comes from `src/lifecore_ros2/__init__.py`.
-The `PublicAPI` component on `lifecore_ros2` (module) is `status: confirmed`,
-meaning RSM found an explicit `__all__` or `__init__.py` export, not a heuristic
-guess.
-
-Top suggested files: `src/lifecore_ros2/__init__.py`,
-`src/lifecore_ros2/components/__init__.py`,
-`src/lifecore_ros2/core/__init__.py`,
-`src/lifecore_ros2/testing/__init__.py`.
-
-One uncertainty was surfaced: an unresolved export target
-(`ComponentDependencyError` from `.core`) whose declaration was not found in the
-indexed entities. RSM surfaces this rather than silently dropping it.
-
-**Noise observed:** several doc-path and `.github/instructions` files ranked
-highly on lexical grounds (`"api"` token hit on path name). The `agent_standard`
-profile applies a `-5.0 penalty` for docs/prose when the task hint is
-`public_api`, but some doc-type files still entered the selected set because the
-budget was large relative to the purely source-matching candidates.
-
-### Task: Find where activation gating is implemented
-
-| Metric                  | Value |
-|-------------------------|-------|
-| Entities selected        | 21    |
-| Relations selected       | 1 (`contains`) |
-| Semantic components      | 22 (`ExternalIntegration ×6`, `TestTarget ×13`, `TestFile ×1`, `LifecycleManaged ×2`) |
-| Source citations         | 22    |
-| Suggested files          | 9     |
-| Truncated                | yes   |
-
-Top entities: `lifecore_ros2.core.activation_gating` (module),
-`tests.core.test_activation_gating` (module),
-`lifecore_ros2.core.activation_gating.require_active` (function),
-`lifecore_ros2.testing.assertions.assert_activation_gated` (function).
-
-Top suggested files: `src/lifecore_ros2/core/activation_gating.py`,
-`tests/core/test_activation_gating.py`,
-`src/lifecore_ros2/testing/assertions.py`,
-`src/lifecore_ros2/core/lifecycle_component.py`.
-
-The `contains` relation links the `activation_gating` module to the
-`require_active` function directly. The ranking correctly surfaced the
-implementation module as the primary target and its corresponding test
-module alongside it.
-
-### Task: Find regression tests for activation gating behavior
-
-| Metric                  | Value |
-|-------------------------|-------|
-| Entities selected        | 21    |
-| Relations selected       | 1 (`tests`, `status: inferred`, heuristic: `file_path`) |
-| Semantic components      | 28 (`TestTarget ×18`, `ExternalIntegration ×7`, `LifecycleManaged ×2`, `TestFile ×1`) |
-| Source citations         | 22    |
-| Suggested files          | 7     |
-| Truncated                | yes   |
-
-The `tests` relation (`confidence: 0.85`, extractor: `test_relationships`)
-links `tests/core/test_activation_gating.py` to
-`src/lifecore_ros2/core/activation_gating.py` via file-path heuristic.
-
-Top entities include `TestPublisherActivationGating`,
-`TestSubscriberActivationGating`, and a Copilot regression-test instruction
-doc that ranked lexically on `"activation"` + `"gating"`.
-
-Top suggested files: `tests/core/test_activation_gating.py`,
-`tools/copilot/instructions/regression-tests.instructions.md`,
-`tests/components/test_watchdog_component.py`,
-`src/lifecore_ros2/core/activation_gating.py`.
-
-The instruction doc appearing in suggestions is a true positive for agent
-context (it documents the regression-test policy), though it is not
-implementation code.
-
-### Task: Find lifecycle component ownership and cleanup rules
-
-| Metric                  | Value |
-|-------------------------|-------|
-| Entities selected        | 19    |
-| Relations selected       | 1 (`tests`, `status: inferred`, heuristic: `direct_import`) |
-| Semantic components      | 13 (`LifecycleManaged ×8`, `ROSLikeIntegration ×4`, `TestFile ×1`) |
-| Source citations         | 20    |
-| Suggested files          | 9     |
-| Truncated                | yes   |
-
-Top entities: `tests.components.test_cleanup_ownership` (module),
-`lifecore_ros2.core.lifecycle_component.LifecycleComponent` (class),
-`LifecycleComponent._on_cleanup` and `on_cleanup` (methods).
-
-The `tests` relation links `test_cleanup_ownership.py` to the
-`lifecore_ros2.components` package via `direct_import` heuristic.
-
-Top suggested files: `tests/components/test_cleanup_ownership.py`,
-`src/lifecore_ros2/core/lifecycle_component.py`,
-`src/lifecore_ros2/components/lifecycle_parameter_component.py`,
-`src/lifecore_ros2/components/lifecycle_watchdog_component.py`.
-
-The eight `LifecycleManaged` components are all `status: inferred`; they were
-assigned by the ECS extractor based on lifecycle-hook heuristics, not declared
-in source.
-
----
-
-## Artifact leakage check
-
-None of the generated context packs include paths or identifiers from the
-`repo-semantic-memory` indexer working directory (e.g., `.rsm/lifecore_ros2.sqlite`
-or other RSM repo paths). Outputs are scoped to the indexed target repo only.
-
----
-
-## Quality checks
-
-```
-uv run ruff format --check .   →  95 files already formatted
-uv run ruff check .            →  All checks passed!
-uv run mypy src                →  Success: no issues found in 52 source files
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest  →  385 passed in 1.97s
-```
-
----
-
-## Lessons from prompts 34.1 / 34.2 / 34.3
-
-These three incremental hardening passes directly improved what this case study
-can demonstrate:
-
-**34.1 — Generated-artifact filtering:**
-Before 34.1, generated build directories (`dist/`, `*.egg-info/`, `docs/_build/`)
-were indexed and polluted entity counts and context packs with non-source symbols.
-After: artifact detection is centralized in `path_roles.py`
-(`is_generated_artifact_path()`), and generated-path entities are excluded from
-packs by default. The lifecore_ros2 index (1923 entities, 3256 relations) reflects
-clean source-only coverage.
-
-**34.2 — Source-first ranking:**
-Before 34.2, doc-path and config entities with incidental lexical hits could
-dominate context-pack slots. After: the ranker boosts source path roles and
-applies targeted penalties for docs/prose/tool paths when the task hint signals
-implementation or public-API intent. The activation-gating packs correctly rank
-the `activation_gating.py` module and `require_active` function above unrelated
-doc files.
-
-**34.3 — Relation budgeting in explain-ranking mode:**
-Before 34.3, budget caps on related-symbol counts could filter out `exports`,
-`tests`, and source `contains` relations before the agent saw them. After:
-relations are task-priority ordered before the profile cap is applied, so the one
-critical relation per pack (`exports`, `contains`, `tests`) is not dropped.
-
----
+- Generated-artifact filtering keeps the indexed context focused on source, tests, docs, and tracked project files instead of build or coverage byproducts.
+- Source-first ranking helps implementation prompts surface code such as activation-gating logic before lower-value prose matches.
+- Explain-ranking relation budgeting now keeps the important compact relation signals visible: `exports` for public API, `contains` for implementation, and `tests` for regression or cleanup questions.
+- The lifecore_ros2 run is a useful smoke test because it exercises package exports, lifecycle-style classes, test-to-source heuristics, and documentation/tooling paths in one repository.
 
 ## Known limitations
 
-1. **Truncated packs.** All four packs hit the 8000-token budget before exhausting
-   candidates. Higher budgets or tighter scoping would include more context.
-
-2. **Unresolved `exports` targets.** `ComponentDependencyError` from `.core` is
-   exported in `__init__.py` but its class definition was not indexed (possibly
-   because the symbol name does not appear at module top-level). RSM surfaces this
-   as an uncertainty; it does not silently drop it.
-
-3. **Inferred `tests` and `LifecycleManaged` components.** All `tests` relations
-   and `LifecycleManaged`/`ROSLikeIntegration` components carry `status: inferred`.
-   Heuristic confidence is noted (0.85 for file-path-matched tests), but these are
-   not confirmed structural claims.
-
-4. **Doc and tool noise in public-API task.** When the task wording contains
-   `"api"`, docs and Copilot instruction files with `"api"` in their path rank on
-   lexical score. Profile penalties dampen but do not eliminate them under a large
-   budget.
-
-5. **No call graph, type inference, or import resolution.** RSM performs static
-   structural indexing only. Cross-module call flows (e.g., which node calls
-   `require_active` at runtime) are not captured.
-
-6. **No ROS-specific extraction.** ROS message types, action servers, service
-   interfaces, and node graph topology are outside RSM's current scope.
-
-7. **Single-target validation scope.** This case study covers one Python ROS2
-   library. Results are not generalizable to other languages or project structures.
-
----
+- All four context packs were budgeted outputs; selected entities and relations are not exhaustive.
+- `confirmed PublicAPI` only means statically exported through package surfaces; it does not imply long-term API stability.
+- `tests`, `LifecycleManaged`, and integration-like components in these packs are inferred heuristically, not proven by type analysis or runtime inspection.
+- RSM does not resolve all imports or export targets yet; unresolved targets are surfaced as uncertainties.
+- RSM does not build a Python call graph, infer ROS node topology, or introspect ROS messages/services/actions at runtime.
+- This is one local run against one repository, so the results should not be generalized as benchmark evidence.
 
 ## Public wording guidance
 
-When referencing this case study:
+Use narrow wording:
 
-- Say: *"RSM indexed lifecore_ros2 and surfaced activation-gating implementation
-  files and regression tests via static extraction."*
-- Do not say: *"RSM understands ROS2 lifecycle semantics"* — it does not import
-  or introspect ROS at runtime.
-- Do not say: *"`confirmed PublicAPI` means the API is stable"* — it means the
-  symbol was explicitly exported in `__init__.py`.
-- Do not say: *"token savings are precise"* — estimates use `chars / 4` and are
-  directional only.
-- Do not say: *"this proves RSM is better than alternatives"* — this is internal
-  dogfooding against one known repo, not a controlled study.
+- Safe: “RSM indexed lifecore_ros2 and retained compact relation signals for public exports, activation-gating implementation, regression tests, and cleanup ownership.”
+- Safe: “The run surfaced inferred lifecycle and test relationships with explicit status labels.”
+
+Avoid overclaims:
+
+- Do not claim RSM understands ROS2 lifecycle semantics at runtime.
+- Do not claim `confirmed PublicAPI` means stable public API.
+- Do not claim this case study proves RSM is better than other retrieval systems.
+- Do not quote token savings or benchmark wins from this report; this run was not a benchmark comparison.
