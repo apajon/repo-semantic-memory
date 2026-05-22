@@ -1,29 +1,31 @@
-# .ai/ — Agent Semantic Memory
-
-> These files are derived agent-facing artifacts and may be stale.
-> Source of truth is always code, docs, tests, and git history.
-> Regenerate with: `rsm export-ai --db .rsm/index.sqlite --out .ai --force`.
+# .ai/ - Agent Semantic Memory
 
 ## Purpose
 
-This directory contains compact semantic memory files for coding agents. It is not a replacement for human documentation under `docs/`.
+This directory contains agent-facing semantic memory artifacts for RSM. These files are derived from the repository index and may be stale. They are not the primary human documentation source; code, docs, tests, and Git history remain authoritative.
 
 ## Files
 
 | File | Description |
 |---|---|
 | `INDEX.yaml` | Versions, source DB path, generation timestamp, entity/relation counts |
-| `AGENT_COMMANDS.md` | Short command guide and workflows for coding agents |
+| `AGENT_COMMANDS.md` | Compact command and workflow guide for coding agents |
 | `repo_map.md` | Compact structural map of the repository |
 | `symbols.yaml` | Stable entity IDs, kinds, names, and source locations |
 | `relations.yaml` | Directed structural relations between entities |
 | `components.yaml` | ECS-style semantic component labels, if present |
-| `invariants.yaml` | Invariant entities, if present |
-| `context_policy.md` | How agents should load these files within context budgets |
+| `invariants.yaml` | Invariant records, if present |
+| `context_policy.md` | Loading order, budget guidance, and interpretation rules |
 
 ## Git behavior
 
-In this repository, volatile generated snapshots are gitignored. Static templates (`AGENT_COMMANDS.md`, `README.md`, `context_policy.md`) may be committed. `.rsm/` must not be committed.
+In this repository, volatile generated snapshots are gitignored. Static templates may be committed:
+
+- `.ai/AGENT_COMMANDS.md`
+- `.ai/README.md`
+- `.ai/context_policy.md`
+
+The local `.rsm/` index must not be committed.
 
 ## Human docs
 
