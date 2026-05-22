@@ -12,7 +12,7 @@ Constraints:
 
 - Static source extraction only; no runtime ROS introspection.
 - No LLM calls, embeddings, or external semantic services.
-- The source repository was cloned locally at `../lifecore_ros2` and indexed once before all derived outputs were generated.
+- The source repository was cloned locally and indexed once before all derived outputs were generated.
 - Context-pack claims are interpreted with their explicit status: `confirmed` for source-backed exports, `inferred` for heuristic relations/components.
 - This is dogfooding evidence for RSM behavior, not scientific proof or a controlled benchmark.
 
@@ -29,50 +29,14 @@ This case study intentionally uses `lifecore_ros2` `main`, the release/PyPI-faci
 
 ## Commands used
 
-The following commands were run from the `repo-semantic-memory` repository root:
+The run used one local index, one repo-map, and four task-specific context packs with an 8000-token budget and the `agent_standard` profile. The context packs used `--format yaml` and `--explain-ranking` for these tasks:
 
-```bash
-uv run rsm index ../lifecore_ros2 --db .rsm/lifecore_ros2.sqlite
+- “Find public API exported by the package”.
+- “Find where activation gating is implemented”.
+- “Find regression tests for activation gating behavior”.
+- “Find lifecycle component ownership and cleanup rules”.
 
-uv run rsm repo-map \
-  --db .rsm/lifecore_ros2.sqlite \
-  --budget 8000 \
-  --profile agent_standard > /tmp/lifecore_repo_map.md
-
-uv run rsm pack \
-  --task "Find public API exported by the package" \
-  --db .rsm/lifecore_ros2.sqlite \
-  --budget 8000 \
-  --profile agent_standard \
-  --format yaml \
-  --explain-ranking > /tmp/lifecore_public_api_pack.yaml
-
-uv run rsm pack \
-  --task "Find where activation gating is implemented" \
-  --db .rsm/lifecore_ros2.sqlite \
-  --budget 8000 \
-  --profile agent_standard \
-  --format yaml \
-  --explain-ranking > /tmp/lifecore_activation_impl_pack.yaml
-
-uv run rsm pack \
-  --task "Find regression tests for activation gating behavior" \
-  --db .rsm/lifecore_ros2.sqlite \
-  --budget 8000 \
-  --profile agent_standard \
-  --format yaml \
-  --explain-ranking > /tmp/lifecore_activation_regression_pack.yaml
-
-uv run rsm pack \
-  --task "Find lifecycle component ownership and cleanup rules" \
-  --db .rsm/lifecore_ros2.sqlite \
-  --budget 8000 \
-  --profile agent_standard \
-  --format yaml \
-  --explain-ranking > /tmp/lifecore_cleanup_pack.yaml
-```
-
-No raw repo-map or context-pack output is reproduced here.
+No raw repo-map, terminal transcript, or context-pack output is reproduced here.
 
 ## What RSM adds beyond a repo map
 
@@ -112,16 +76,25 @@ Index size for the `lifecore_ros2` run: 1923 entities and 3256 relations.
 - What RSM surfaced: lifecycle implementation context, cleanup-related methods, ownership tests, and 1 useful retained `tests` relation. No `contains` relation fit within the selected relation budget for this pack.
 - Why it matters: an agent gets both implementation and behavior evidence, which is more useful for cleanup rules than a flat list of files mentioning lifecycle terms.
 
-## Generated-artifact suppression
+## Artifact leakage check
 
-The generated outputs did not include generated build docs, coverage output, package metadata, local index paths, or volatile `.ai` snapshot files. In particular, no `docs/_build`, `htmlcov`, `egg-info`, `.rsm`, or volatile `.ai` snapshot paths appeared in the repo-map or context-pack outputs.
+Generated-artifact leakage checks passed for all generated outputs. The repo-map and context packs did not include forbidden build-output, coverage-output, package-metadata, local-index, shell-prompt, raw-pack, or volatile agent-snapshot markers.
 
-## Before/after lessons
+## Quality checks
+
+- The forbidden-output grep check returned no matches after this cleanup.
+- Ruff format check passed.
+- Ruff lint check passed.
+- Mypy passed for `src`.
+- Pytest passed with plugin autoload disabled.
+- Final git status showed only the intended case-study documentation change before commit.
+
+## Lessons from hardening
 
 - Generated-artifact filtering keeps indexed context focused on source, tests, docs, and tracked project files instead of build or coverage byproducts.
 - Source-first ranking helps implementation prompts surface code before lower-value prose matches.
 - Explain-ranking relation budgeting keeps compact relation signals visible: `exports` for public API, `contains` for implementation, and `tests` for regression or cleanup questions.
-- The useful claim is not that RSM “solves” coding-agent context; it is that RSM can provide a small, source-backed, task-shaped context pack with explicit relation evidence.
+- The useful claim is not that RSM solves coding-agent context; it is that RSM can provide a small, source-backed, task-shaped context pack with explicit relation evidence.
 
 ## Known limitations
 
@@ -149,3 +122,5 @@ Avoid overclaims:
 - Do not claim this case study proves RSM is better than grep, README scanning, or other retrieval systems.
 - Do not claim RSM solves coding-agent context.
 - Do not quote token savings or benchmark wins from this report; this run was not a benchmark comparison.
+
+RSM’s useful behavior in this run was not just finding matching files; it produced task-shaped, source-cited context with structural relations such as `exports`, `contains`, and `tests`.
