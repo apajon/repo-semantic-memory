@@ -16,6 +16,17 @@ Constraints:
 - Context-pack claims are interpreted with their explicit status: `confirmed` for source-backed exports, `inferred` for heuristic relations/components.
 - This is dogfooding evidence for RSM behavior, not a controlled benchmark.
 
+## Revision context
+
+- RSM branch used for generation: `copilot/create-docs-case-studies-lifecore-ros2`.
+- RSM short commit used for generation: `71a5988`.
+- RSM version for generated outputs: `0.23.4.dev1+g71a59888b`.
+- `lifecore_ros2` branch: `main`.
+- `lifecore_ros2` short commit: `ea220f1`.
+- `lifecore_ros2` working tree status during validation: clean.
+
+This case study intentionally uses `lifecore_ros2` `main`, the release/PyPI-facing branch. It should not be compared directly with earlier Prompt 35 hardening-validation counts from `dev-lifecore_state`.
+
 ## Commands used
 
 The following commands were run from the `repo-semantic-memory` repository root:
