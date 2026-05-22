@@ -1,23 +1,42 @@
 # MCP handlers and contracts
 
-MCP-style handlers/contracts exist, but no MCP runtime server is shipped yet.
+RSM has MCP-style typed contracts and pure local handler functions, but it does
+not yet ship an MCP runtime server.
 
-RSM currently includes pure deterministic MCP-style handlers and typed contracts over
-local core logic. These are local building blocks, not a runtime server.
+The existing handlers are deterministic local building blocks over RSM's index,
+graph, context-pack, and Git-summary logic. They are not a transport, daemon,
+network listener, or long-running process. A future MCP runtime should wrap these
+handlers instead of reimplementing indexing or query logic.
 
 ## Current status
 
 - Contracts describe planned tool envelopes and request/response shapes.
-- Pure handlers can call existing local index/context-pack logic.
-- No transport, daemon, network listener, or runtime MCP server is shipped.
-- No LLM, embedding, vector database, or remote API dependency is introduced.
+- Pure handlers call existing local deterministic logic.
+- Handler output should preserve evidence/citations where available and mark
+  uncertainty when evidence is incomplete.
+- No runtime MCP server is shipped yet.
+- No transport, daemon, network listener, HTTP server, Docker image, cloud
+  service, LLM, embedding, vector database, or remote API dependency is
+  introduced.
 
-## Intended tool surface
+## Phase 1 read-only surface
 
-The planned surface includes local, bounded tools such as symbol search, entity explanation, context-pack building, graph querying, `.ai` export, patch-context validation, and Git summary.
+The planned phase 1 runtime surface is read-only:
 
-Every semantic response should preserve evidence/citations where available and mark uncertainty when evidence is incomplete.
+- `rsm_status`
+- `rsm_search_symbols`
+- `rsm_explain_entity`
+- `rsm_build_context_pack`
+- `rsm_query_graph`
+- `rsm_validate_patch_context`
+- `rsm_get_git_summary`
+
+Mutation-oriented tools such as indexing, exports/imports, invariant writes,
+test execution, arbitrary command execution, and patch application are deferred.
 
 ## Runtime split
 
-Runtime/server concerns are tracked separately in [MCP runtime](mcp_runtime.md). Keeping contracts separate from runtime transport avoids freezing a server API before the local deterministic behavior and security model are stable.
+Runtime/server concerns are tracked separately in [MCP runtime](mcp_runtime.md).
+Keeping contracts separate from runtime transport avoids freezing a server API
+before the local deterministic behavior, path validation, staleness reporting,
+and safety boundaries are stable.
