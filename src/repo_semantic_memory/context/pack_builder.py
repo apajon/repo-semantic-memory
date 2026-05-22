@@ -64,6 +64,8 @@ _IMPLEMENTATION_CORE_LOGIC_TOKENS = frozenset({"core", "logic"})
 _IMPLEMENTATION_PRIORITIZED_ENTITY_KINDS = frozenset({"module", "class", "function", "method"})
 _TEST_TASK_TOKENS = frozenset({"test", "tests", "behavior", "coverage", "pytest", "regression"})
 _PUBLIC_API_TASK_TOKENS = frozenset({"public", "api", "export", "exports", "__init__", "init"})
+_CLEANUP_OWNERSHIP_TASK_TOKENS = frozenset({"cleanup", "ownership", "owner", "owns"})
+_DOCUMENTATION_TASK_TOKENS = frozenset({"doc", "docs", "documentation", "readme", "markdown"})
 _FORBIDDEN_ASSUMPTIONS = (
     (
         "Do not assume inheritance targets are resolved unless relation metadata says "
@@ -308,13 +310,16 @@ def build_context_pack(
     selected_entities = [
         entity_by_id[entity_id] for entity_id in selected_entity_ids if entity_id in entity_by_id
     ]
-    selected_relations = sorted(
-        selected_relations,
-        key=lambda relation: (
-            relation.kind,
-            relation.source_entity_id.value,
-            relation.target_entity_id.value,
-        ),
+    selected_entity_ranks = {
+        entity_id: index for index, entity_id in enumerate(selected_entity_ids)
+    }
+    selected_relations = _order_relations_for_profile_cap(
+        selected_relations=selected_relations,
+        prefer_structural_relations=explain_ranking or resolved_profile.include_ranking_breakdown,
+        task_hints=frozenset(task_hints),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(selected_entity_ids),
+        selected_entity_ranks=selected_entity_ranks,
     )
     selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
     score_capped_reasons_by_key = _cap_reasons_per_item(
@@ -711,6 +716,10 @@ def _task_hints(task_tokens: tuple[str, ...]) -> set[str]:
         hints.add("tests")
     if any(token in _PUBLIC_API_TASK_TOKENS for token in task_tokens):
         hints.add("public_api")
+    if any(token in _CLEANUP_OWNERSHIP_TASK_TOKENS for token in task_tokens):
+        hints.add("cleanup_ownership")
+    if any(token in _DOCUMENTATION_TASK_TOKENS for token in task_tokens):
+        hints.add("documentation")
     return hints
 
 
@@ -904,6 +913,18 @@ def _is_markdown_or_tooling_relation(
     return False
 
 
+def _is_markdown_relation(relation: Relation, entity_by_id: Mapping[str, Entity]) -> bool:
+    """True when any endpoint path is markdown."""
+    for eid in (relation.source_entity_id.value, relation.target_entity_id.value):
+        entity = entity_by_id.get(eid)
+        if entity is None:
+            continue
+        path = entity.source_range.path.replace("\\", "/").lower()
+        if path.endswith(".md"):
+            return True
+    return False
+
+
 def _relation_endpoint_coverage(
     relation: Relation,
     kept_entity_ids: set[str] | frozenset[str],
@@ -914,6 +935,25 @@ def _relation_endpoint_coverage(
     return (1 if src_kept else 0) + (1 if tgt_kept else 0)
 
 
+def _relation_endpoint_rank_priority(
+    relation: Relation,
+    entity_ranks: Mapping[str, int] | None,
+) -> tuple[int, int, int]:
+    """Order relations by how early their endpoints rank among selected/kept entities."""
+    if not entity_ranks:
+        return (2, 10**9, 10**9)
+    endpoint_ranks = sorted(
+        entity_ranks[eid]
+        for eid in (relation.source_entity_id.value, relation.target_entity_id.value)
+        if eid in entity_ranks
+    )
+    if not endpoint_ranks:
+        return (2, 10**9, 10**9)
+    if len(endpoint_ranks) == 1:
+        return (1, endpoint_ranks[0], endpoint_ranks[0])
+    return (0, endpoint_ranks[0], endpoint_ranks[0] + endpoint_ranks[1])
+
+
 def _relation_task_priority(
     relation: Relation,
     *,
@@ -922,44 +962,97 @@ def _relation_task_priority(
 ) -> int:
     """Task-intent-aware relation priority (lower = higher priority).
 
-    For public_api tasks: exports > tests > source contains > doc/tool contains.
-    For implementation/cleanup tasks: tests > source contains > owns > uses/inherits.
+    For public_api tasks: exports > source contains > tests > source structural.
+    For cleanup/ownership tasks: tests > source contains > owns > uses/inherits > imports.
+    For implementation tasks: source contains > tests > uses/inherits > imports.
+    For documentation tasks: markdown contains can rank high.
     For test tasks: tests > source contains > uses/inherits.
     Markdown/tooling relations (.github, tools/copilot) are always deprioritized.
     """
     kind = relation.kind
     is_md_tooling = _is_markdown_or_tooling_relation(relation, entity_by_id)
     is_src = _is_source_code_relation(relation, entity_by_id)
+    is_markdown = _is_markdown_relation(relation, entity_by_id)
+
+    if "documentation" in task_hints:
+        if kind == "contains" and is_markdown and not is_md_tooling:
+            return 0
+        if kind in {"contains", "documents"} and not is_md_tooling:
+            return 1
+        if kind in {"exports", "tests"} and not is_md_tooling:
+            return 2
+        if (
+            kind in {"uses", "owns", "inherits", "requires", "calls"}
+            and is_src
+            and not is_md_tooling
+        ):
+            return 3
+        if kind == "imports":
+            return 4
+        if kind == "contains" and is_md_tooling:
+            return 6
+        return 5
 
     if "public_api" in task_hints:
         if kind == "exports":
             return 0
-        if kind == "tests" and not is_md_tooling:
-            return 1
         if kind == "contains" and is_src and not is_md_tooling:
+            return 1
+        if kind == "tests" and not is_md_tooling:
             return 2
-        if kind in {"uses", "inherits"} and not is_md_tooling:
+        if (
+            kind in {"uses", "owns", "inherits", "requires", "calls"}
+            and is_src
+            and not is_md_tooling
+        ):
             return 3
-        if kind == "contains" and not is_md_tooling:
+        if kind == "contains" and is_markdown and not is_md_tooling:
             return 4
         if kind == "imports":
             return 5
-        return 6  # markdown/tooling or other
+        if kind == "contains" and not is_md_tooling:
+            return 6
+        if kind == "contains" and is_md_tooling:
+            return 8
+        return 7
 
-    if "implementation" in task_hints:
+    if "cleanup_ownership" in task_hints:
         if kind == "tests" and not is_md_tooling:
             return 0
         if kind == "contains" and is_src and not is_md_tooling:
             return 1
         if kind == "owns" and not is_md_tooling:
             return 2
-        if kind in {"uses", "inherits"} and not is_md_tooling:
+        if kind == "uses" and not is_md_tooling:
             return 3
-        if kind == "exports":
+        if kind == "inherits" and not is_md_tooling:
             return 4
         if kind == "imports":
             return 5
-        return 6  # markdown/tooling or other
+        if kind == "contains" and is_markdown and not is_md_tooling:
+            return 6
+        if kind == "contains" and is_md_tooling:
+            return 8
+        return 7
+
+    if "implementation" in task_hints:
+        if kind == "contains" and is_src and not is_md_tooling:
+            return 0
+        if kind == "tests" and not is_md_tooling:
+            return 1
+        if kind == "uses" and not is_md_tooling:
+            return 2
+        if kind == "inherits" and not is_md_tooling:
+            return 3
+        if kind == "imports":
+            return 4
+        if kind in {"owns", "requires", "calls"} and is_src and not is_md_tooling:
+            return 5
+        if kind == "contains" and is_markdown and not is_md_tooling:
+            return 6
+        if kind == "contains" and is_md_tooling:
+            return 8
+        return 7
 
     if "tests" in task_hints:
         if kind == "tests" and not is_md_tooling:
@@ -972,7 +1065,9 @@ def _relation_task_priority(
             return 3
         if kind == "imports":
             return 4
-        return 5  # markdown/tooling or other
+        if kind == "contains" and is_md_tooling:
+            return 6
+        return 5
 
     # Default: source-code structural relations first; markdown/tooling last.
     if kind in {"exports", "tests"} and not is_md_tooling:
@@ -983,6 +1078,8 @@ def _relation_task_priority(
         return 2
     if kind == "imports":
         return 3
+    if kind == "contains" and is_md_tooling:
+        return 5
     return 4  # markdown/tooling or other
 
 
@@ -1004,17 +1101,43 @@ def _truncate_to_budget(
     kept_entity_ids: set[str] = set()
     truncated = False
 
+    _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
+    _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+    selected_entity_ids = frozenset(entity.id.value for entity in selected_entities)
+    selected_entity_ranks = {
+        entity.id.value: index for index, entity in enumerate(selected_entities)
+    }
+    relation_budget_reservation = 0
+    if preserve_at_least_one_relation and selected_relations:
+        top_relation = min(
+            selected_relations,
+            key=lambda relation: _relation_budget_priority(
+                relation,
+                prefer_structural_relations=prefer_structural_relations,
+                task_hints=_task_hints,
+                entity_by_id=_entity_by_id,
+                kept_entity_ids=selected_entity_ids,
+                selected_entity_ids=selected_entity_ids,
+                kept_entity_ranks=selected_entity_ranks,
+                selected_entity_ranks=selected_entity_ranks,
+            ),
+        )
+        relation_budget_reservation = _estimate_relation_chars(
+            top_relation, reasons_by_key.get(relation_key(top_relation), ())
+        )
+        available_budget = max(0, budget_chars - used)
+        relation_budget_reservation = min(relation_budget_reservation, available_budget)
+    entity_budget_limit = budget_chars - relation_budget_reservation
+
     for entity in selected_entities:
         estimate = _estimate_entity_chars(entity, reasons_by_key.get(entity.id.value, ()))
-        if used + estimate > budget_chars:
+        if used + estimate > entity_budget_limit:
             truncated = True
             break
         kept_entities.append(entity)
         kept_entity_ids.add(entity.id.value)
         used += estimate
 
-    _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
-    _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
     ordered_relations = sorted(
         selected_relations,
         key=lambda relation: _relation_budget_priority(
@@ -1022,6 +1145,12 @@ def _truncate_to_budget(
             prefer_structural_relations=prefer_structural_relations,
             task_hints=_task_hints,
             entity_by_id=_entity_by_id,
+            kept_entity_ids=kept_entity_ids,
+            selected_entity_ids=selected_entity_ids,
+            kept_entity_ranks={
+                entity.id.value: index for index, entity in enumerate(kept_entities)
+            },
+            selected_entity_ranks=selected_entity_ranks,
         ),
     )
     kept_relations: list[Relation] = []
@@ -1110,7 +1239,10 @@ def _relation_budget_priority(
     task_hints: set[str] | frozenset[str] | None = None,
     entity_by_id: Mapping[str, Entity] | None = None,
     kept_entity_ids: set[str] | frozenset[str] | None = None,
-) -> tuple[int, int, str, str, str]:
+    selected_entity_ids: set[str] | frozenset[str] | None = None,
+    kept_entity_ranks: Mapping[str, int] | None = None,
+    selected_entity_ranks: Mapping[str, int] | None = None,
+) -> tuple[int, int, int, int, int, int, int, int, int, str, str, str]:
     """Compute a sort key for relation budget ordering (lower = higher priority).
 
     In structural (explain_ranking) mode:
@@ -1124,22 +1256,59 @@ def _relation_budget_priority(
     resolved = relation.metadata.get("resolved") is True
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
-
     if not prefer_structural_relations:
         # Non-structural mode: keep original ordering (unresolved imports/inherits first).
         kind_priority = 0 if relation.kind in {"imports", "inherits"} and not resolved else 1
         return (
-            kind_priority,
             0,
+            0,
+            0,
+            2,
+            10**9,
+            10**9,
+            2,
+            10**9,
+            kind_priority,
             relation.kind,
             relation.source_entity_id.value,
             relation.target_entity_id.value,
         )
 
     # Structural (explain_ranking) mode: task-intent + kind priority.
+    _kept_entity_ids: set[str] | frozenset[str] = (
+        kept_entity_ids if kept_entity_ids is not None else frozenset()
+    )
+    _selected_entity_ids: set[str] | frozenset[str] = (
+        selected_entity_ids if selected_entity_ids is not None else frozenset()
+    )
+    selected_coverage = _relation_endpoint_coverage(relation, _selected_entity_ids)
+    if relation.kind == "exports" and selected_coverage >= 1:
+        selected_priority = 0
+    else:
+        selected_priority = 0 if selected_coverage == 2 else 1 if selected_coverage == 1 else 2
+    kept_coverage = _relation_endpoint_coverage(relation, _kept_entity_ids)
+    # kept_priority mapping (lower is better):
+    # 0: both endpoints budgeted
+    # 1: one endpoint budgeted and both endpoints selected overall
+    # 2: one endpoint budgeted only
+    # 3: no budgeted endpoints
+    if relation.kind == "exports" and kept_coverage >= 1:
+        kept_priority = 0
+    elif kept_coverage == 2:
+        kept_priority = 0
+    # selected_coverage == 2 means both endpoints were selected before truncation;
+    # with one endpoint still budgeted, this is our preferred fallback over other 1-endpoint cases.
+    elif kept_coverage == 1 and selected_coverage == 2:
+        kept_priority = 1
+    elif kept_coverage == 1:
+        kept_priority = 2
+    else:
+        kept_priority = 3
     task_priority = _relation_task_priority(
         relation, task_hints=_task_hints, entity_by_id=_entity_by_id
     )
+    kept_rank_priority = _relation_endpoint_rank_priority(relation, kept_entity_ranks)
+    selected_rank_priority = _relation_endpoint_rank_priority(relation, selected_entity_ranks)
 
     # Traditional kind priority as a secondary tiebreaker within the same task-intent tier.
     if relation.kind in {"tests", "exports"}:
@@ -1154,11 +1323,52 @@ def _relation_budget_priority(
         kind_priority = 4
 
     return (
+        selected_priority,
+        kept_priority,
         task_priority,
+        kept_rank_priority[0],
+        kept_rank_priority[1],
+        kept_rank_priority[2],
+        selected_rank_priority[0],
+        selected_rank_priority[1],
         kind_priority,
         relation.kind,
         relation.source_entity_id.value,
         relation.target_entity_id.value,
+    )
+
+
+def _order_relations_for_profile_cap(
+    *,
+    selected_relations: Sequence[Relation],
+    prefer_structural_relations: bool,
+    task_hints: frozenset[str],
+    entity_by_id: Mapping[str, Entity],
+    selected_entity_ids: frozenset[str],
+    selected_entity_ranks: Mapping[str, int],
+) -> list[Relation]:
+    """Deterministically order relations before profile-level relation cap is applied."""
+    if not prefer_structural_relations:
+        return sorted(
+            selected_relations,
+            key=lambda relation: (
+                relation.kind,
+                relation.source_entity_id.value,
+                relation.target_entity_id.value,
+            ),
+        )
+    return sorted(
+        selected_relations,
+        key=lambda relation: _relation_budget_priority(
+            relation,
+            prefer_structural_relations=True,
+            task_hints=task_hints,
+            entity_by_id=entity_by_id,
+            kept_entity_ids=selected_entity_ids,
+            selected_entity_ids=selected_entity_ids,
+            kept_entity_ranks=selected_entity_ranks,
+            selected_entity_ranks=selected_entity_ranks,
+        ),
     )
 
 

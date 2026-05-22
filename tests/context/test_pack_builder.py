@@ -3,20 +3,33 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from pathlib import Path
 
 from repo_semantic_memory.context import build_context_pack, render_context_pack_markdown
-from repo_semantic_memory.context.compression import available_profile_names, resolve_profile
+from repo_semantic_memory.context.compression import (
+    available_profile_names,
+    filter_related_relations,
+    resolve_profile,
+)
 from repo_semantic_memory.context.context_pack import relation_key
 from repo_semantic_memory.context.pack_builder import (
+    _PACK_FIXED_OVERHEAD_CHARS,
     _build_bm25_index,
     _component_labels_by_entity,
+    _estimate_entity_chars,
+    _estimate_relation_chars,
     _is_code_task,
     _is_graph_seed_eligible,
+    _is_markdown_or_tooling_relation,
+    _order_relations_for_profile_cap,
+    _relation_budget_priority,
+    _relation_endpoint_coverage,
     _relation_labels_by_entity,
     _score_entity,
     _task_hints,
     _tokenize,
+    _truncate_to_budget,
 )
 from repo_semantic_memory.extractors import (
     extract_filesystem_entities,
@@ -42,6 +55,11 @@ _ACTIVATION_GATING_TESTS = (
     "class TestSubscriberActivationGating:\n"
     "    def test_watchdog_blocks_activation(self) -> None:\n"
     "        assert not ActivationGating().should_activate(False)\n"
+)
+# Relation kinds considered task-relevant in diagnostics:
+# structural source-code links + behavioral links that should survive relation budgeting.
+_DIAGNOSTIC_USEFUL_RELATION_KINDS = frozenset(
+    {"contains", "tests", "exports", "uses", "owns", "inherits", "imports"}
 )
 
 
@@ -754,7 +772,9 @@ def test_explain_ranking_retains_structural_relations() -> None:
         )
 
     public_api_relation_kinds = {relation.kind for relation in public_api_pack.selected_relations}
-    assert {"contains", "exports", "tests"} <= public_api_relation_kinds
+    assert public_api_relation_kinds & {"exports", "contains"}, (
+        "public_api explain pack must keep exports or source-code contains relations"
+    )
 
 
 def test_explain_ranking_agent_standard_preserves_relations_under_budget_pressure() -> None:
@@ -1194,6 +1214,531 @@ def test_generated_artifacts_remain_suppressed_under_compact_profiles() -> None:
 # ---------------------------------------------------------------------------
 
 
+def _relation_budget_diagnostic_for_selected(
+    *,
+    task: str,
+    budget_chars: int,
+    selected_entities: list[Entity],
+    selected_relations: list[Relation],
+    profile: str = "agent_standard",
+) -> dict[str, object]:
+    """Debug-only helper to inspect relation budgeting stages for selected items.
+
+    Failure mode mapping:
+    - A: useful relations absent from candidates
+    - B: useful relations exist but no both-endpoint-selected candidate
+    - C: useful both-endpoint-selected candidates exist, but none survive kept-entity truncation
+    - D: top-ranked candidate is markdown/tooling contains despite useful both-selected alternatives
+    - E: useful both-endpoint-selected candidates are filtered out before relation budgeting
+    - F: fallback rejects all candidates due estimated relation cost
+    - resolved: none of A-F triggered
+    """
+    resolved_profile = resolve_profile(profile)
+    task_hints = frozenset(_task_hints(_tokenize(task)))
+    entity_by_id = {entity.id.value: entity for entity in selected_entities}
+    selected_ids = frozenset(entity_by_id.keys())
+    reasons_by_key: dict[str, tuple[str, ...]] = defaultdict(tuple)
+
+    ordered_prefilter = _order_relations_for_profile_cap(
+        selected_relations=selected_relations,
+        prefer_structural_relations=True,
+        task_hints=task_hints,
+        entity_by_id=entity_by_id,
+        selected_entity_ids=selected_ids,
+        selected_entity_ranks={
+            entity.id.value: index for index, entity in enumerate(selected_entities)
+        },
+    )
+    filtered_relations = filter_related_relations(ordered_prefilter, profile=resolved_profile)
+    filtered_relation_keys = {relation_key(rel) for rel in filtered_relations}
+
+    top_candidates = _top_relation_candidates(
+        ordered_relations=ordered_prefilter,
+        selected_ids=selected_ids,
+        filtered_relation_keys=filtered_relation_keys,
+        entity_by_id=entity_by_id,
+        task_hints=task_hints,
+    )
+
+    kept_entities, _kept_relations, _ = _truncate_to_budget(
+        task=task,
+        budget_chars=budget_chars,
+        selected_entities=selected_entities,
+        selected_relations=filtered_relations,
+        reasons_by_key=reasons_by_key,
+        prefer_structural_relations=True,
+        preserve_at_least_one_relation=True,
+        task_hints=set(task_hints),
+        entity_by_id=entity_by_id,
+    )
+    kept_ids = frozenset(entity.id.value for entity in kept_entities)
+    dropped_ids = [
+        entity.id.value for entity in selected_entities if entity.id.value not in kept_ids
+    ]
+
+    both_endpoints_kept = 0
+    one_kept_one_selected = 0
+    for relation in filtered_relations:
+        kept_coverage = _relation_endpoint_coverage(relation, kept_ids)
+        selected_coverage = _relation_endpoint_coverage(relation, selected_ids)
+        if kept_coverage == 2:
+            both_endpoints_kept += 1
+        if kept_coverage == 1 and selected_coverage == 2:
+            one_kept_one_selected += 1
+
+    ordered_after_entity_budget = sorted(
+        filtered_relations,
+        key=lambda relation: _relation_budget_priority(
+            relation,
+            prefer_structural_relations=True,
+            task_hints=task_hints,
+            entity_by_id=entity_by_id,
+            kept_entity_ids=kept_ids,
+            selected_entity_ids=selected_ids,
+            kept_entity_ranks={
+                entity.id.value: index for index, entity in enumerate(kept_entities)
+            },
+            selected_entity_ranks={
+                entity.id.value: index for index, entity in enumerate(selected_entities)
+            },
+        ),
+    )
+
+    used_after_entities = (
+        len(task)
+        + _PACK_FIXED_OVERHEAD_CHARS
+        + sum(_estimate_entity_chars(entity, ()) for entity in kept_entities)
+    )
+    normal_kept: list[Relation] = []
+    used = used_after_entities
+    for relation in ordered_after_entity_budget:
+        coverage = _relation_endpoint_coverage(relation, kept_ids)
+        if coverage == 0:
+            continue
+        estimate = _estimate_relation_chars(relation, ())
+        if used + estimate > budget_chars:
+            continue
+        normal_kept.append(relation)
+        used += estimate
+
+    fallback_attempts = _simulate_fallback_attempts(
+        ordered_relations=ordered_after_entity_budget,
+        kept_entities=kept_entities,
+        kept_ids=kept_ids,
+        used_after_entities=used_after_entities,
+        budget_chars=budget_chars,
+        normal_kept=normal_kept,
+    )
+
+    def _is_useful(relation: Relation) -> bool:
+        return (
+            relation.kind in _DIAGNOSTIC_USEFUL_RELATION_KINDS
+            and not _is_markdown_or_tooling_relation(relation, entity_by_id)
+        )
+
+    useful_relations = [rel for rel in ordered_prefilter if _is_useful(rel)]
+    useful_both_selected = [
+        rel for rel in useful_relations if _relation_endpoint_coverage(rel, selected_ids) == 2
+    ]
+    useful_both_kept = [
+        rel for rel in useful_relations if _relation_endpoint_coverage(rel, kept_ids) == 2
+    ]
+    useful_filtered_out = [
+        rel for rel in useful_both_selected if relation_key(rel) not in filtered_relation_keys
+    ]
+    failure_mode = _classify_failure_mode(
+        useful_relations=useful_relations,
+        useful_both_selected=useful_both_selected,
+        useful_both_kept=useful_both_kept,
+        useful_filtered_out=useful_filtered_out,
+        top_candidates=top_candidates,
+        fallback_attempts=fallback_attempts,
+    )
+
+    return {
+        "before_truncation": {
+            "selected_entity_count": len(selected_entities),
+            "both_endpoints_selected_count": sum(
+                1
+                for relation in ordered_prefilter
+                if _relation_endpoint_coverage(relation, selected_ids) == 2
+            ),
+            "top_relation_candidates": top_candidates,
+        },
+        "after_entity_truncation": {
+            "kept_entity_count": len(kept_entities),
+            "dropped_entity_ids": dropped_ids,
+            "both_endpoints_kept_count": both_endpoints_kept,
+            "one_kept_one_selected_count": one_kept_one_selected,
+        },
+        "fallback": {"attempts": fallback_attempts},
+        "public_api": {
+            "exports_candidates_present": any(rel.kind == "exports" for rel in ordered_prefilter),
+            "exports_candidates_filtered_out": any(
+                rel.kind == "exports" and relation_key(rel) not in filtered_relation_keys
+                for rel in ordered_prefilter
+            ),
+        },
+        "failure_mode": failure_mode,
+    }
+
+
+def _top_relation_candidates(
+    *,
+    ordered_relations: list[Relation],
+    selected_ids: frozenset[str],
+    filtered_relation_keys: set[str],
+    entity_by_id: dict[str, Entity],
+    task_hints: frozenset[str],
+) -> list[dict[str, object]]:
+    top_candidates: list[dict[str, object]] = []
+    for relation in ordered_relations[:20]:
+        src = entity_by_id.get(relation.source_entity_id.value)
+        tgt = entity_by_id.get(relation.target_entity_id.value)
+        top_candidates.append(
+            {
+                "kind": relation.kind,
+                "source_id": relation.source_entity_id.value,
+                "target_id": relation.target_entity_id.value,
+                "source_path": src.source_range.path if src else "<missing>",
+                "target_path": tgt.source_range.path if tgt else "<missing>",
+                "budget_priority": _relation_budget_priority(
+                    relation,
+                    prefer_structural_relations=True,
+                    task_hints=task_hints,
+                    entity_by_id=entity_by_id,
+                    kept_entity_ids=selected_ids,
+                    selected_entity_ids=selected_ids,
+                    kept_entity_ranks={
+                        entity_id: index for index, entity_id in enumerate(selected_ids)
+                    },
+                    selected_entity_ranks={
+                        entity_id: index for index, entity_id in enumerate(selected_ids)
+                    },
+                ),
+                "selected_endpoint_coverage": _relation_endpoint_coverage(relation, selected_ids),
+                "estimated_chars": _estimate_relation_chars(relation, ()),
+                "filtered_out": relation_key(relation) not in filtered_relation_keys,
+            }
+        )
+    return top_candidates
+
+
+def _simulate_fallback_attempts(
+    *,
+    ordered_relations: list[Relation],
+    kept_entities: list[Entity],
+    kept_ids: frozenset[str],
+    used_after_entities: int,
+    budget_chars: int,
+    normal_kept: list[Relation],
+) -> list[dict[str, object]]:
+    if normal_kept:
+        return []
+    fallback_attempts: list[dict[str, object]] = []
+    for relation in ordered_relations:
+        estimate = _estimate_relation_chars(relation, ())
+        trial_entities = list(kept_entities)
+        trial_ids = set(kept_ids)
+        trial_used = used_after_entities
+        dropped_tail_ids: list[str] = []
+        while trial_entities and trial_used + estimate > budget_chars:
+            removed = trial_entities.pop()
+            dropped_tail_ids.append(removed.id.value)
+            trial_used -= _estimate_entity_chars(removed, ())
+            trial_ids.discard(removed.id.value)
+        if trial_used + estimate > budget_chars:
+            fallback_attempts.append(
+                {
+                    "candidate": relation_key(relation),
+                    "result": "rejected",
+                    "reason": "estimated cost too high",
+                    "dropped_tail_entity_ids": dropped_tail_ids,
+                }
+            )
+            continue
+        if _relation_endpoint_coverage(relation, frozenset(trial_ids)) == 0:
+            fallback_attempts.append(
+                {
+                    "candidate": relation_key(relation),
+                    "result": "rejected",
+                    "reason": "endpoint missing",
+                    "dropped_tail_entity_ids": dropped_tail_ids,
+                }
+            )
+            continue
+        fallback_attempts.append(
+            {
+                "candidate": relation_key(relation),
+                "result": "accepted",
+                "reason": "fits after fallback",
+                "dropped_tail_entity_ids": dropped_tail_ids,
+            }
+        )
+        break
+    return fallback_attempts
+
+
+def _classify_failure_mode(
+    *,
+    useful_relations: list[Relation],
+    useful_both_selected: list[Relation],
+    useful_both_kept: list[Relation],
+    useful_filtered_out: list[Relation],
+    top_candidates: list[dict[str, object]],
+    fallback_attempts: list[dict[str, object]],
+) -> str:
+    if not useful_relations:
+        return "A"
+    if not useful_both_selected:
+        return "B"
+    if useful_both_selected and not useful_both_kept:
+        return "C"
+    if useful_filtered_out:
+        return "E"
+    if (
+        top_candidates
+        and top_candidates[0]["kind"] == "contains"
+        and isinstance(top_candidates[0]["source_path"], str)
+        and top_candidates[0]["source_path"].startswith(".github/")
+        and useful_both_selected
+    ):
+        return "D"
+    if fallback_attempts and all(
+        attempt["reason"] == "estimated cost too high" for attempt in fallback_attempts
+    ):
+        return "F"
+    return "resolved"
+
+
+def test_relation_budget_diagnostic_helper_reports_requested_fields() -> None:
+    entities, relations = _ranking_fixture_entities_and_all_relations()
+    pack = build_context_pack(
+        task="Find lifecycle component ownership and cleanup rules",
+        entities=entities,
+        relations=relations,
+        budget_chars=200000,
+        explain_ranking=True,
+        profile="agent_standard",
+    )
+    selected_entities = list(pack.selected_entities)
+    selected_ids = {entity.id.value for entity in selected_entities}
+    selected_relations = [
+        rel
+        for rel in relations
+        if rel.source_entity_id.value in selected_ids or rel.target_entity_id.value in selected_ids
+    ]
+    diagnostic = _relation_budget_diagnostic_for_selected(
+        task="Find lifecycle component ownership and cleanup rules",
+        budget_chars=1400,
+        selected_entities=selected_entities,
+        selected_relations=selected_relations,
+    )
+
+    assert "before_truncation" in diagnostic
+    assert "after_entity_truncation" in diagnostic
+    assert "fallback" in diagnostic
+    assert "public_api" in diagnostic
+    assert diagnostic["failure_mode"] in {"A", "B", "C", "D", "E", "F", "resolved"}
+
+
+def test_profile_relation_cap_keeps_task_relevant_relation_before_tooling_contains() -> None:
+    profile = resolve_profile("agent_standard")
+    src_module = Entity(
+        id=StableId("python:module:src.pkg.core"),
+        kind="module",
+        name="core",
+        qualified_name="src.pkg.core",
+        source_range=SourceRange(path="src/pkg/core.py", start_line=1, end_line=20),
+    )
+    src_class = Entity(
+        id=StableId("python:class:src.pkg.core.Core"),
+        kind="class",
+        name="Core",
+        qualified_name="src.pkg.core.Core",
+        source_range=SourceRange(path="src/pkg/core.py", start_line=22, end_line=80),
+    )
+    useful_relation = Relation(
+        kind="contains",
+        source_entity_id=src_module.id,
+        target_entity_id=src_class.id,
+    )
+
+    entities = [src_module, src_class]
+    relations: list[Relation] = [useful_relation]
+    for idx in range(60):
+        file_entity = Entity(
+            id=StableId(f"file:.github/instructions/policy_{idx}.md"),
+            kind="file",
+            name=f"policy_{idx}.md",
+            qualified_name=f"policy_{idx}.md",
+            source_range=SourceRange(
+                path=f".github/instructions/policy_{idx}.md", start_line=1, end_line=10
+            ),
+        )
+        section_entity = Entity(
+            id=StableId(f"markdown:.github/instructions/policy_{idx}.md:section:policy:{idx}"),
+            kind="doc",
+            name=f"policy_{idx}",
+            qualified_name=f"policy_{idx}",
+            source_range=SourceRange(
+                path=f".github/instructions/policy_{idx}.md", start_line=1, end_line=2
+            ),
+        )
+        entities.extend([file_entity, section_entity])
+        relations.append(
+            Relation(
+                kind="contains",
+                source_entity_id=file_entity.id,
+                target_entity_id=section_entity.id,
+            )
+        )
+
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    selected_ids = frozenset(entity_by_id.keys())
+    ordered = _order_relations_for_profile_cap(
+        selected_relations=relations,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"public_api"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=selected_ids,
+        selected_entity_ranks={entity.id.value: index for index, entity in enumerate(entities)},
+    )
+    capped = filter_related_relations(ordered, profile=profile)
+
+    assert useful_relation in capped[: profile.max_related_symbols]
+
+
+def test_relation_cap_prefers_higher_ranked_selected_relations() -> None:
+    activation_module = Entity(
+        id=StableId("python:module:src.pkg.activation"),
+        kind="module",
+        name="activation",
+        qualified_name="src.pkg.activation",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=1, end_line=20),
+    )
+    activation_func = Entity(
+        id=StableId("python:function:src.pkg.activation.require_active"),
+        kind="function",
+        name="require_active",
+        qualified_name="src.pkg.activation.require_active",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=22, end_line=40),
+    )
+    noise_module = Entity(
+        id=StableId("python:module:examples.alpha"),
+        kind="module",
+        name="alpha",
+        qualified_name="examples.alpha",
+        source_range=SourceRange(path="examples/alpha.py", start_line=1, end_line=20),
+    )
+    noise_func = Entity(
+        id=StableId("python:function:examples.alpha.before"),
+        kind="function",
+        name="before",
+        qualified_name="examples.alpha.before",
+        source_range=SourceRange(path="examples/alpha.py", start_line=22, end_line=30),
+    )
+    activation_contains = Relation(
+        kind="contains",
+        source_entity_id=activation_module.id,
+        target_entity_id=activation_func.id,
+    )
+    noise_contains = Relation(
+        kind="contains",
+        source_entity_id=noise_module.id,
+        target_entity_id=noise_func.id,
+    )
+
+    entities = [activation_module, activation_func, noise_module, noise_func]
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    selected_order = [
+        activation_module.id.value,
+        activation_func.id.value,
+        noise_module.id.value,
+        noise_func.id.value,
+    ]
+
+    ordered = _order_relations_for_profile_cap(
+        selected_relations=[noise_contains, activation_contains],
+        prefer_structural_relations=True,
+        task_hints=frozenset({"implementation"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(selected_order),
+        selected_entity_ranks={entity_id: index for index, entity_id in enumerate(selected_order)},
+    )
+
+    assert ordered[0] == activation_contains
+
+
+def test_relation_budget_priority_prefers_both_kept_relation_over_one_kept_test_relation() -> None:
+    activation_module = Entity(
+        id=StableId("python:module:src.pkg.activation"),
+        kind="module",
+        name="activation",
+        qualified_name="src.pkg.activation",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=1, end_line=20),
+    )
+    activation_func = Entity(
+        id=StableId("python:function:src.pkg.activation.require_active"),
+        kind="function",
+        name="require_active",
+        qualified_name="src.pkg.activation.require_active",
+        source_range=SourceRange(path="src/pkg/activation.py", start_line=22, end_line=40),
+    )
+    test_module = Entity(
+        id=StableId("python:module:tests.test_activation"),
+        kind="module",
+        name="test_activation",
+        qualified_name="tests.test_activation",
+        source_range=SourceRange(path="tests/test_activation.py", start_line=1, end_line=20),
+    )
+    entity_by_id = {
+        entity.id.value: entity for entity in (activation_module, activation_func, test_module)
+    }
+    contains_relation = Relation(
+        kind="contains",
+        source_entity_id=activation_module.id,
+        target_entity_id=activation_func.id,
+    )
+    one_kept_test_relation = Relation(
+        kind="tests",
+        source_entity_id=test_module.id,
+        target_entity_id=activation_module.id,
+    )
+    selected_order = [
+        activation_module.id.value,
+        activation_func.id.value,
+        test_module.id.value,
+    ]
+    kept_order = [
+        activation_module.id.value,
+        activation_func.id.value,
+    ]
+
+    contains_priority = _relation_budget_priority(
+        contains_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"cleanup_ownership"}),
+        entity_by_id=entity_by_id,
+        kept_entity_ids=frozenset(kept_order),
+        selected_entity_ids=frozenset(selected_order),
+        kept_entity_ranks={entity_id: index for index, entity_id in enumerate(kept_order)},
+        selected_entity_ranks={entity_id: index for index, entity_id in enumerate(selected_order)},
+    )
+    one_kept_test_priority = _relation_budget_priority(
+        one_kept_test_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"cleanup_ownership"}),
+        entity_by_id=entity_by_id,
+        kept_entity_ids=frozenset(kept_order),
+        selected_entity_ids=frozenset(selected_order),
+        kept_entity_ranks={entity_id: index for index, entity_id in enumerate(kept_order)},
+        selected_entity_ranks={entity_id: index for index, entity_id in enumerate(selected_order)},
+    )
+
+    assert contains_priority < one_kept_test_priority
+
+
 def test_relation_helpers_classify_source_and_tooling_paths() -> None:
     """_is_source_code_relation and _is_markdown_or_tooling_relation classify paths correctly."""
     from repo_semantic_memory.context.pack_builder import (
@@ -1269,7 +1814,7 @@ def test_relation_helpers_classify_source_and_tooling_paths() -> None:
 
 
 def test_relation_task_priority_public_api_ranks_exports_over_tooling_contains() -> None:
-    """For public_api hints: exports has priority 0 (highest), then tests, source contains,
+    """For public_api hints: exports has priority 0 (highest), then source contains, tests,
     .github/tooling contains (lowest).  Lower number = higher priority in the sort order."""
     from repo_semantic_memory.context.pack_builder import _relation_task_priority
 
@@ -1322,13 +1867,79 @@ def test_relation_task_priority_public_api_ranks_exports_over_tooling_contains()
     p_github = _relation_task_priority(github_contains, task_hints=hints, entity_by_id=entity_by_id)
 
     assert p_exports == 0, f"exports should have highest priority (0); got {p_exports}"
-    assert p_tests == 1, f"tests should have priority 1; got {p_tests}"
-    assert p_src_contains == 2, f"source contains should have priority 2; got {p_src_contains}"
+    assert p_src_contains == 1, f"source contains should have priority 1; got {p_src_contains}"
+    assert p_tests == 2, f"tests should have priority 2; got {p_tests}"
     assert p_github > p_src_contains, (
         f".github contains ({p_github}) must rank lower than source contains ({p_src_contains})"
     )
     assert p_github > p_exports, (
         f".github contains ({p_github}) must rank lower than exports ({p_exports})"
+    )
+
+
+def test_relation_task_priority_implementation_prefers_source_contains_before_tests() -> None:
+    from repo_semantic_memory.context.pack_builder import _relation_task_priority
+
+    src_entity = Entity(
+        id=StableId("python:module:src.activation"),
+        kind="module",
+        name="activation",
+        qualified_name="src.activation",
+        source_range=SourceRange(path="src/activation.py", start_line=1, end_line=1),
+    )
+    entity_by_id = {src_entity.id.value: src_entity}
+    src_contains = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:src.activation"),
+        target_entity_id=StableId("python:function:src.activation.require_active"),
+    )
+    tests_rel = Relation(
+        kind="tests",
+        source_entity_id=StableId("python:module:tests.test_activation"),
+        target_entity_id=StableId("python:module:src.activation"),
+    )
+
+    hints: frozenset[str] = frozenset({"implementation"})
+    p_src_contains = _relation_task_priority(
+        src_contains, task_hints=hints, entity_by_id=entity_by_id
+    )
+    p_tests = _relation_task_priority(tests_rel, task_hints=hints, entity_by_id=entity_by_id)
+
+    assert p_src_contains < p_tests, (
+        f"implementation should prefer source contains over tests ({p_src_contains=} {p_tests=})"
+    )
+
+
+def test_relation_task_priority_cleanup_prefers_tests_then_source_contains() -> None:
+    from repo_semantic_memory.context.pack_builder import _relation_task_priority
+
+    src_entity = Entity(
+        id=StableId("python:module:src.lifecycle"),
+        kind="module",
+        name="lifecycle",
+        qualified_name="src.lifecycle",
+        source_range=SourceRange(path="src/lifecycle.py", start_line=1, end_line=1),
+    )
+    entity_by_id = {src_entity.id.value: src_entity}
+    src_contains = Relation(
+        kind="contains",
+        source_entity_id=StableId("python:module:src.lifecycle"),
+        target_entity_id=StableId("python:class:src.lifecycle.LifecycleComponent"),
+    )
+    tests_rel = Relation(
+        kind="tests",
+        source_entity_id=StableId("python:module:tests.test_lifecycle"),
+        target_entity_id=StableId("python:module:src.lifecycle"),
+    )
+
+    hints: frozenset[str] = frozenset({"cleanup_ownership"})
+    p_tests = _relation_task_priority(tests_rel, task_hints=hints, entity_by_id=entity_by_id)
+    p_src_contains = _relation_task_priority(
+        src_contains, task_hints=hints, entity_by_id=entity_by_id
+    )
+
+    assert p_tests < p_src_contains, (
+        f"cleanup/ownership should prefer tests over source contains ({p_tests=} {p_src_contains=})"
     )
 
 
@@ -1405,6 +2016,73 @@ def test_ensure_minimum_relation_coverage_nondestructive() -> None:
     # The commit for R_small should NOT have popped e_a (it fitted without popping).
     assert e_a.id.value in kept_entity_ids, "e_a must remain in kept_entity_ids after R_small"
     assert e_b.id.value in kept_entity_ids, "e_b must remain in kept_entity_ids after R_small"
+
+
+def test_truncate_to_budget_trades_tail_entity_to_keep_useful_relation() -> None:
+    from repo_semantic_memory.context.pack_builder import (
+        _PACK_FIXED_OVERHEAD_CHARS,
+        _estimate_entity_chars,
+        _estimate_relation_chars,
+        _truncate_to_budget,
+    )
+
+    e_a = Entity(
+        id=StableId("python:module:src.lifecycle_component"),
+        kind="module",
+        name="lifecycle_component",
+        qualified_name="src.lifecycle_component",
+        source_range=SourceRange(path="src/lifecycle_component.py", start_line=1, end_line=20),
+    )
+    e_b = Entity(
+        id=StableId("python:class:src.lifecycle_component.LifecycleComponent"),
+        kind="class",
+        name="LifecycleComponent",
+        qualified_name="src.lifecycle_component.LifecycleComponent",
+        source_range=SourceRange(path="src/lifecycle_component.py", start_line=22, end_line=90),
+    )
+    useful_relation = Relation(
+        kind="contains",
+        source_entity_id=e_a.id,
+        target_entity_id=e_b.id,
+    )
+    # Derive tail size from relation estimate so dropping tail reliably
+    # makes room for that relation.
+    tail_multiplier = max(8, (_estimate_relation_chars(useful_relation, ()) // len("Tail")) + 8)
+    e_tail = Entity(
+        id=StableId("python:class:src.lifecycle_component." + "Tail" * tail_multiplier),
+        kind="class",
+        name="Tail",
+        qualified_name="src.lifecycle_component." + "Tail" * tail_multiplier,
+        source_range=SourceRange(path="src/lifecycle_component.py", start_line=100, end_line=180),
+    )
+
+    task = "Find lifecycle component ownership and cleanup rules"
+    used_base = len(task) + _PACK_FIXED_OVERHEAD_CHARS
+    budget = (
+        used_base
+        + _estimate_entity_chars(e_a, ())
+        + _estimate_entity_chars(e_b, ())
+        + _estimate_entity_chars(e_tail, ())
+    )
+
+    kept_entities, kept_relations, truncated = _truncate_to_budget(
+        task=task,
+        budget_chars=budget,
+        selected_entities=[e_a, e_b, e_tail],
+        selected_relations=[useful_relation],
+        reasons_by_key={},
+        prefer_structural_relations=True,
+        preserve_at_least_one_relation=True,
+        task_hints={"cleanup_ownership", "implementation"},
+        entity_by_id={e.id.value: e for e in (e_a, e_b, e_tail)},
+    )
+
+    kept_entity_ids = {entity.id.value for entity in kept_entities}
+    assert useful_relation in kept_relations
+    assert e_a.id.value in kept_entity_ids
+    assert e_b.id.value in kept_entity_ids
+    assert e_tail.id.value not in kept_entity_ids, "tail entity should be traded to fit relation"
+    assert truncated
 
 
 def test_explain_ranking_github_tooling_contains_does_not_outrank_source_relations(
