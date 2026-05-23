@@ -5,15 +5,17 @@ Business logic lives in the existing pure handlers and the thin wrappers in
 :mod:`repo_semantic_memory.mcp.runtime`.
 
 Transport model:
-- newline-delimited JSON-RPC 2.0 messages on stdin/stdout per the MCP stdio
-  transport spec.
+- newline-delimited JSON-RPC 2.0 messages on stdin/stdout, following the MCP
+  stdio transport shape.
 - one process per agent/client session, launched and stopped by the MCP client.
 - no HTTP, no daemon, no background task framework.
 
-This implementation does not depend on the official ``mcp`` Python SDK because
-RSM has a zero-runtime-dependency policy and the phase 1 surface is a small,
-auditable subset of the MCP protocol. See ``docs/usage/mcp.md`` for the
-dependency rationale.
+This is a phase 1 prototype: it is MCP-compatible by construction but has not
+yet been validated against external MCP clients. This implementation does not
+depend on the official ``mcp`` Python SDK because RSM has a
+zero-runtime-dependency policy and the phase 1 surface is a small, auditable
+subset of the MCP protocol. See ``docs/usage/mcp.md`` for the dependency
+rationale and the documented untested scope.
 """
 
 from __future__ import annotations

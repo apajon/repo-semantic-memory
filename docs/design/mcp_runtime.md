@@ -1,8 +1,9 @@
 # MCP runtime design
 
-RSM ships a minimal phase 1 stdio MCP runtime (`rsm mcp serve`). See
-[`docs/usage/mcp.md`](../usage/mcp.md) for the user-facing guide and from-source
-client configuration.
+RSM ships a minimal phase 1 stdio prototype (`rsm mcp serve`): an MCP-compatible
+local JSON-RPC server that has not yet been validated against external MCP
+clients. See [`docs/usage/mcp.md`](../usage/mcp.md) for the user-facing guide
+and from-source client configuration.
 
 Current RSM MCP support consists of MCP-style typed contracts, pure local
 handler functions, and a thin stdio JSON-RPC server that wraps those handlers.

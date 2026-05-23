@@ -1,17 +1,26 @@
 # MCP runtime usage
 
-> **Status — phase 1, prototype.** Local stdio only. Read-only. No Docker, no
+> **Status — phase 1 prototype.** Minimal local stdio MCP-compatible JSON-RPC
+> prototype, not yet externally conformance-tested. Read-only. No Docker, no
 > daemon, no HTTP, no cloud, no auto-indexing.
 
 `rsm mcp serve` exposes the existing pure RSM handlers through a minimal
-[Model Context Protocol](https://modelcontextprotocol.io/) stdio server. It is
-launched by an MCP client (an agent or IDE) for the lifetime of that client's
-session and exits when the client closes its stdin.
+local stdio JSON-RPC loop that follows the
+[Model Context Protocol](https://modelcontextprotocol.io/) stdio transport
+shape. It is launched by an MCP client (an agent or IDE) for the lifetime of
+that client's session and exits when the client closes its stdin. Conformance
+against external MCP clients has not yet been validated, so this is best
+described as an MCP-compatible prototype rather than a fully compliant MCP
+server.
 
 The runtime does not index your repository, does not modify your repository,
-does not modify the SQLite index, does not run shell commands, does not run
-tests, and does not apply patches. It is a thin transport over the read-only
-handlers documented in [`docs/design/mcp_server.md`](../design/mcp_server.md).
+does not modify the SQLite index, does not execute arbitrary shell commands,
+does not run tests, and does not apply patches. It is a thin transport over the
+read-only handlers documented in
+[`docs/design/mcp_server.md`](../design/mcp_server.md). The
+`rsm_get_git_summary` tool may invoke a fixed, read-only `git` subprocess
+internally via the existing extractor; that is bounded local Git inspection
+with hardcoded arguments, not arbitrary command execution.
 
 ## Prerequisites
 
@@ -110,7 +119,7 @@ considered but not adopted because:
 - The phase 1 surface (`initialize`, `tools/list`, `tools/call`, `ping`,
   `shutdown`) is small enough to implement and audit by hand.
 - Keeping the implementation in one focused module makes the safety boundary
-  (read-only, no shell, no network) easy to review.
+  (read-only, no arbitrary shell command execution, no network) easy to review.
 
 This decision is revisited if/when the runtime grows beyond the phase 1
 read-only surface.

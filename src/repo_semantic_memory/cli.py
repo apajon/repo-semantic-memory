@@ -383,8 +383,9 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_serve_parser = mcp_subparsers.add_parser(
         "serve",
         help=(
-            "Run the read-only stdio MCP server for an explicit repo and existing "
-            "SQLite index. Does not auto-index or mutate state."
+            "Run the read-only local stdio MCP-compatible JSON-RPC prototype for "
+            "an explicit repo and existing SQLite index. Does not auto-index or "
+            "mutate state; external MCP client conformance not yet validated."
         ),
     )
     mcp_serve_parser.add_argument(
