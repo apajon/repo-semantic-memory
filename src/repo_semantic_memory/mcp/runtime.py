@@ -194,6 +194,23 @@ def _tool_status(args: Mapping[str, Any], session: SessionConfig) -> dict[str, A
     return payload
 
 
+def _serialize_response(response: Any) -> dict[str, Any]:
+    """Convert a typed handler response (dataclass) to a JSON-safe dict.
+
+    Handler responses are frozen dataclasses, so ``to_jsonable`` always yields
+    a dict here. We still defensively raise ``TypeError`` rather than using
+    ``assert``, because ``assert`` is stripped under ``python -O``.
+    """
+
+    payload = to_jsonable(response)
+    if not isinstance(payload, dict):
+        raise TypeError(
+            f"expected dataclass response, got {type(response).__name__} -> "
+            f"{type(payload).__name__}"
+        )
+    return payload
+
+
 def _tool_search_symbols(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
     request = SearchSymbolsRequest(
         query=_require_str(args, "query"),
@@ -204,9 +221,7 @@ def _tool_search_symbols(args: Mapping[str, Any], session: SessionConfig) -> dic
         include_relations=_optional_bool(args, "include_relations", False),
     )
     response = _handlers.handle_search_symbols(request, repo_root=session.repo_root)
-    payload = to_jsonable(response)
-    assert isinstance(payload, dict)
-    return payload
+    return _serialize_response(response)
 
 
 def _tool_explain_entity(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
@@ -219,9 +234,7 @@ def _tool_explain_entity(args: Mapping[str, Any], session: SessionConfig) -> dic
         include_claims=_optional_bool(args, "include_claims", True),
     )
     response = _handlers.handle_explain_entity(request, repo_root=session.repo_root)
-    payload = to_jsonable(response)
-    assert isinstance(payload, dict)
-    return payload
+    return _serialize_response(response)
 
 
 def _tool_build_context_pack(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
@@ -238,9 +251,7 @@ def _tool_build_context_pack(args: Mapping[str, Any], session: SessionConfig) ->
         include_semantic_components=_optional_bool(args, "include_semantic_components", True),
     )
     response = _handlers.handle_build_context_pack(request, repo_root=session.repo_root)
-    payload = to_jsonable(response)
-    assert isinstance(payload, dict)
-    return payload
+    return _serialize_response(response)
 
 
 def _tool_query_graph(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
@@ -261,9 +272,7 @@ def _tool_query_graph(args: Mapping[str, Any], session: SessionConfig) -> dict[s
         limit=_optional_int(args, "limit", 25),
     )
     response = _handlers.handle_query_graph(request, repo_root=session.repo_root)
-    payload = to_jsonable(response)
-    assert isinstance(payload, dict)
-    return payload
+    return _serialize_response(response)
 
 
 def _tool_validate_patch_context(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
@@ -283,9 +292,7 @@ def _tool_validate_patch_context(args: Mapping[str, Any], session: SessionConfig
         budget_chars=budget_value,
     )
     response = _handlers.handle_validate_patch_context(request, repo_root=session.repo_root)
-    payload = to_jsonable(response)
-    assert isinstance(payload, dict)
-    return payload
+    return _serialize_response(response)
 
 
 def _tool_get_git_summary(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
@@ -294,9 +301,7 @@ def _tool_get_git_summary(args: Mapping[str, Any], session: SessionConfig) -> di
         raise ToolInvocationError("argument 'path' must be a non-empty string")
     request = GetGitSummaryRequest(path=path_value)
     response = _handlers.handle_get_git_summary(request, repo_root=session.repo_root)
-    payload = to_jsonable(response)
-    assert isinstance(payload, dict)
-    return payload
+    return _serialize_response(response)
 
 
 def _input_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
