@@ -1,12 +1,13 @@
 # MCP runtime design
 
-RSM does not yet ship an MCP runtime server.
+RSM ships a minimal phase 1 stdio MCP runtime (`rsm mcp serve`). See
+[`docs/usage/mcp.md`](../usage/mcp.md) for the user-facing guide and from-source
+client configuration.
 
-Current RSM MCP support is limited to MCP-style typed contracts and pure local
-handler functions. Those handlers are deterministic building blocks over the
-existing index, graph, context-pack, and Git-summary logic. The future MCP
-runtime should wrap those handlers; it should not reimplement indexing,
-retrieval, graph, or context-pack behavior.
+Current RSM MCP support consists of MCP-style typed contracts, pure local
+handler functions, and a thin stdio JSON-RPC server that wraps those handlers.
+The runtime is deterministic, read-only, and reuses the existing index, graph,
+context-pack, and Git-summary logic; it does not reimplement them.
 
 ## Target runtime model
 
@@ -147,6 +148,20 @@ The initial runtime is not:
 `.ai/` export is a portable snapshot. The future MCP runtime is a live local
 query surface over an explicitly selected existing index. Both preserve the rule
 that source code, docs, tests, and Git history remain authoritative.
+
+## Implementation status
+
+Phase 1 is implemented:
+
+- `rsm mcp serve --repo ... --db ...` launches a read-only stdio JSON-RPC
+  server that wraps the existing pure handlers.
+- The transport is pure-stdlib newline-delimited JSON-RPC 2.0; the official
+  `mcp` Python SDK is intentionally not used so that RSM keeps its
+  zero-runtime-dependency policy and a small auditable safety boundary.
+- The exposed tool registry exactly matches the phase 1 list above and is
+  asserted in tests against the deferred-tools list.
+- `--repo`/`--db` validation rejects missing repos, missing DBs, and DB paths
+  outside the repository root, with clean stderr errors.
 
 ## Implementation plan
 

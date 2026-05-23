@@ -46,7 +46,7 @@ For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quicks
 - benchmark/eval commands
 - `.ai/` export
 - JSONL import/export
-- MCP-style handlers/contracts exist, but no MCP runtime server is shipped yet.
+- MCP-style handlers/contracts exist; a minimal read-only stdio MCP server (`rsm mcp serve`, see [`docs/usage/mcp.md`](docs/usage/mcp.md)) is available for local dogfooding.
 
 ## Documentation map
 
@@ -69,7 +69,7 @@ Agent/contributor operations live in [`AGENTS.md`](AGENTS.md). Static `.ai/` tem
 - `confirmed PublicAPI` means explicitly exported in source, not a stable API guarantee.
 - Token estimates use approximate deterministic accounting (`chars / 4`) and are directional.
 - Internal benchmark results are small, repository-specific, and not broad superiority claims.
-- MCP-style handlers/contracts exist, but no MCP runtime server is shipped yet.
+- MCP-style handlers/contracts exist; a minimal read-only stdio MCP server (`rsm mcp serve`, see [`docs/usage/mcp.md`](docs/usage/mcp.md)) is available for local dogfooding.
 
 ## License
 
