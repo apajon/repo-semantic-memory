@@ -1,12 +1,12 @@
 # MCP handlers and contracts
 
-RSM has MCP-style typed contracts and pure local handler functions, but it does
-not yet ship an MCP runtime server.
+RSM has MCP-style typed contracts and pure local handler functions, and now also
+ships a minimal local stdio MCP-compatible JSON-RPC prototype.
 
 The existing handlers are deterministic local building blocks over RSM's index,
 graph, context-pack, and Git-summary logic. They are not a transport, daemon,
-network listener, or long-running process. A future MCP runtime should wrap these
-handlers instead of reimplementing indexing or query logic.
+network listener, or long-running process by themselves. The phase-1 runtime
+wraps these handlers instead of reimplementing indexing or query logic.
 
 ## Current status
 
@@ -14,7 +14,8 @@ handlers instead of reimplementing indexing or query logic.
 - Pure handlers call existing local deterministic logic.
 - Handler output should preserve evidence/citations where available and mark
   uncertainty when evidence is incomplete.
-- No runtime MCP server is shipped yet.
+- A minimal local stdio MCP-compatible JSON-RPC prototype is available for
+  read-only local dogfooding and is not yet externally conformance-tested.
 - No transport, daemon, network listener, HTTP server, Docker image, cloud
   service, LLM, embedding, vector database, or remote API dependency is
   introduced.

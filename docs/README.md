@@ -1,15 +1,18 @@
 # RSM documentation
 
-This directory contains the human-facing documentation for `repo-semantic-memory` (`rsm`).
-The root `README.md` is the short public entrypoint; `AGENTS.md` is the contributor/agent
-operations guide; `.ai/` contains static or generated agent-facing artifacts and is not
-the primary documentation source.
+This documentation explains how to use RSM as a local context compiler for coding-agent workflows.
+
+Start with the quickstart if you want to run commands. Read the concepts if you want to understand what repo maps, context packs, citations, relations, and uncertainty mean. Use the design docs if you want to inspect how the system is built or contribute to it.
 
 ## Start here
 
-- [Quickstart](quickstart.md) — install, index, build a repo map, build a context pack.
-- [CLI usage](usage/cli.md) — command reference and validation commands.
-- [Agent workflows](usage/agent_workflows.md) — how coding agents should use RSM without overloading context.
+- **I want to try RSM:** read [Quickstart](quickstart.md).
+- **I want to understand the main idea:** read [Context packs](concepts/context_packs.md) and [Repo maps](concepts/repo_maps.md).
+- **I want to use the CLI:** read [CLI usage](usage/cli.md).
+- **I want to use the MCP prototype:** read [MCP usage](usage/mcp.md).
+- **I want to understand evaluation:** read [Benchmarks](eval/benchmarks.md).
+- **I want to understand release/versioning:** read [Versioning](release/versioning.md).
+- **I want a real-repo example:** read [lifecore_ros2 case study](case_studies/lifecore_ros2.md).
 
 ## Concepts
 

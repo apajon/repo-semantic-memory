@@ -51,4 +51,4 @@ uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
 - `confirmed PublicAPI` means exported in source, not stable API.
 - Token estimates are approximate and directional.
 - Internal benchmark results are not broad superiority claims.
-- MCP handlers/contracts may exist, but no runtime MCP server is shipped yet.
+- A minimal local stdio MCP-compatible JSON-RPC prototype exists; it is read-only and not yet externally conformance-tested.

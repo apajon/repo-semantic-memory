@@ -10,8 +10,9 @@ Transport model:
 - one process per agent/client session, launched and stopped by the MCP client.
 - no HTTP, no daemon, no background task framework.
 
-This is a phase 1 prototype: it is MCP-compatible by construction but has not
-yet been validated against external MCP clients. This implementation does not
+This is a phase 1 prototype: it is a minimal local stdio MCP-compatible
+JSON-RPC server and has not yet been validated against external MCP clients.
+This implementation does not
 depend on the official ``mcp`` Python SDK because RSM has a
 zero-runtime-dependency policy and the phase 1 surface is a small, auditable
 subset of the MCP protocol. See ``docs/usage/mcp.md`` for the dependency
