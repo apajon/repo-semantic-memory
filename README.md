@@ -1,15 +1,14 @@
 # repo-semantic-memory
 
-`repo-semantic-memory` (`rsm`) is an **experimental pre-1.0** deterministic repository
-context compiler for coding agents.
+Coding agents work better when they know where to look.
 
-It indexes source code, docs, tests, and optional local Git metadata, then emits compact,
-source-cited artifacts such as repo maps, task context packs, JSONL graph exports, and
-`.ai/` snapshots. RSM is local-first and intentionally avoids LLM calls, embeddings,
-vector databases, web UIs, and runtime servers in the MVP.
+`repo-semantic-memory` (`rsm`) builds compact, source-cited repository context for coding agents. It can generate broad repo maps for orientation, task-shaped context packs for focused work, and `.ai/` snapshots for agent workflows.
 
-RSM is not a documentation generator, Obsidian vault, generic vector database, or broad
-“AI knowledge graph platform.” The repository remains the source of truth.
+The goal is not to replace reading source. The goal is to give an agent a better starting point: relevant files, symbols, exports, tests, structural relations, citations, and uncertainty, all derived from local repository evidence.
+
+RSM is an experimental pre-1.0, Python-first repository context compiler. It runs locally and avoids LLM calls, embeddings, vector databases, hosted services, and web UIs.
+
+RSM also includes a minimal local stdio MCP-compatible JSON-RPC prototype for read-only dogfooding. It is not yet externally conformance-tested.
 
 ## Quick start
 
@@ -34,6 +33,8 @@ For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quicks
 
 ## What it currently covers
 
+RSM is organized around one practical workflow: index the repository once, then ask for compact context tailored to a task.
+
 - deterministic repository indexing
 - Python AST extraction
 - Markdown outline extraction
@@ -46,7 +47,7 @@ For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quicks
 - benchmark/eval commands
 - `.ai/` export
 - JSONL import/export
-- MCP-style handlers/contracts exist; a minimal local stdio MCP-compatible JSON-RPC server prototype (`rsm mcp serve`, see [`docs/usage/mcp.md`](docs/usage/mcp.md)) is available for local dogfooding. External MCP client conformance has not yet been tested.
+- minimal local stdio MCP-compatible JSON-RPC prototype for read-only local dogfooding, not yet externally conformance-tested
 
 ## Documentation map
 
@@ -64,12 +65,12 @@ Agent/contributor operations live in [`AGENTS.md`](AGENTS.md). Static `.ai/` tem
 ## Limitations
 
 - Experimental pre-1.0 project; APIs, schemas, and context-pack formats may evolve.
-- All semantic claims should be verified against cited source evidence.
+- Context packs are starting points, not proof. Important claims should be verified against cited source.
 - Some relations and components are inferred heuristically.
 - `confirmed PublicAPI` means explicitly exported in source, not a stable API guarantee.
 - Token estimates use approximate deterministic accounting (`chars / 4`) and are directional.
 - Internal benchmark results are small, repository-specific, and not broad superiority claims.
-- MCP-style handlers/contracts exist; a minimal local stdio MCP-compatible JSON-RPC server prototype (`rsm mcp serve`, see [`docs/usage/mcp.md`](docs/usage/mcp.md)) is available for local dogfooding. External MCP client conformance has not yet been tested.
+- The MCP prototype is read-only and not yet externally conformance-tested.
 
 ## License
 

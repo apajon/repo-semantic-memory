@@ -26,7 +26,7 @@ RSM is local-first, deterministic, and evidence-oriented. It currently targets P
 - exporting and importing JSONL graph artifacts;
 - evaluating retrieval/context quality against internal benchmark tasks;
 - estimating approximate token savings with deterministic `chars / 4` accounting;
-- exposing MCP-style local handlers/contracts, without shipping a runtime MCP server yet.
+- exposing a minimal local stdio MCP-compatible JSON-RPC prototype for read-only local dogfooding, not yet externally conformance-tested.
 
 ## 3. What it does not do
 
@@ -42,7 +42,7 @@ It is not:
 - a web UI;
 - a replacement for reading source;
 - a stable 1.0 API;
-- a runtime MCP server yet;
+- an externally conformance-tested MCP server;
 - a runtime introspection system for ROS, Python, or application state.
 
 It compiles structured repository context. It does not “understand” a codebase in the human sense, and it does not prove correctness.
@@ -79,7 +79,7 @@ The design constraints are intentional:
 - no vector database;
 - no hosted service.
 
-It currently includes MCP-style local handlers/contracts, but no runtime MCP server yet. That is likely the next important integration step: a local stdio MCP server launched by the agent/client session.
+It includes a minimal local stdio MCP-compatible JSON-RPC prototype, but that prototype is read-only and not yet externally conformance-tested.
 
 Repository: https://github.com/apajon/repo-semantic-memory
 
@@ -95,7 +95,7 @@ Current scope:
 - Python symbols, docs sections, exports, and test relationships;
 - context packs with citations and uncertainty;
 - internal retrieval/context evaluation;
-- MCP-style handlers/contracts, but no runtime MCP server yet.
+- a minimal local stdio MCP-compatible JSON-RPC prototype (read-only, not yet externally conformance-tested).
 
 Repository: https://github.com/apajon/repo-semantic-memory
 
@@ -105,7 +105,7 @@ Sharing `repo-semantic-memory` (`rsm`): an experimental local-first context comp
 
 It generates source-cited repo maps, task-specific context packs, `.ai` artifacts, and internal benchmark reports. The useful part is not just file matching: context packs can preserve symbols, exports, test relationships, and structural relations such as `contains`, `exports`, and `tests`.
 
-It is not a vector DB, not an LLM agent, and not a runtime MCP server yet. It currently has MCP-style handlers/contracts, with a local stdio MCP runtime planned as a likely next step.
+It is not a vector DB and not an LLM agent. It includes a minimal local stdio MCP-compatible JSON-RPC prototype, but it is read-only and not yet externally conformance-tested.
 
 Repo: https://github.com/apajon/repo-semantic-memory
 
@@ -139,7 +139,7 @@ Caveat: this is still pre-1.0. APIs, schemas, and context-pack formats may evolv
 > - `confirmed PublicAPI` means a symbol is explicitly exported by source, not that it is a stable public API promise.
 > - Inferred relations and components must be verified against cited source.
 > - The `lifecore_ros2` case study is dogfooding evidence, not general proof.
-> - MCP-style handlers/contracts exist, but no runtime MCP server is shipped yet.
+> - A minimal local stdio MCP-compatible JSON-RPC prototype exists, but it is read-only and not yet externally conformance-tested.
 
 ## 12. Announcement strategy
 
@@ -155,15 +155,17 @@ Reasonable now:
 
 Do not frame it as:
 
-- production-ready;
+- stable 1.0;
 - an MCP server;
 - a replacement for RAG/vector DB;
 - a solved agent-memory system;
 - a ROS introspection tool.
 
-### Wait for MCP before broader diffusion
+### Reuse after MCP workflow validation
 
-A broader announcement will land better once RSM has:
+This announcement draft should be reused only after local MCP validation confirms the prototype works with the intended from-source workflow.
+
+Checklist before wider diffusion:
 
 - a local stdio MCP server;
 - client-session-scoped startup;
@@ -178,7 +180,7 @@ That will turn the message from:
 
 into:
 
-> “Here is a local MCP server that gives coding agents source-cited repository context on demand.”
+> “Here is a minimal local stdio MCP-compatible JSON-RPC prototype that gives coding agents source-cited repository context on demand.”
 
 That second message is much easier for people to understand and try.
 
@@ -186,19 +188,9 @@ That second message is much easier for people to understand and try.
 
 Use this:
 
-> `repo-semantic-memory` is an experimental, local-first repository context compiler for coding agents. It generates source-cited repo maps, task-specific context packs, `.ai/` artifacts, and benchmark reports from local repository evidence. It is not an LLM agent, not a vector DB, and not a runtime MCP server yet.
-
-Avoid this:
-
-> RSM solves coding-agent memory.
-
-Avoid this:
-
-> RSM is better than RAG.
-
-Avoid this:
-
-> RSM understands your codebase.
+> `repo-semantic-memory` is an experimental, local-first repository context compiler for coding agents. It generates source-cited repo maps, task-specific context packs, `.ai/` artifacts, and benchmark reports from local repository evidence. It is not an LLM agent and not a vector DB.
+>
+> It includes a minimal local stdio MCP-compatible JSON-RPC prototype, but it is read-only and not yet externally conformance-tested.
 
 Avoid this:
 
@@ -206,7 +198,7 @@ Avoid this:
 
 ## 14. Recommended next announcement milestone
 
-The next stronger announcement should wait for:
+The next stronger announcement should follow successful local MCP validation of:
 
 ```bash
 rsm mcp serve --repo /path/to/repo --db /path/to/repo/.rsm/index.sqlite

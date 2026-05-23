@@ -49,8 +49,10 @@ A repo-map is useful for broad orientation: it helps an agent see the main files
 modules, and rough project shape. A context-pack is useful for task-specific
 work: it changes what is selected and ranked based on the prompt.
 
-In this run, RSM selected exports, implementation code, and tests differently
-for different questions. It also preserved compact structural relations such as
+The useful behavior in this run was not just finding files with matching words.
+RSM selected different context for different tasks: exports for a public API
+question, implementation symbols for an implementation question, and tests for
+a regression question. It also preserved compact structural relations such as
 `exports`, `contains`, and `tests`, so an agent receives navigational structure
 rather than only file names or prose matches.
 
@@ -111,7 +113,7 @@ agent-snapshot markers.
 - Generated-artifact filtering keeps indexed context focused on source, tests, docs, and tracked project files instead of build or coverage byproducts.
 - Source-first ranking helps implementation prompts surface code before lower-value prose matches.
 - Explain-ranking relation budgeting keeps compact relation signals visible: `exports` for public API, `contains` for implementation, and `tests` for regression or cleanup questions.
-- The useful claim is not that RSM solves coding-agent context; it is that RSM can provide a small, source-backed, task-shaped context pack with explicit relation evidence.
+- The useful claim is narrower: RSM can provide a small, source-backed, task-shaped context pack with explicit relation evidence.
 
 ## Known limitations
 
@@ -137,7 +139,7 @@ Avoid overclaims:
 - Do not claim RSM understands ROS2 lifecycle semantics at runtime.
 - Do not claim `confirmed PublicAPI` means stable public API.
 - Do not claim this case study proves RSM is better than grep, README scanning, or other retrieval systems.
-- Do not claim RSM solves coding-agent context.
+- Do not claim this case study proves universal coding-agent context coverage.
 - Do not quote token savings or benchmark wins from this report; this run was not a benchmark comparison.
 
 RSM’s useful behavior in this run was not just finding matching files; it produced task-shaped, source-cited context with structural relations such as `exports`, `contains`, and `tests`.

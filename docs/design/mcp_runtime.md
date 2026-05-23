@@ -146,7 +146,7 @@ The initial runtime is not:
 
 ## Static `.ai/` vs MCP runtime
 
-`.ai/` export is a portable snapshot. The future MCP runtime is a live local
+`.ai/` export is a portable snapshot. The MCP runtime is a live local
 query surface over an explicitly selected existing index. Both preserve the rule
 that source code, docs, tests, and Git history remain authoritative.
 

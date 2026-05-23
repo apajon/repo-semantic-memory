@@ -2,6 +2,8 @@
 
 RSM is local-first. It reads the current repository and writes local artifacts; source code, docs, tests, and Git history remain authoritative.
 
+This quickstart walks through the normal local workflow: install dependencies, build an index, inspect the repository, ask for task-specific context, optionally export `.ai/` artifacts, and run evaluation commands.
+
 ## Install dependencies
 
 ```bash
@@ -13,6 +15,8 @@ overview, see the root [README](../README.md); this page keeps the first-run com
 
 ## Build an index
 
+Indexing builds the local SQLite database that the other commands read.
+
 ```bash
 uv run rsm index . --db .rsm/index.sqlite
 ```
@@ -21,6 +25,8 @@ uv run rsm index . --db .rsm/index.sqlite
 
 ## Generate a repo map
 
+A repo map gives broad orientation when you do not yet know where to look.
+
 ```bash
 uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
 ```
@@ -28,6 +34,8 @@ uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standar
 Use this for broad orientation before deeper inspection.
 
 ## Generate a task context pack
+
+A context pack is task-specific: it selects files, symbols, relations, citations, and uncertainty for one prompt.
 
 ```bash
 uv run rsm pack \
@@ -41,6 +49,8 @@ Use context packs to identify cited files and symbols for a specific task. Verif
 
 ## Optional exports
 
+The `.ai/` export writes agent-facing snapshots derived from the local index.
+
 ```bash
 uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
 uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
@@ -52,6 +62,8 @@ volatile generated snapshots should stay uncommitted in this repository. See
 [`.ai/` directory](usage/ai_directory.md).
 
 ## Optional evaluation
+
+Evaluation commands help compare retrieval/context behavior under fixed budgets.
 
 ```bash
 uv run rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --json

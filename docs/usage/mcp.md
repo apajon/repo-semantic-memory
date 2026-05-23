@@ -1,17 +1,13 @@
 # MCP runtime usage
 
-> **Status — phase 1 prototype.** Minimal local stdio MCP-compatible JSON-RPC
-> prototype, not yet externally conformance-tested. Read-only. No Docker, no
-> daemon, no HTTP, no cloud, no auto-indexing.
+The MCP prototype lets an MCP-capable client start RSM as a local stdio process and ask it for repository context during an agent/client session.
 
-`rsm mcp serve` exposes the existing pure RSM handlers through a minimal
-local stdio JSON-RPC loop that follows the
-[Model Context Protocol](https://modelcontextprotocol.io/) stdio transport
-shape. It is launched by an MCP client (an agent or IDE) for the lifetime of
-that client's session and exits when the client closes its stdin. Conformance
-against external MCP clients has not yet been validated, so this is best
-described as an MCP-compatible prototype rather than a fully compliant MCP
-server.
+It is intentionally small in phase 1: read-only tools, explicit repo/db paths, no Docker, no daemon, no cloud, no HTTP server, and no auto-indexing.
+
+This is a minimal local stdio MCP-compatible JSON-RPC prototype. It is not yet externally conformance-tested against a real MCP client.
+
+`rsm mcp serve` exposes the existing pure RSM handlers through a local stdio JSON-RPC loop that follows the
+[Model Context Protocol](https://modelcontextprotocol.io/) stdio transport shape. It is launched by an MCP client (an agent or IDE) for the lifetime of that client's session and exits when the client closes its stdin.
 
 The runtime does not index your repository, does not modify your repository,
 does not modify the SQLite index, does not execute arbitrary shell commands,
