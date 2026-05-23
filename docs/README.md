@@ -25,6 +25,7 @@ the primary documentation source.
 - [Agent workflows](usage/agent_workflows.md) — task-oriented agent usage patterns.
 - [.ai directory](usage/ai_directory.md) — generated/static artifact policy and staleness rules.
 - [JSONL interchange](usage/jsonl_interchange.md) — export/import role and caveats.
+- [MCP runtime usage](usage/mcp.md) — `rsm mcp serve` read-only stdio MCP server.
 
 ## Evaluation
 
@@ -35,7 +36,7 @@ the primary documentation source.
 
 - [Data model](design/data_model.md) — schema/version contracts, entity and relation semantics.
 - [MCP handlers and contracts](design/mcp_server.md) — current pure local handler surface and contract status.
-- [MCP runtime](design/mcp_runtime.md) — deferred runtime/server design and security boundaries.
+- [MCP runtime](design/mcp_runtime.md) — phase 1 stdio prototype design and security boundaries (MCP-compatible JSON-RPC, not yet externally conformance-tested; see [usage/mcp.md](usage/mcp.md)).
 - [CLI output summarizer](design/cli_output_summarizer.md) — future design only.
 - [Architecture overview](design/architecture.md) — layered semantic compiler model.
 - [Roadmap](design/roadmap.md) and [MVP review](design/mvp_review.md) — historical planning/review notes.
@@ -53,5 +54,7 @@ the primary documentation source.
 RSM is experimental and pre-1.0. It is local-first, deterministic, source-cited, and does
 not use LLM calls, embeddings, or vector databases in the MVP. Benchmark results are
 internal and directional; token estimates are approximate; `confirmed PublicAPI` means
-exported in source, not a compatibility promise. MCP-style handlers/contracts exist,
-but no MCP runtime server is shipped yet.
+exported in source, not a compatibility promise. MCP-style handlers/contracts exist;
+a minimal local stdio MCP-compatible JSON-RPC prototype (`rsm mcp serve`) is
+available for local dogfooding (see [usage/mcp.md](usage/mcp.md)). External MCP
+client conformance has not yet been tested.

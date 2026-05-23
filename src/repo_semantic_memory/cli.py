@@ -374,6 +374,33 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="SQLite database file path to create or update.",
     )
+
+    mcp_parser = subparsers.add_parser(
+        "mcp",
+        help="Local MCP runtime commands (read-only, stdio).",
+    )
+    mcp_subparsers = mcp_parser.add_subparsers(dest="mcp_target")
+    mcp_serve_parser = mcp_subparsers.add_parser(
+        "serve",
+        help=(
+            "Run the read-only local stdio MCP-compatible JSON-RPC prototype for "
+            "an explicit repo and existing SQLite index. Does not auto-index or "
+            "mutate state; external MCP client conformance not yet validated."
+        ),
+    )
+    mcp_serve_parser.add_argument(
+        "--repo",
+        required=True,
+        help="Absolute path to the target repository root.",
+    )
+    mcp_serve_parser.add_argument(
+        "--db",
+        required=True,
+        help=(
+            "Path to an existing .rsm/index.sqlite database located inside --repo. "
+            "Build it first with: rsm index <repo> --db <repo>/.rsm/index.sqlite"
+        ),
+    )
     return parser
 
 
@@ -485,6 +512,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_export_jsonl_command(db=args.db, out=args.out)
     if args.command == "import-jsonl":
         return _run_import_jsonl_command(input_dir=args.input_dir, db=args.db)
+    if args.command == "mcp":
+        if args.mcp_target == "serve":
+            from repo_semantic_memory.mcp.server import run_serve
+
+            return run_serve(repo=args.repo, db=args.db)
+        parser.print_help()
+        return 2
 
     parser.print_help()
     return 0
