@@ -55,6 +55,14 @@ _MAX_GRAPH_ENTITIES = 100
 _MAX_CONTEXT_BUDGET = 20_000
 _MAX_DIRECT_RELATIONS = 10
 
+# Short, stable instructions included in every agent-facing MCP result.
+# Agents should print these fields verbatim before summarising tool output.
+_AGENT_INSTRUCTIONS: tuple[str, ...] = (
+    "Use only paths listed in this response.",
+    "Do not infer missing paths, symbols, or class names.",
+    "Verify edits against cited source ranges.",
+)
+
 
 def handle_search_symbols(
     request: SearchSymbolsRequest,
@@ -162,6 +170,10 @@ def handle_search_symbols(
             "name": entity.name,
             "qualified_name": entity.qualified_name,
             "kind": entity.kind,
+            "path": entity.source_range.path,
+            "start_line": entity.source_range.start_line,
+            "end_line": entity.source_range.end_line,
+            "score": score.score,
             "source_range": {
                 "path": entity.source_range.path,
                 "start_line": entity.source_range.start_line,
@@ -191,6 +203,7 @@ def handle_search_symbols(
         results=tuple(results),
         citations=tuple(citations),
         uncertainties=tuple(uncertainties),
+        agent_instructions=_AGENT_INSTRUCTIONS,
         budget=BudgetEnvelope(
             requested_chars=max(1, used_chars),
             used_chars=used_chars,
@@ -360,6 +373,28 @@ def handle_build_context_pack(
     )
 
     used_chars = len(rendered)
+    # Derive selected_files from suggested_files_to_inspect when available,
+    # falling back to the source paths of selected entities.
+    if pack.suggested_files_to_inspect:
+        selected_files: tuple[str, ...] = tuple(sorted(set(pack.suggested_files_to_inspect)))
+    else:
+        selected_files = tuple(
+            sorted({entity.source_range.path for entity in pack.selected_entities})
+        )
+
+    # Serialize selected entities and relations as agent-readable dicts.
+    # These mirror the corresponding lists already present in ``payload``, but
+    # are promoted to explicit top-level fields so agents don't have to dig into
+    # the nested payload structure.
+    raw_entities = payload.get("selected_entities")
+    selected_entities: tuple[dict[str, object], ...] = (
+        tuple(raw_entities) if isinstance(raw_entities, list) else ()
+    )
+    raw_relations = payload.get("selected_relations")
+    selected_relations: tuple[dict[str, object], ...] = (
+        tuple(raw_relations) if isinstance(raw_relations, list) else ()
+    )
+
     return BuildContextPackResponse(
         rendered=rendered,
         payload=payload,
@@ -372,6 +407,10 @@ def handle_build_context_pack(
             used_chars=min(used_chars, request.budget_chars),
             truncated=pack.truncated or request.budget_chars > _MAX_CONTEXT_BUDGET,
         ),
+        selected_files=selected_files,
+        selected_entities=selected_entities,
+        selected_relations=selected_relations,
+        agent_instructions=_AGENT_INSTRUCTIONS,
     )
 
 

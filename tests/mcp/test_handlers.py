@@ -202,6 +202,221 @@ def test_validate_patch_context_reports_coverage_not_correctness(
     assert response.suggested_context_query is not None
 
 
+# ---------------------------------------------------------------------------
+# Ergonomics: rsm_search_symbols top-level fields
+# ---------------------------------------------------------------------------
+
+
+def test_search_symbols_results_have_top_level_path(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    for result in response.results:
+        assert "path" in result, f"result missing top-level 'path': {result}"
+        assert isinstance(result["path"], str)
+        assert result["path"]  # non-empty
+
+
+def test_search_symbols_results_have_top_level_start_line_end_line(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    for result in response.results:
+        assert "start_line" in result, f"result missing top-level 'start_line': {result}"
+        assert "end_line" in result, f"result missing top-level 'end_line': {result}"
+        assert isinstance(result["start_line"], int)
+        assert isinstance(result["end_line"], int)
+
+
+def test_search_symbols_results_path_equals_source_range_path(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    for result in response.results:
+        source_range = result.get("source_range")
+        assert isinstance(source_range, dict)
+        assert result["path"] == source_range["path"]
+        assert result["start_line"] == source_range["start_line"]
+        assert result["end_line"] == source_range["end_line"]
+
+
+def test_search_symbols_results_path_is_repo_relative(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    for result in response.results:
+        path = result["path"]
+        assert isinstance(path, str)
+        # Must not be absolute and must not be a bare basename (must contain a slash)
+        assert not path.startswith("/"), f"path is absolute: {path}"
+        assert "/" in path, f"path looks like a bare basename, not repo-relative: {path}"
+
+
+def test_search_symbols_results_have_numeric_score(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    for result in response.results:
+        assert "score" in result, f"result missing top-level 'score': {result}"
+        assert isinstance(result["score"], float)
+        assert result["score"] > 0
+
+
+def test_search_symbols_has_agent_instructions(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    assert response.agent_instructions
+    assert len(response.agent_instructions) >= 1
+    for instruction in response.agent_instructions:
+        assert isinstance(instruction, str)
+        assert instruction.strip()
+
+
+def test_search_symbols_existing_fields_still_present(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_search_symbols(
+        SearchSymbolsRequest(query="run", db_path=str(db_path), limit=10),
+        repo_root=repo_root,
+    )
+    # Original fields preserved
+    assert hasattr(response, "matches")
+    assert hasattr(response, "results")
+    assert hasattr(response, "citations")
+    assert hasattr(response, "budget")
+    for result in response.results:
+        assert "entity_id" in result
+        assert "source_range" in result
+        assert "ranking_reasons" in result
+        assert "path_role" in result
+
+
+# ---------------------------------------------------------------------------
+# Ergonomics: rsm_build_context_pack top-level fields
+# ---------------------------------------------------------------------------
+
+
+def test_build_context_pack_has_selected_files(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert hasattr(response, "selected_files")
+    assert isinstance(response.selected_files, tuple)
+
+
+def test_build_context_pack_selected_files_are_repo_relative(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    for path in response.selected_files:
+        assert isinstance(path, str)
+        assert not path.startswith("/"), f"selected_files path is absolute: {path}"
+        assert "/" in path, f"selected_files path looks like a basename: {path}"
+
+
+def test_build_context_pack_has_selected_entities(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert hasattr(response, "selected_entities")
+    assert isinstance(response.selected_entities, tuple)
+
+
+def test_build_context_pack_has_selected_relations(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert hasattr(response, "selected_relations")
+    assert isinstance(response.selected_relations, tuple)
+
+
+def test_build_context_pack_has_agent_instructions(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert response.agent_instructions
+    assert len(response.agent_instructions) >= 1
+    for instruction in response.agent_instructions:
+        assert isinstance(instruction, str)
+        assert instruction.strip()
+
+
+def test_build_context_pack_existing_fields_still_present(indexed_repo: tuple[Path, Path]) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    # All original fields preserved
+    assert hasattr(response, "payload")
+    assert hasattr(response, "rendered")
+    assert hasattr(response, "selected_entity_ids")
+    assert hasattr(response, "selected_relation_keys")
+    assert hasattr(response, "citations")
+    assert hasattr(response, "budget")
+    assert hasattr(response, "uncertainties")
+
+
 def test_get_git_summary_is_graceful_for_non_git_repo(indexed_repo: tuple[Path, Path]) -> None:
     repo_root, _ = indexed_repo
     response = handle_get_git_summary(
