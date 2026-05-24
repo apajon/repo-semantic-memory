@@ -113,6 +113,7 @@ class SearchSymbolsResponse:
     citations: tuple[Citation, ...] = ()
     uncertainties: tuple[Uncertainty, ...] = ()
     budget: BudgetEnvelope | None = None
+    agent_instructions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -174,6 +175,10 @@ class BuildContextPackResponse:
     citations: tuple[Citation, ...] = ()
     uncertainties: tuple[Uncertainty, ...] = ()
     budget: BudgetEnvelope = field(default_factory=lambda: BudgetEnvelope(requested_chars=1))
+    selected_files: tuple[str, ...] = ()
+    selected_entities: tuple[dict[str, object], ...] = ()
+    selected_relations: tuple[dict[str, object], ...] = ()
+    agent_instructions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

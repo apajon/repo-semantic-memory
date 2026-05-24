@@ -252,6 +252,14 @@ def test_invoke_search_symbols(indexed_repo: tuple[Path, Path]) -> None:
     # Results carry citations and budget envelope preserved from the handler.
     assert "citations" in result
     assert "budget" in result
+    # Ergonomics: agent_instructions and top-level path fields
+    assert "agent_instructions" in result
+    assert isinstance(result["agent_instructions"], list)
+    for item in result["results"]:
+        assert "path" in item
+        assert "start_line" in item
+        assert "end_line" in item
+        assert "score" in item
 
 
 def test_invoke_explain_entity_unknown_returns_uncertainty(
@@ -277,6 +285,20 @@ def test_invoke_build_context_pack_caps_budget(indexed_repo: tuple[Path, Path]) 
     assert result["budget"]["requested_chars"] == 999_999
     codes = {item["code"] for item in result["uncertainties"]}
     assert "budget_capped" in codes
+    # Ergonomics fields present
+    assert "selected_files" in result
+    assert isinstance(result["selected_files"], list)
+    assert "selected_entities" in result
+    assert isinstance(result["selected_entities"], list)
+    assert "selected_relations" in result
+    assert isinstance(result["selected_relations"], list)
+    assert "agent_instructions" in result
+    assert isinstance(result["agent_instructions"], list)
+    # Existing fields preserved
+    assert "payload" in result
+    assert "rendered" in result
+    assert "selected_entity_ids" in result
+    assert "selected_relation_keys" in result
 
 
 def test_invoke_query_graph(indexed_repo: tuple[Path, Path]) -> None:
@@ -411,3 +433,60 @@ def test_stdio_unknown_method_returns_method_not_found(
     session = validate_session(repo, db)
     responses = _drive(session, [{"jsonrpc": "2.0", "id": 3, "method": "totally/unknown"}])
     assert responses[0]["error"]["code"] == -32601
+
+
+def test_stdio_search_symbols_ergonomics_fields(indexed_repo: tuple[Path, Path]) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_search_symbols",
+                    "arguments": {"query": "run", "limit": 5},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert "agent_instructions" in payload
+    for item in payload["results"]:
+        assert "path" in item
+        assert "start_line" in item
+        assert "end_line" in item
+        assert "score" in item
+
+
+def test_stdio_build_context_pack_ergonomics_fields(indexed_repo: tuple[Path, Path]) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_build_context_pack",
+                    "arguments": {"task": "Improve run()", "budget_chars": 8000},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert "selected_files" in payload
+    assert "selected_entities" in payload
+    assert "selected_relations" in payload
+    assert "agent_instructions" in payload
+    # Existing fields preserved
+    assert "payload" in payload
+    assert "rendered" in payload
+    assert "selected_entity_ids" in payload
+    assert "selected_relation_keys" in payload

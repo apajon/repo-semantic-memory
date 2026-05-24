@@ -149,3 +149,24 @@ End-to-end protocol conformance against an external MCP client is **not** part
 of phase 1. The plan is to validate against a real MCP client (and against
 `lifecore_ros2`) as part of a later phase, before promoting the runtime out
 of prototype status.
+
+## Reading MCP tool output safely
+
+MCP tool results include machine-friendly fields for agents. Prefer these fields before summarizing:
+
+- `path`
+- `start_line`
+- `end_line`
+- `selected_files`
+- `selected_entities`
+- `selected_relations`
+- `citations`
+- `agent_instructions`
+
+Agents should not infer paths, symbols, or classes that are not listed in the tool output.
+
+### Prompt example
+
+```
+Use RSM MCP and print `selected_files`, `selected_entities`, and `selected_relations` exactly as returned before summarizing.
+```
