@@ -91,18 +91,19 @@ exposes already-computed slices in a paged shape.
 ### `result_set_id` format
 
 - Format: `pack_<short-hash>` where `<short-hash>` is a 10–12 character
-  base32 or hex digest derived deterministically from
-  `(task, profile, budget_chars, index fingerprint, monotonic counter)`.
-- The fingerprint component is derived from the existing index metadata
-  (entity/relation counts, schema version) already exposed by `rsm_status`.
-- The monotonic counter prevents collisions when the same task is rebuilt
-  with the same parameters in one session.
-- IDs are opaque to clients; clients must treat them as strings.
-- IDs are only valid in the MCP session that minted them. Sending an unknown
-  ID returns a clear `result_set_unknown` uncertainty rather than a transport
-  error.
-
-Example: `pack_4f3a91c2b8`.
+  base32 or hex token, for example `pack_4f3a91c2b8`.
+- IDs are **opaque client tokens**, not persistent identifiers. Clients must
+  treat them as strings and not parse or reconstruct them.
+- IDs are **stable only within the current MCP session**. They are not
+  guaranteed to be reproducible across sessions, processes, or hosts, and
+  should not be persisted by the client.
+- The implementation may derive the token from pack inputs (task, profile,
+  budget, index fingerprint) plus a per-session counter to avoid collisions
+  within the session. This is an implementation detail; clients must not
+  rely on it.
+- Sending an unknown or expired `result_set_id` is a recoverable tool-level
+  outcome (see [Error handling](#error-handling)), not a transport-layer
+  failure.
 
 ### Page model
 
@@ -173,11 +174,11 @@ The first response from `rsm_build_context_pack` becomes a brief page:
     "Use only paths listed in this response.",
     "Do not infer missing paths, symbols, or class names.",
     "Call rsm_explain_entity for details about a selected entity.",
-    "Call rsm_context_page for more files/entities/relations from this result set."
+    "Call rsm_get_context_page for more files/entities/relations from this result set."
   ],
   "omitted_sections": ["rendered", "payload", "ranking_breakdowns"],
   "how_to_get_more": [
-    "Call rsm_context_page with result_set_id and stream=entities to page entities.",
+    "Call rsm_get_context_page with result_set_id and stream=entities to page entities.",
     "Call rsm_explain_entity with an entity_id for focused details.",
     "Call rsm_build_context_pack with include_rendered=true for the full Markdown pack."
   ]
@@ -187,7 +188,7 @@ The first response from `rsm_build_context_pack` becomes a brief page:
 Defaults aim for ≤ 3–4 entries per preview stream so the first response stays
 on the order of 2–4 KB in typical repositories.
 
-## Follow-up tool: `rsm_context_page` (future, optional)
+## Follow-up tool: `rsm_get_context_page` (future, optional)
 
 A small read-only tool that pages an existing result set. Sketch:
 
@@ -195,10 +196,44 @@ A small read-only tool that pages an existing result set. Sketch:
 - Output: ordered slice, `total`, `next_offset`, short IDs.
 - Bounds: same per-stream caps as the existing compact response (e.g.
   `max_entities=15`, `max_relations=10`, `max_citations=12`).
+- **Must not recompute the context pack.** Ranking, selection, and budget
+  evaluation are not re-run.
+- **Only pages the already stored in-memory result set** for the given
+  `result_set_id`. If the result set is unknown or has been evicted, the
+  call returns a recoverable tool-level error (see
+  [Error handling](#error-handling)) and the agent is expected to rebuild
+  via `rsm_build_context_pack`.
 
 This tool is **not** added in this design pass. The current task is design
 only. If implemented later, it should reuse `handle_build_context_pack`'s
 existing deterministic outputs without re-running the pack.
+
+## Error handling
+
+The progressive model distinguishes two error classes:
+
+- **Tool-level (recoverable) outcomes.** Conditions that an agent can react
+  to and retry differently. These are reported inside the tool response,
+  not as JSON-RPC protocol errors. Examples:
+  - Unknown `result_set_id` (never minted in this session).
+  - Expired `result_set_id` (evicted by the LRU cap or session ended).
+  - `offset` past the end of a stream (returns an empty slice with
+    `next_offset=null`).
+
+  These surface as a clear `result_set_unknown` (or equivalent) entry in
+  the response `uncertainties`, with a suggested action (typically: call
+  `rsm_build_context_pack` again to mint a fresh result set).
+
+- **Tool-call errors.** Conditions that indicate a malformed call rather
+  than a recoverable runtime state. These remain normal MCP tool-call
+  errors. Examples:
+  - Missing required arguments (`result_set_id`, `stream`).
+  - Unknown `stream` value.
+  - Non-integer `offset` or `limit`, or values outside the allowed range.
+
+JSON-RPC protocol errors (transport / parse / method-not-found) are
+reserved for actual protocol-level failures and are not used to signal
+result-set lifetime conditions.
 
 ## Why session-local in-memory only
 
@@ -278,7 +313,7 @@ This document is design-only. A safe rollout would be:
 3. Have `rsm_build_context_pack` emit a `result_set_id` and `counts`
    alongside the current compact preview lists, while still returning
    the same bounded preview content (so existing agents keep working).
-4. Add a `rsm_context_page` tool that consults the registry.
+4. Add a `rsm_get_context_page` tool that consults the registry.
 5. Add stdio tests covering: ID minting, paging, unknown ID handling,
    eviction, and the unchanged default preview shape.
 6. Validate against `rsm` and `lifecore_ros2` before promoting the
