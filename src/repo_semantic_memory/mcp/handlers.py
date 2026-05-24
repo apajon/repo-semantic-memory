@@ -63,6 +63,53 @@ _AGENT_INSTRUCTIONS: tuple[str, ...] = (
     "Verify edits against cited source ranges.",
 )
 
+# Instructions used specifically for ``rsm_build_context_pack`` results. The
+# third instruction encourages progressive disclosure via the focused
+# ``rsm_explain_entity`` tool rather than re-fetching the full pack with
+# rendered output.
+_CONTEXT_PACK_AGENT_INSTRUCTIONS: tuple[str, ...] = (
+    "Use only paths listed in this response.",
+    "Do not infer missing paths, symbols, or class names.",
+    "Call rsm_explain_entity for details about a selected entity.",
+)
+
+
+def _compact_entity_dict(item: object) -> dict[str, object]:
+    """Flatten a ``selected_entities`` payload entry to a compact MCP shape.
+
+    The full payload dict produced by :meth:`ContextPack.to_dict` nests
+    ``source_range`` under each entity. Agents consuming compact MCP results
+    expect ``path``/``start_line``/``end_line`` at the top level and a stable
+    ``entity_id`` key matching :class:`Entity` IDs surfaced by other tools.
+    """
+
+    if not isinstance(item, dict):
+        return {}
+    source_range = item.get("source_range") if isinstance(item.get("source_range"), dict) else {}
+    assert isinstance(source_range, dict)  # for type narrowing
+    compact: dict[str, object] = {
+        "entity_id": item.get("id"),
+        "kind": item.get("kind"),
+        "name": item.get("name"),
+        "qualified_name": item.get("qualified_name"),
+        "path": source_range.get("path"),
+        "start_line": source_range.get("start_line"),
+        "end_line": source_range.get("end_line"),
+    }
+    return compact
+
+
+def _compact_relation_dict(item: object) -> dict[str, object]:
+    """Flatten a ``selected_relations`` payload entry to a compact MCP shape."""
+
+    if not isinstance(item, dict):
+        return {}
+    return {
+        "kind": item.get("kind"),
+        "source_entity_id": item.get("source_entity_id"),
+        "target_entity_id": item.get("target_entity_id"),
+    }
+
 
 def handle_search_symbols(
     request: SearchSymbolsRequest,
@@ -346,15 +393,35 @@ def handle_build_context_pack(
         profile=profile,
     )
 
-    payload = pack.to_dict(include_ranking=include_ranking)
+    full_payload = pack.to_dict(include_ranking=include_ranking)
     if not request.include_semantic_components:
-        payload["semantic_components"] = []
+        full_payload["semantic_components"] = []
 
-    rendered = pack.to_yaml(include_ranking=include_ranking)
-    if request.format == "markdown":
-        rendered = render_context_pack_markdown(pack, explain_ranking=include_ranking)
+    # Render only when explicitly requested. Default MCP output stays compact
+    # and avoids large Markdown/YAML payloads that clients spill into
+    # temporary content files.
+    if request.include_rendered:
+        if request.format == "markdown":
+            rendered = render_context_pack_markdown(pack, explain_ranking=include_ranking)
+        else:
+            rendered = pack.to_yaml(include_ranking=include_ranking)
+    else:
+        rendered = ""
 
-    citations = tuple(
+    # Decide which payload variant to expose. ``include_ranking_breakdowns``
+    # gates the heaviest extra field. If neither full payload nor ranking
+    # details are requested, expose an empty dict to keep the response shape
+    # stable while signaling omission via ``omitted_sections``.
+    if request.include_payload:
+        payload_out: dict[str, object] = dict(full_payload)
+        if not request.include_ranking_breakdowns:
+            payload_out.pop("ranking_breakdowns", None)
+    elif request.include_ranking_breakdowns and "ranking_breakdowns" in full_payload:
+        payload_out = {"ranking_breakdowns": full_payload["ranking_breakdowns"]}
+    else:
+        payload_out = {}
+
+    raw_citations = tuple(
         Citation(
             subject_kind=_normalize_subject_kind(citation.subject_kind),
             subject_id=citation.subject_id,
@@ -372,6 +439,10 @@ def handle_build_context_pack(
         for item in pack.uncertainties
     )
 
+    # Budget accounting reflects rendered output when produced; the compact
+    # response is intentionally small and reported as 0 used chars so that
+    # ``budget_capped`` uncertainties remain the sole signal for over-budget
+    # requests.
     used_chars = len(rendered)
     # Derive selected_files from suggested_files_to_inspect when available,
     # falling back to the source paths of selected entities.
@@ -382,22 +453,44 @@ def handle_build_context_pack(
             sorted({entity.source_range.path for entity in pack.selected_entities})
         )
 
-    # Serialize selected entities and relations as agent-readable dicts.
-    # These mirror the corresponding lists already present in ``payload``, but
-    # are promoted to explicit top-level fields so agents don't have to dig into
-    # the nested payload structure.
-    raw_entities = payload.get("selected_entities")
-    selected_entities: tuple[dict[str, object], ...] = (
-        tuple(raw_entities) if isinstance(raw_entities, list) else ()
-    )
-    raw_relations = payload.get("selected_relations")
-    selected_relations: tuple[dict[str, object], ...] = (
-        tuple(raw_relations) if isinstance(raw_relations, list) else ()
+    # Serialize selected entities and relations as agent-readable dicts using
+    # the compact, flattened shape. Bound them by ``max_entities`` and
+    # ``max_relations`` so MCP responses stay small by default.
+    raw_entities = full_payload.get("selected_entities")
+    if isinstance(raw_entities, list):
+        compact_entities = tuple(_compact_entity_dict(item) for item in raw_entities)
+    else:
+        compact_entities = ()
+    selected_entities = compact_entities[: request.max_entities]
+
+    raw_relations = full_payload.get("selected_relations")
+    if isinstance(raw_relations, list):
+        compact_relations = tuple(_compact_relation_dict(item) for item in raw_relations)
+    else:
+        compact_relations = ()
+    selected_relations = compact_relations[: request.max_relations]
+
+    citations = raw_citations[: request.max_citations]
+
+    omitted: list[str] = []
+    if not request.include_rendered:
+        omitted.append("rendered")
+    if not request.include_payload:
+        omitted.append("payload")
+    if not request.include_ranking_breakdowns:
+        omitted.append("ranking_breakdowns")
+
+    how_to_get_more: tuple[str, ...] = (
+        "Call rsm_build_context_pack with include_rendered=true for Markdown output.",
+        "Call rsm_build_context_pack with include_payload=true for the full payload.",
+        "Call rsm_build_context_pack with include_ranking_breakdowns=true for ranking details.",
+        "Call rsm_explain_entity with an entity_id for focused details.",
     )
 
+    truncated_flag = pack.truncated or request.budget_chars > _MAX_CONTEXT_BUDGET
     return BuildContextPackResponse(
         rendered=rendered,
-        payload=payload,
+        payload=payload_out,
         selected_entity_ids=tuple(entity.id.value for entity in pack.selected_entities),
         selected_relation_keys=tuple(relation_key(item) for item in pack.selected_relations),
         citations=citations,
@@ -405,12 +498,15 @@ def handle_build_context_pack(
         budget=BudgetEnvelope(
             requested_chars=request.budget_chars,
             used_chars=min(used_chars, request.budget_chars),
-            truncated=pack.truncated or request.budget_chars > _MAX_CONTEXT_BUDGET,
+            truncated=truncated_flag,
         ),
         selected_files=selected_files,
         selected_entities=selected_entities,
         selected_relations=selected_relations,
-        agent_instructions=_AGENT_INSTRUCTIONS,
+        agent_instructions=_CONTEXT_PACK_AGENT_INSTRUCTIONS,
+        truncated=truncated_flag,
+        omitted_sections=tuple(omitted),
+        how_to_get_more=how_to_get_more,
     )
 
 

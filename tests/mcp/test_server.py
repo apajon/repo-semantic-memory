@@ -490,3 +490,71 @@ def test_stdio_build_context_pack_ergonomics_fields(indexed_repo: tuple[Path, Pa
     assert "rendered" in payload
     assert "selected_entity_ids" in payload
     assert "selected_relation_keys" in payload
+
+
+def test_stdio_build_context_pack_compact_default(indexed_repo: tuple[Path, Path]) -> None:
+    """Default MCP rsm_build_context_pack output is compact.
+
+    rendered/payload/ranking_breakdowns must be omitted unless explicitly
+    requested. The response advertises omissions via ``omitted_sections``
+    and points clients to progressive-disclosure follow-up calls via
+    ``how_to_get_more``.
+    """
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_build_context_pack",
+                    "arguments": {"task": "Improve run()", "budget_chars": 8000},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert payload["rendered"] == ""
+    assert payload["payload"] == {}
+    assert "omitted_sections" in payload
+    assert "rendered" in payload["omitted_sections"]
+    assert "payload" in payload["omitted_sections"]
+    assert "ranking_breakdowns" in payload["omitted_sections"]
+    assert "how_to_get_more" in payload
+    assert payload["how_to_get_more"]
+
+
+def test_stdio_build_context_pack_include_rendered_true(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Explicitly requesting include_rendered=true returns non-empty rendered output."""
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_build_context_pack",
+                    "arguments": {
+                        "task": "Improve run()",
+                        "budget_chars": 8000,
+                        "include_rendered": True,
+                    },
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert payload["rendered"].strip()
+    assert "rendered" not in payload["omitted_sections"]

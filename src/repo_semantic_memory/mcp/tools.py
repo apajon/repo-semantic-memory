@@ -147,7 +147,15 @@ class ExplainEntityResponse:
 
 @dataclass(frozen=True)
 class BuildContextPackRequest:
-    """Placeholder request for bounded context-pack construction."""
+    """Placeholder request for bounded context-pack construction.
+
+    The ``include_*`` and ``max_*`` arguments are intended for MCP callers and
+    are honored by :func:`handle_build_context_pack`. They default to a
+    compact, progressively-disclosed output so MCP clients do not have to
+    stream large payloads through temporary files. The CLI ``rsm pack``
+    command builds context packs directly via :func:`build_context_pack` and
+    is unaffected by these defaults.
+    """
 
     task: str
     db_path: str = ".rsm/index.sqlite"
@@ -156,12 +164,24 @@ class BuildContextPackRequest:
     profile: str = "agent_standard"
     explain_ranking: bool = False
     include_semantic_components: bool = True
+    include_rendered: bool = False
+    include_payload: bool = False
+    include_ranking_breakdowns: bool = False
+    max_entities: int = 15
+    max_relations: int = 10
+    max_citations: int = 12
 
     def __post_init__(self) -> None:
         if not self.task.strip():
             raise ValueError("BuildContextPackRequest task must not be empty")
         if self.budget_chars < 1:
             raise ValueError("BuildContextPackRequest budget_chars must be >= 1")
+        if self.max_entities < 0:
+            raise ValueError("BuildContextPackRequest max_entities must be >= 0")
+        if self.max_relations < 0:
+            raise ValueError("BuildContextPackRequest max_relations must be >= 0")
+        if self.max_citations < 0:
+            raise ValueError("BuildContextPackRequest max_citations must be >= 0")
 
 
 @dataclass(frozen=True)
@@ -179,6 +199,9 @@ class BuildContextPackResponse:
     selected_entities: tuple[dict[str, object], ...] = ()
     selected_relations: tuple[dict[str, object], ...] = ()
     agent_instructions: tuple[str, ...] = ()
+    truncated: bool = False
+    omitted_sections: tuple[str, ...] = ()
+    how_to_get_more: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
