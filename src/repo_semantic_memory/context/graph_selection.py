@@ -9,9 +9,18 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Literal
 
 from repo_semantic_memory.model import Relation
+from repo_semantic_memory.model import Entity
+from repo_semantic_memory.context.import_scoring import (
+    ImportScoringContext,
+    build_import_scoring_context,
+    classify_import_relation,
+    import_relation_weight,
+    resolve_import_target_ids,
+)
 
 Direction = Literal["outgoing", "incoming", "both"]
 
@@ -91,11 +100,15 @@ class GraphNeighbor:
     via_kind: str
     from_entity_id: str
     is_unresolved: bool
+    signal_detail: str = ""
 
     def reason(self) -> str:
         """Build a human-readable selection reason string."""
+        via = self.via_kind
+        if self.signal_detail:
+            via = f"{via}/{self.signal_detail}"
         base = (
-            f"graph neighbor via {self.via_kind} "
+            f"graph neighbor via {via} "
             f"(depth={self.depth}, score={self.score:.3f}) "
             f"from {self.from_entity_id}"
         )
@@ -128,6 +141,8 @@ def select_graph_neighbors(
     relations: Sequence[Relation],
     config: GraphSelectionConfig | None = None,
     exclude_ids: frozenset[str] | None = None,
+    entity_by_id: Mapping[str, Entity] | None = None,
+    import_context: ImportScoringContext | None = None,
 ) -> GraphSelectionResult:
     """Select graph neighbors from seed entities using weighted BFS.
 
@@ -148,6 +163,9 @@ def select_graph_neighbors(
     """
     cfg = config or GraphSelectionConfig()
     exclude_set: frozenset[str] = exclude_ids if exclude_ids is not None else frozenset(seed_ids)
+    scoring_context = import_context
+    if scoring_context is None and entity_by_id is not None:
+        scoring_context = build_import_scoring_context(tuple(entity_by_id.values()))
 
     # Build adjacency lists from sorted relations for deterministic traversal order.
     outgoing: dict[str, list[Relation]] = defaultdict(list)
@@ -180,7 +198,14 @@ def select_graph_neighbors(
         if cfg.direction in ("outgoing", "both"):
             for rel in outgoing.get(current_id, []):
                 if not cfg.kind_filters or rel.kind in cfg.kind_filters:
-                    edges.append((rel.target_entity_id.value, rel))
+                    edges.extend(
+                        _neighbor_ids_for_relation(
+                            rel,
+                            default_neighbor_id=rel.target_entity_id.value,
+                            entity_id_set=entity_id_set,
+                            import_context=scoring_context,
+                        )
+                    )
         if cfg.direction in ("incoming", "both"):
             for rel in incoming.get(current_id, []):
                 if not cfg.kind_filters or rel.kind in cfg.kind_filters:
@@ -197,11 +222,22 @@ def select_graph_neighbors(
             next_depth = depth + 1
 
             # Compute per-relation score with depth decay.
-            base_weight = cfg.relation_weights.get(rel.kind, _DEFAULT_RELATION_WEIGHT)
+            base_weight = _relation_weight(
+                rel,
+                config=cfg,
+                entity_by_id=entity_by_id,
+                import_context=scoring_context,
+            )
             is_unresolved = (
                 rel.kind in _UNRESOLVED_KINDS and rel.metadata.get("resolved") is not True
             )
-            if is_unresolved:
+            if _is_locally_resolved_import(
+                rel,
+                neighbor_id=neighbor_id,
+                import_context=scoring_context,
+            ):
+                is_unresolved = False
+            if is_unresolved and base_weight > 0:
                 base_weight = max(0.0, base_weight - cfg.unresolved_penalty)
 
             score = base_weight * (_DEPTH_DECAY ** (next_depth - 1))
@@ -217,6 +253,11 @@ def select_graph_neighbors(
                     via_kind=rel.kind,
                     from_entity_id=current_id,
                     is_unresolved=is_unresolved,
+                    signal_detail=_relation_signal_detail(
+                        rel,
+                        entity_by_id=entity_by_id,
+                        import_context=scoring_context,
+                    ),
                 )
                 all_reasons[neighbor_id].append(neighbor.reason())
                 if is_unresolved:
@@ -243,3 +284,67 @@ def select_graph_neighbors(
         reasons_by_id={eid: tuple(dict.fromkeys(all_reasons.get(eid, []))) for eid in selected_ids},
         uncertainty_ids=frozenset(uncertainty_ids) & final_selected,
     )
+
+
+def _neighbor_ids_for_relation(
+    relation: Relation,
+    *,
+    default_neighbor_id: str,
+    entity_id_set: frozenset[str],
+    import_context: ImportScoringContext | None,
+) -> list[tuple[str, Relation]]:
+    if relation.kind != "imports" or import_context is None:
+        return [(default_neighbor_id, relation)]
+    neighbor_ids = [default_neighbor_id]
+    for resolved_id in resolve_import_target_ids(relation, context=import_context):
+        if resolved_id in entity_id_set:
+            neighbor_ids.append(resolved_id)
+    return [(neighbor_id, relation) for neighbor_id in dict.fromkeys(neighbor_ids)]
+
+
+def _relation_weight(
+    relation: Relation,
+    *,
+    config: GraphSelectionConfig,
+    entity_by_id: Mapping[str, Entity] | None,
+    import_context: ImportScoringContext | None,
+) -> float:
+    if relation.kind == "imports":
+        return import_relation_weight(
+            relation,
+            entity_by_id=entity_by_id,
+            context=import_context,
+        )
+    return config.relation_weights.get(relation.kind, _DEFAULT_RELATION_WEIGHT)
+
+
+def _relation_signal_detail(
+    relation: Relation,
+    *,
+    entity_by_id: Mapping[str, Entity] | None,
+    import_context: ImportScoringContext | None,
+) -> str:
+    if relation.kind != "imports":
+        return ""
+    return classify_import_relation(
+        relation,
+        entity_by_id=entity_by_id,
+        context=import_context,
+    )
+
+
+def _is_locally_resolved_import(
+    relation: Relation,
+    *,
+    neighbor_id: str,
+    import_context: ImportScoringContext | None,
+) -> bool:
+    if relation.kind != "imports" or import_context is None:
+        return False
+    if neighbor_id in resolve_import_target_ids(relation, context=import_context):
+        return classify_import_relation(relation, context=import_context) in {
+            "local_package",
+            "relative_local",
+            "test_local",
+        }
+    return False
