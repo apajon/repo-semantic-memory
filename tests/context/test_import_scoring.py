@@ -9,6 +9,8 @@ from repo_semantic_memory.context.import_scoring import (
 )
 from repo_semantic_memory.model import Entity, SourceRange, StableId
 
+_PRIMARY_STRUCTURAL_RELATION_WEIGHT = 0.9
+
 
 def _module(path: str, qname: str) -> Entity:
     return Entity(
@@ -82,5 +84,5 @@ def test_fallback_classification_is_deterministic() -> None:
 
 def test_import_weights_keep_local_imports_below_primary_structural_relations() -> None:
     assert IMPORT_CLASS_WEIGHTS["local_package"] > IMPORT_CLASS_WEIGHTS["third_party_common"]
-    assert IMPORT_CLASS_WEIGHTS["local_package"] < 0.9
+    assert IMPORT_CLASS_WEIGHTS["local_package"] < _PRIMARY_STRUCTURAL_RELATION_WEIGHT
     assert IMPORT_CLASS_WEIGHTS["stdlib"] == 0.0

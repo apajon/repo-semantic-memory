@@ -5,7 +5,8 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from types import MappingProxyType
+from typing import Final, Literal
 
 from repo_semantic_memory.model import Entity, Relation
 
@@ -44,15 +45,17 @@ _IGNORED_LOCAL_ROOTS: frozenset[str] = frozenset(
 _TEST_PATH_PREFIXES: tuple[str, ...] = ("tests/", "test/")
 _SOURCE_PATH_PREFIXES: tuple[str, ...] = ("src/",)
 
-IMPORT_CLASS_WEIGHTS: dict[ImportClass, float] = {
-    "relative_local": 0.55,
-    "local_package": 0.55,
-    "test_local": 0.50,
-    "third_party_unknown": 0.12,
-    "unknown": 0.12,
-    "third_party_common": 0.05,
-    "stdlib": 0.0,
-}
+IMPORT_CLASS_WEIGHTS: Final[Mapping[ImportClass, float]] = MappingProxyType(
+    {
+        "relative_local": 0.55,
+        "local_package": 0.55,
+        "test_local": 0.50,
+        "third_party_unknown": 0.12,
+        "unknown": 0.12,
+        "third_party_common": 0.05,
+        "stdlib": 0.0,
+    }
+)
 
 
 @dataclass(frozen=True)

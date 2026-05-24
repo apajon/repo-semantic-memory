@@ -62,6 +62,7 @@ _ACTIVATION_GATING_TESTS = (
 _DIAGNOSTIC_USEFUL_RELATION_KINDS = frozenset(
     {"contains", "tests", "exports", "uses", "owns", "inherits", "imports"}
 )
+_NOT_FOUND_INDEX = 10**6
 
 
 def _fixture_root() -> Path:
@@ -2345,9 +2346,11 @@ def test_realistic_fixture_favors_local_helper_import_over_dependency_noise(
     selected_names = [entity.qualified_name for entity in pack.selected_entities]
     assert "pkg.helper.assist" in selected_names
     numeric_index = (
-        selected_names.index("pkg.numeric") if "pkg.numeric" in selected_names else 10**6
+        selected_names.index("pkg.numeric") if "pkg.numeric" in selected_names else _NOT_FOUND_INDEX
     )
-    paths_index = selected_names.index("pkg.paths") if "pkg.paths" in selected_names else 10**6
+    paths_index = (
+        selected_names.index("pkg.paths") if "pkg.paths" in selected_names else _NOT_FOUND_INDEX
+    )
     helper_index = selected_names.index("pkg.helper.assist")
     assert helper_index < numeric_index
     assert helper_index < paths_index

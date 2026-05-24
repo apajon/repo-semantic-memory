@@ -229,12 +229,11 @@ def select_graph_neighbors(
             is_unresolved = (
                 rel.kind in _UNRESOLVED_KINDS and rel.metadata.get("resolved") is not True
             )
-            if _is_locally_resolved_import(
+            is_unresolved = is_unresolved and not _is_locally_resolved_import(
                 rel,
                 neighbor_id=neighbor_id,
                 import_context=scoring_context,
-            ):
-                is_unresolved = False
+            )
             if is_unresolved and base_weight > 0:
                 base_weight = max(0.0, base_weight - cfg.unresolved_penalty)
 
