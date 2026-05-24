@@ -344,7 +344,8 @@ def test_build_context_pack_selected_files_are_repo_relative(
     )
     for path in response.selected_files:
         assert isinstance(path, str)
-        assert not path.startswith("/"), f"selected_files path is absolute: {path}"
+        # Must not be absolute and must contain a slash (not a bare basename)
+        assert not path.startswith("/"), f"path is absolute: {path}"
         assert "/" in path, f"selected_files path looks like a basename: {path}"
 
 

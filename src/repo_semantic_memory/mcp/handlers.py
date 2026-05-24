@@ -56,7 +56,7 @@ _MAX_CONTEXT_BUDGET = 20_000
 _MAX_DIRECT_RELATIONS = 10
 
 # Short, stable instructions included in every agent-facing MCP result.
-# Agents should print these fields verbatim before summarising tool output.
+# Agents should print these fields verbatim before summarizing tool output.
 _AGENT_INSTRUCTIONS: tuple[str, ...] = (
     "Use only paths listed in this response.",
     "Do not infer missing paths, symbols, or class names.",
