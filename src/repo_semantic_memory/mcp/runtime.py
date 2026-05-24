@@ -408,10 +408,10 @@ def _register_pack_result_set(
     # ``rsm_get_context_page``. ``ranking_breakdowns`` is included whenever
     # any are stored (the preview never embeds them).
     shown_counts: dict[str, int] = {
-        "files": min(len(full_files), preview_caps.get("files", 0)),
-        "entities": min(len(full_entities), preview_caps.get("entities", 0)),
-        "relations": min(len(full_relations), preview_caps.get("relations", 0)),
-        "citations": min(len(full_citations), preview_caps.get("citations", 0)),
+        "files": min(len(full_files), preview_caps["files"]),
+        "entities": min(len(full_entities), preview_caps["entities"]),
+        "relations": min(len(full_relations), preview_caps["relations"]),
+        "citations": min(len(full_citations), preview_caps["citations"]),
         "ranking_breakdowns": 0,
     }
     next_hints: dict[str, dict[str, Any]] = {}
