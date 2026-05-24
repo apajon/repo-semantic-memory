@@ -194,8 +194,6 @@ def _local_root_for_entity(entity: Entity) -> str:
         return ""
     if path.startswith(_SOURCE_PATH_PREFIXES):
         return _path_source_root(path) or top_level
-    if path.endswith("__init__.py") or "/" not in path:
-        return top_level
     return top_level
 
 
