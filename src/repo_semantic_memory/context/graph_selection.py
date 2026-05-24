@@ -7,13 +7,10 @@ depth limits, direction filtering, and budget-aware neighbor selection.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from collections.abc import Mapping
 from typing import Literal
 
-from repo_semantic_memory.model import Relation
-from repo_semantic_memory.model import Entity
 from repo_semantic_memory.context.import_scoring import (
     ImportScoringContext,
     build_import_scoring_context,
@@ -21,6 +18,7 @@ from repo_semantic_memory.context.import_scoring import (
     import_relation_weight,
     resolve_import_target_ids,
 )
+from repo_semantic_memory.model import Entity, Relation
 
 Direction = Literal["outgoing", "incoming", "both"]
 
