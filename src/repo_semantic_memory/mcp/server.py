@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import IO, Any
 
 from repo_semantic_memory.mcp.runtime import (
@@ -222,15 +223,40 @@ def serve_stdio(
     return 0
 
 
-def run_serve(repo: str, db: str) -> int:
+def run_serve(repo: str, db: str | None) -> int:
     """CLI entry point for ``rsm mcp serve``.
 
     Validates the repo/db pair and starts the stdio loop. Returns a non-zero
     exit code with a clean stderr message for invalid configuration.
+
+    When ``db`` is ``None``, the RSM Index Store registry is consulted for a
+    registered index for the given ``repo``.  If no entry is found the command
+    exits with code 2 and a clear ``error:`` line on stderr.
     """
+    resolved_db = db
+    db_from_registry = False
+    if resolved_db is None:
+        from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+        registry = IndexRegistry(resolve_store_home())
+        looked_up = registry.lookup(Path(repo).expanduser())
+        if looked_up is None:
+            repo_display = repo
+            repo_path = Path(repo).expanduser()
+            if repo_path.exists():
+                repo_display = str(repo_path.resolve())
+            print(
+                f"error: no index registered for repo {repo_display}\n"
+                f"Register it first: rsm store register {repo_display} --index\n"
+                f"Or provide an explicit --db path.",
+                file=sys.stderr,
+            )
+            return 2
+        resolved_db = str(looked_up)
+        db_from_registry = True
 
     try:
-        session = validate_session(repo, db)
+        session = validate_session(repo, resolved_db, require_db_inside_repo=not db_from_registry)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
