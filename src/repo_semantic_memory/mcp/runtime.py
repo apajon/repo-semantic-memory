@@ -17,6 +17,13 @@ from pathlib import Path
 from typing import Any
 
 from repo_semantic_memory.mcp import handlers as _handlers
+from repo_semantic_memory.mcp.session import (
+    DEFAULT_PAGE_LIMIT,
+    MAX_PAGE_LIMIT,
+    STREAM_NAMES,
+    ResultStore,
+    slice_page,
+)
 from repo_semantic_memory.mcp.tools import (
     BuildContextPackRequest,
     ExplainEntityRequest,
@@ -35,6 +42,7 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_search_symbols",
     "rsm_explain_entity",
     "rsm_build_context_pack",
+    "rsm_get_context_page",
     "rsm_query_graph",
     "rsm_validate_patch_context",
     "rsm_get_git_summary",
@@ -65,12 +73,17 @@ class SessionConfig:
 
 @dataclass(frozen=True)
 class ToolDescriptor:
-    """Static description of an exposed MCP tool."""
+    """Static description of an exposed MCP tool.
+
+    Tool handlers receive the parsed arguments, the session configuration, and
+    a per-session :class:`ResultStore`. Handlers that do not use the store
+    simply ignore the third argument.
+    """
 
     name: str
     description: str
     input_schema: dict[str, Any]
-    handler: Callable[[Mapping[str, Any], SessionConfig], dict[str, Any]]
+    handler: Callable[[Mapping[str, Any], SessionConfig, ResultStore], dict[str, Any]]
 
 
 class ToolInvocationError(ValueError):
@@ -164,10 +177,12 @@ def _str_tuple(args: Mapping[str, Any], key: str) -> tuple[str, ...]:
     return tuple(out)
 
 
-def _tool_status(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def _tool_status(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
     """Lightweight local status wrapper using repo/db/index metadata."""
 
-    del args  # status takes no inputs
+    del args, store  # status takes no inputs and does not use the result store
     version = get_version_info()
     payload: dict[str, Any] = {
         "repo_root": session.repo_root.as_posix(),
@@ -180,14 +195,14 @@ def _tool_status(args: Mapping[str, Any], session: SessionConfig) -> dict[str, A
         "auto_index": False,
         "tools": list(PHASE1_TOOL_NAMES),
     }
-    store = SQLiteStore(session.db_path)
+    sqlite_store = SQLiteStore(session.db_path)
     try:
-        store.initialize()
-        metadata = store.get_metadata()
-        entity_count = len(store.list_entities())
-        relation_count = len(store.list_relations())
+        sqlite_store.initialize()
+        metadata = sqlite_store.get_metadata()
+        entity_count = len(sqlite_store.list_entities())
+        relation_count = len(sqlite_store.list_relations())
     finally:
-        store.close()
+        sqlite_store.close()
     payload["index_metadata"] = dict(sorted(metadata.items()))
     payload["entity_count"] = entity_count
     payload["relation_count"] = relation_count
@@ -211,7 +226,10 @@ def _serialize_response(response: Any) -> dict[str, Any]:
     return payload
 
 
-def _tool_search_symbols(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def _tool_search_symbols(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    del store
     request = SearchSymbolsRequest(
         query=_require_str(args, "query"),
         db_path=str(session.db_path),
@@ -224,7 +242,10 @@ def _tool_search_symbols(args: Mapping[str, Any], session: SessionConfig) -> dic
     return _serialize_response(response)
 
 
-def _tool_explain_entity(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def _tool_explain_entity(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    del store
     request = ExplainEntityRequest(
         entity_id=_require_str(args, "entity_id"),
         db_path=str(session.db_path),
@@ -237,10 +258,68 @@ def _tool_explain_entity(args: Mapping[str, Any], session: SessionConfig) -> dic
     return _serialize_response(response)
 
 
-def _tool_build_context_pack(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+# Internal store cap used when collecting pack streams to make available via
+# ``rsm_get_context_page``. The handler will not slice beyond this, so the
+# session-local result store sees the full pack output (subject to the pack's
+# own ranking/selection budget) while the response shows a smaller preview.
+_PACK_STORE_CAP = 1000
+
+# Hard safety cap for user-supplied per-stream preview values. Mirrors the
+# handler's own non-negative check while preventing accidental enormous
+# previews from MCP callers.
+_PACK_PREVIEW_SAFETY_CAP = 200
+
+# Per-``detail_level`` brief/compact preview defaults.
+_DETAIL_LEVEL_DEFAULTS: dict[str, dict[str, int]] = {
+    "brief": {
+        "max_files": 5,
+        "max_entities": 5,
+        "max_relations": 3,
+        "max_citations": 0,
+    },
+    "compact": {
+        # ``compact`` preserves the post-46.1/46.3 one-shot preview shape so
+        # agents that want a larger first response keep their behavior. Files
+        # are intentionally not capped in compact mode.
+        "max_files": _PACK_STORE_CAP,
+        "max_entities": 15,
+        "max_relations": 10,
+        "max_citations": 12,
+    },
+}
+
+
+def _bounded_preview_int(args: Mapping[str, Any], key: str, default: int) -> int:
+    """Parse an optional preview cap; reject negatives, clamp to safety cap."""
+
+    value = _optional_int(args, key, default)
+    if value < 0:
+        raise ToolInvocationError(f"argument {key!r} must be >= 0")
+    return min(value, _PACK_PREVIEW_SAFETY_CAP)
+
+
+def _tool_build_context_pack(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
     fmt = args.get("format", "markdown")
     if fmt not in ("markdown", "yaml"):
         raise ToolInvocationError("argument 'format' must be 'markdown' or 'yaml'")
+    detail_level = args.get("detail_level", "brief")
+    if detail_level not in _DETAIL_LEVEL_DEFAULTS:
+        raise ToolInvocationError(
+            f"argument 'detail_level' must be one of {sorted(_DETAIL_LEVEL_DEFAULTS)}"
+        )
+    defaults = _DETAIL_LEVEL_DEFAULTS[detail_level]
+    preview_caps = {
+        "files": _bounded_preview_int(args, "max_files", defaults["max_files"]),
+        "entities": _bounded_preview_int(args, "max_entities", defaults["max_entities"]),
+        "relations": _bounded_preview_int(args, "max_relations", defaults["max_relations"]),
+        "citations": _bounded_preview_int(args, "max_citations", defaults["max_citations"]),
+    }
+
+    # Always ask the handler for the full pack streams so ``rsm_get_context_page``
+    # can later page over items that the preview omitted (e.g. citations under
+    # the brief default). Preview-side caps are applied in this runtime layer.
     request = BuildContextPackRequest(
         task=_require_str(args, "task"),
         db_path=str(session.db_path),
@@ -252,15 +331,203 @@ def _tool_build_context_pack(args: Mapping[str, Any], session: SessionConfig) ->
         include_rendered=_optional_bool(args, "include_rendered", False),
         include_payload=_optional_bool(args, "include_payload", False),
         include_ranking_breakdowns=_optional_bool(args, "include_ranking_breakdowns", False),
-        max_entities=_optional_int(args, "max_entities", 15),
-        max_relations=_optional_int(args, "max_relations", 10),
-        max_citations=_optional_int(args, "max_citations", 12),
+        max_entities=_PACK_STORE_CAP,
+        max_relations=_PACK_STORE_CAP,
+        max_citations=_PACK_STORE_CAP,
     )
     response = _handlers.handle_build_context_pack(request, repo_root=session.repo_root)
-    return _serialize_response(response)
+    payload = _serialize_response(response)
+
+    # Snapshot the full streams (as returned by the handler) before applying
+    # the per-stream preview caps so the result store can serve subsequent
+    # ``rsm_get_context_page`` calls without recomputing the pack.
+    full_files = list(payload.get("selected_files") or [])
+    full_entities = list(payload.get("selected_entities") or [])
+    full_relations = list(payload.get("selected_relations") or [])
+    full_citations = list(payload.get("citations") or [])
+
+    # Apply preview caps to the user-facing response. Underlying streams
+    # remain in the result store (see ``_register_pack_result_set``).
+    payload["selected_files"] = full_files[: preview_caps["files"]]
+    payload["selected_entities"] = full_entities[: preview_caps["entities"]]
+    payload["selected_relations"] = full_relations[: preview_caps["relations"]]
+    payload["citations"] = full_citations[: preview_caps["citations"]]
+
+    # In brief mode, intentionally empty the verbose full-list compatibility
+    # fields. The full data remains accessible via ``result_set_id`` +
+    # ``rsm_get_context_page``; ``counts`` still reports full totals. Compact
+    # mode keeps the previous post-46.1/46.3 populated shape.
+    if detail_level == "brief":
+        payload["selected_entity_ids"] = []
+        payload["selected_relation_keys"] = []
+
+    _register_pack_result_set(
+        payload,
+        store,
+        full_files=full_files,
+        full_entities=full_entities,
+        full_relations=full_relations,
+        full_citations=full_citations,
+        preview_caps=preview_caps,
+    )
+    payload["detail_level"] = detail_level
+    return payload
 
 
-def _tool_query_graph(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def _register_pack_result_set(
+    payload: dict[str, Any],
+    store: ResultStore,
+    *,
+    full_files: list[Any],
+    full_entities: list[Any],
+    full_relations: list[Any],
+    full_citations: list[Any],
+    preview_caps: Mapping[str, int],
+) -> None:
+    """Register full pack streams and inject result_set_id/counts/next hints.
+
+    The store keeps the full streams (not just the preview slice) so a
+    follow-up ``rsm_get_context_page`` call never recomputes the context
+    pack and can return items beyond the preview cap (for example, the
+    citations omitted from the brief default).
+    """
+
+    ranking_breakdowns: list[Any] = []
+    payload_section = payload.get("payload")
+    if isinstance(payload_section, Mapping):
+        raw_breakdowns = payload_section.get("ranking_breakdowns")
+        if isinstance(raw_breakdowns, list):
+            ranking_breakdowns = list(raw_breakdowns)
+
+    streams = {
+        "files": _short_id_stream("f", _file_entries(full_files)),
+        "entities": _short_id_stream("e", full_entities),
+        "relations": _short_id_stream("r", full_relations),
+        "citations": _short_id_stream("c", full_citations),
+        "ranking_breakdowns": _short_id_stream("b", ranking_breakdowns),
+    }
+    result_set = store.put(streams)
+    counts: dict[str, int] = dict(result_set.counts)
+    payload["result_set_id"] = result_set.result_set_id
+    payload["counts"] = counts
+
+    # ``next`` advertises per-stream availability beyond what the preview
+    # shows so agents know which streams they can page with
+    # ``rsm_get_context_page``. ``ranking_breakdowns`` is included whenever
+    # any are stored (the preview never embeds them).
+    shown_counts: dict[str, int] = {
+        "files": min(len(full_files), preview_caps["files"]),
+        "entities": min(len(full_entities), preview_caps["entities"]),
+        "relations": min(len(full_relations), preview_caps["relations"]),
+        "citations": min(len(full_citations), preview_caps["citations"]),
+        "ranking_breakdowns": 0,
+    }
+    next_hints: dict[str, dict[str, Any]] = {}
+    for stream_name in ("files", "entities", "relations", "citations", "ranking_breakdowns"):
+        available = counts.get(stream_name, 0)
+        shown = shown_counts[stream_name]
+        if available > shown:
+            next_hints[stream_name] = {
+                "stream": stream_name,
+                "available": available,
+                "shown": shown,
+                "tool": "rsm_get_context_page",
+            }
+    payload["next"] = next_hints
+
+
+def _file_entries(files: Any) -> list[dict[str, Any]]:
+    """Normalize ``selected_files`` (paths) into stream entries."""
+
+    out: list[dict[str, Any]] = []
+    if isinstance(files, (list, tuple)):
+        for path in files:
+            if isinstance(path, str):
+                out.append({"path": path})
+    return out
+
+
+def _short_id_stream(prefix: str, items: Any) -> list[dict[str, Any]]:
+    """Attach short stable per-result-set IDs (``e1``, ``r2``, …) to entries."""
+
+    out: list[dict[str, Any]] = []
+    if not isinstance(items, (list, tuple)):
+        return out
+    for index, item in enumerate(items, start=1):
+        if isinstance(item, Mapping):
+            entry = dict(item)
+        else:
+            entry = {"value": item}
+        entry["id"] = f"{prefix}{index}"
+        out.append(entry)
+    return out
+
+
+def _tool_get_context_page(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Page over an already-stored result set without recomputing.
+
+    Unknown or expired ``result_set_id`` is a recoverable tool-level outcome:
+    the response carries a ``result_set_unknown`` entry in ``uncertainties``
+    rather than raising a JSON-RPC protocol error. Malformed arguments
+    (missing/invalid types or out-of-range page bounds) remain normal
+    tool-call errors via :class:`ToolInvocationError`.
+    """
+
+    del session  # paging never touches the index or filesystem
+    result_set_id = _require_str(args, "result_set_id")
+    stream = _require_str(args, "stream")
+    if stream not in STREAM_NAMES:
+        raise ToolInvocationError(f"argument 'stream' must be one of {list(STREAM_NAMES)}")
+    offset = _optional_int(args, "offset", 0)
+    if offset < 0:
+        raise ToolInvocationError("argument 'offset' must be >= 0")
+    limit = _optional_int(args, "limit", DEFAULT_PAGE_LIMIT)
+    if limit < 1 or limit > MAX_PAGE_LIMIT:
+        raise ToolInvocationError(f"argument 'limit' must be between 1 and {MAX_PAGE_LIMIT}")
+
+    result_set = store.get(result_set_id)
+    if result_set is None:
+        return {
+            "result_set_id": result_set_id,
+            "stream": stream,
+            "offset": offset,
+            "limit": limit,
+            "items": [],
+            "total": 0,
+            "next_offset": None,
+            "uncertainties": [
+                {
+                    "code": "result_set_unknown",
+                    "message": (
+                        f"result_set_id {result_set_id!r} is unknown or has expired in "
+                        "this MCP session; call rsm_build_context_pack again to mint a "
+                        "fresh result set."
+                    ),
+                    "recoverable": True,
+                    "subject_id": result_set_id,
+                }
+            ],
+        }
+
+    items, total, next_offset = slice_page(result_set, stream=stream, offset=offset, limit=limit)
+    return {
+        "result_set_id": result_set.result_set_id,
+        "stream": stream,
+        "offset": offset,
+        "limit": limit,
+        "items": [dict(item) for item in items],
+        "total": total,
+        "next_offset": next_offset,
+        "uncertainties": [],
+    }
+
+
+def _tool_query_graph(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    del store
     direction = args.get("direction", "both")
     if direction not in ("outgoing", "incoming", "both"):
         raise ToolInvocationError(
@@ -281,7 +548,10 @@ def _tool_query_graph(args: Mapping[str, Any], session: SessionConfig) -> dict[s
     return _serialize_response(response)
 
 
-def _tool_validate_patch_context(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def _tool_validate_patch_context(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    del store
     changed_paths = _str_tuple(args, "changed_paths")
     if not changed_paths:
         raise ToolInvocationError("argument 'changed_paths' must be a non-empty list of strings")
@@ -301,7 +571,10 @@ def _tool_validate_patch_context(args: Mapping[str, Any], session: SessionConfig
     return _serialize_response(response)
 
 
-def _tool_get_git_summary(args: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def _tool_get_git_summary(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    del store
     path_value = args.get("path", session.repo_root.as_posix())
     if not isinstance(path_value, str) or not path_value.strip():
         raise ToolInvocationError("argument 'path' must be a non-empty string")
@@ -376,8 +649,11 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
             name="rsm_build_context_pack",
             description=(
                 "Build a deterministic, source-cited, budget-bounded context pack for a task. "
-                "Returns a compact summary by default; opt in to full output with "
-                "include_rendered, include_payload, or include_ranking_breakdowns. Read-only."
+                "Returns a brief first-page preview by default (5 files, 5 entities, 3 relations, "
+                "0 citations) plus a session-scoped result_set_id; use rsm_get_context_page to "
+                "page over omitted items. Pass detail_level='compact' for the larger one-shot "
+                "preview, or opt in to full output with include_rendered, include_payload, or "
+                "include_ranking_breakdowns. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -385,11 +661,16 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                     "budget_chars": {"type": "integer", "minimum": 1},
                     "format": {"type": "string", "enum": ["markdown", "yaml"]},
                     "profile": {"type": "string"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": sorted(_DETAIL_LEVEL_DEFAULTS),
+                    },
                     "explain_ranking": {"type": "boolean"},
                     "include_semantic_components": {"type": "boolean"},
                     "include_rendered": {"type": "boolean"},
                     "include_payload": {"type": "boolean"},
                     "include_ranking_breakdowns": {"type": "boolean"},
+                    "max_files": {"type": "integer", "minimum": 0},
                     "max_entities": {"type": "integer", "minimum": 0},
                     "max_relations": {"type": "integer", "minimum": 0},
                     "max_citations": {"type": "integer", "minimum": 0},
@@ -397,6 +678,34 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                 ["task"],
             ),
             handler=_tool_build_context_pack,
+        ),
+        ToolDescriptor(
+            name="rsm_get_context_page",
+            description=(
+                "Page over a previously-built context pack stored in this MCP session by "
+                "result_set_id, without recomputing the pack. Returns a deterministic "
+                "slice of the requested stream (files, entities, relations, citations, or "
+                "ranking_breakdowns) with short stable per-entry IDs. Unknown or expired "
+                "result_set_id surfaces as a recoverable 'result_set_unknown' uncertainty "
+                "in the response. Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "result_set_id": {"type": "string"},
+                    "stream": {
+                        "type": "string",
+                        "enum": list(STREAM_NAMES),
+                    },
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": MAX_PAGE_LIMIT,
+                    },
+                },
+                ["result_set_id", "stream"],
+            ),
+            handler=_tool_get_context_page,
         ),
         ToolDescriptor(
             name="rsm_query_graph",
@@ -456,16 +765,29 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
     return registry
 
 
-def invoke_tool(name: str, arguments: Mapping[str, Any], session: SessionConfig) -> dict[str, Any]:
+def invoke_tool(
+    name: str,
+    arguments: Mapping[str, Any],
+    session: SessionConfig,
+    *,
+    result_store: ResultStore | None = None,
+) -> dict[str, Any]:
     """Dispatch a tool call by name with already-validated session config.
 
     Raises :class:`ToolInvocationError` for unknown tool names or invalid args.
     Other exceptions bubble up and are surfaced as MCP tool errors by the
     transport layer in :mod:`repo_semantic_memory.mcp.server`.
+
+    ``result_store`` is the per-MCP-session in-memory store used by the
+    progressive context retrieval model. A fresh, isolated store is created
+    when one is not provided so that one-off ``invoke_tool`` calls (e.g. in
+    unit tests) remain valid; callers that want paging across calls must
+    reuse the same :class:`ResultStore`.
     """
 
+    store = result_store if result_store is not None else ResultStore()
     registry = build_tool_registry()
     descriptor = registry.get(name)
     if descriptor is None:
         raise ToolInvocationError(f"unknown tool: {name}")
-    return descriptor.handler(arguments, session)
+    return descriptor.handler(arguments, session, store)

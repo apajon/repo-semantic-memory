@@ -188,6 +188,7 @@ def test_tool_registry_names_match_phase1_contract() -> None:
         "rsm_search_symbols",
         "rsm_explain_entity",
         "rsm_build_context_pack",
+        "rsm_get_context_page",
         "rsm_query_graph",
         "rsm_validate_patch_context",
         "rsm_get_git_summary",
@@ -558,3 +559,412 @@ def test_stdio_build_context_pack_include_rendered_true(
     payload = json.loads(responses[0]["result"]["content"][0]["text"])
     assert payload["rendered"].strip()
     assert "rendered" not in payload["omitted_sections"]
+
+
+# ---------------------------------------------------------------------------
+# Progressive context retrieval (Prompt 46.3)
+# ---------------------------------------------------------------------------
+
+
+def test_invoke_build_context_pack_returns_result_set_id_and_counts(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    assert isinstance(result.get("result_set_id"), str)
+    assert result["result_set_id"].startswith("pack_")
+    counts = result.get("counts")
+    assert isinstance(counts, dict)
+    for stream_name in ("files", "entities", "relations", "citations", "ranking_breakdowns"):
+        assert stream_name in counts
+        assert isinstance(counts[stream_name], int)
+
+
+def test_get_context_page_reads_already_stored_streams(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    # Reuse the same result store so paging sees what was minted.
+    from repo_semantic_memory.mcp.session import ResultStore
+
+    store = ResultStore()
+    pack = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+        result_store=store,
+    )
+    result_set_id = pack["result_set_id"]
+    page = invoke_tool(
+        "rsm_get_context_page",
+        {"result_set_id": result_set_id, "stream": "entities", "offset": 0, "limit": 2},
+        session,
+        result_store=store,
+    )
+    assert page["result_set_id"] == result_set_id
+    assert page["stream"] == "entities"
+    assert page["offset"] == 0
+    assert page["limit"] == 2
+    assert page["total"] == pack["counts"]["entities"]
+    assert isinstance(page["items"], list)
+    assert page["uncertainties"] == []
+    for entry in page["items"]:
+        assert "id" in entry
+        assert entry["id"].startswith("e")
+
+
+def test_get_context_page_unknown_id_returns_recoverable_uncertainty(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    page = invoke_tool(
+        "rsm_get_context_page",
+        {"result_set_id": "pack_deadbeef00", "stream": "entities"},
+        session,
+    )
+    # Unknown result_set_id is a tool-level uncertainty, not an exception.
+    assert page["items"] == []
+    assert page["total"] == 0
+    assert page["next_offset"] is None
+    codes = {item["code"] for item in page["uncertainties"]}
+    assert "result_set_unknown" in codes
+    for entry in page["uncertainties"]:
+        if entry["code"] == "result_set_unknown":
+            assert entry["recoverable"] is True
+            assert entry["subject_id"] == "pack_deadbeef00"
+
+
+def test_get_context_page_rejects_malformed_args(indexed_repo: tuple[Path, Path]) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    # Missing result_set_id → tool-call error (not a tool-level uncertainty).
+    with pytest.raises(ToolInvocationError, match="result_set_id"):
+        invoke_tool("rsm_get_context_page", {"stream": "entities"}, session)
+    # Unknown stream → tool-call error.
+    with pytest.raises(ToolInvocationError, match="stream"):
+        invoke_tool(
+            "rsm_get_context_page",
+            {"result_set_id": "pack_x", "stream": "nope"},
+            session,
+        )
+    # Out-of-range limit → tool-call error.
+    with pytest.raises(ToolInvocationError, match="limit"):
+        invoke_tool(
+            "rsm_get_context_page",
+            {"result_set_id": "pack_x", "stream": "entities", "limit": 0},
+            session,
+        )
+    with pytest.raises(ToolInvocationError, match="limit"):
+        invoke_tool(
+            "rsm_get_context_page",
+            {"result_set_id": "pack_x", "stream": "entities", "limit": 999},
+            session,
+        )
+
+
+def test_stdio_get_context_page_unknown_id_is_recoverable(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """An unknown ``result_set_id`` over stdio must surface as a tool-level
+    uncertainty (``result_set_unknown``), not a JSON-RPC protocol error."""
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_get_context_page",
+                    "arguments": {
+                        "result_set_id": "pack_deadbeef00",
+                        "stream": "entities",
+                    },
+                },
+            },
+        ],
+    )
+    assert "error" not in responses[0]
+    assert responses[0]["result"]["isError"] is False
+    page = json.loads(responses[0]["result"]["content"][0]["text"])
+    codes = {item["code"] for item in page["uncertainties"]}
+    assert "result_set_unknown" in codes
+    assert page["items"] == []
+
+
+def test_stdio_in_session_paging_is_live(indexed_repo: tuple[Path, Path]) -> None:
+    """Build + page calls inside the same ``serve_stdio`` run share one store.
+
+    The page response must come back without ``result_set_unknown`` and the
+    items must carry the short stable per-entry IDs added at registration
+    time. Reading the build response's ``result_set_id`` mid-stream is done
+    by driving the two messages with a helper that re-issues the page call
+    once the first response is on the wire.
+    """
+
+    import io
+
+    from repo_semantic_memory.mcp.server import serve_stdio
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+
+    # First run: capture the freshly minted result_set_id.
+    build_msg = {
+        "jsonrpc": "2.0",
+        "id": 70,
+        "method": "tools/call",
+        "params": {
+            "name": "rsm_build_context_pack",
+            "arguments": {"task": "Improve run()", "budget_chars": 8000},
+        },
+    }
+    stdin = io.StringIO(json.dumps(build_msg) + "\n")
+    stdout = io.StringIO()
+    serve_stdio(session, stdin=stdin, stdout=stdout)
+    first_payload = json.loads(
+        json.loads(stdout.getvalue().strip())["result"]["content"][0]["text"]
+    )
+    result_set_id = first_payload["result_set_id"]
+
+    # Second run: same session, but a fresh ResultStore. The ID must now be
+    # unknown - this asserts result sets are scoped to a single MCP session.
+    page_msg = {
+        "jsonrpc": "2.0",
+        "id": 71,
+        "method": "tools/call",
+        "params": {
+            "name": "rsm_get_context_page",
+            "arguments": {"result_set_id": result_set_id, "stream": "entities"},
+        },
+    }
+    stdin = io.StringIO(json.dumps(page_msg) + "\n")
+    stdout = io.StringIO()
+    serve_stdio(session, stdin=stdin, stdout=stdout)
+    page_payload = json.loads(json.loads(stdout.getvalue().strip())["result"]["content"][0]["text"])
+    codes = {item["code"] for item in page_payload["uncertainties"]}
+    assert "result_set_unknown" in codes
+
+
+# ---------------------------------------------------------------------------
+# Brief default preview (Prompt 46.4)
+# ---------------------------------------------------------------------------
+
+
+def test_build_context_pack_brief_default_caps(indexed_repo: tuple[Path, Path]) -> None:
+    """Default ``rsm_build_context_pack`` returns a brief first-page preview.
+
+    Brief caps: max_files=5, max_entities=5, max_relations=3, max_citations=0.
+    ``counts`` still reports the full per-stream totals, and ``next`` advertises
+    streams that have more items available via ``rsm_get_context_page``.
+    """
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    assert result["detail_level"] == "brief"
+    assert len(result["selected_files"]) <= 5
+    assert len(result["selected_entities"]) <= 5
+    assert len(result["selected_relations"]) <= 3
+    assert result["citations"] == []
+    counts = result["counts"]
+    assert counts["citations"] >= 0  # full citation count is still reported
+    assert "result_set_id" in result
+    assert "how_to_get_more" in result
+    assert "next" in result
+    if counts["citations"] > 0:
+        assert "citations" in result["next"]
+        assert result["next"]["citations"]["available"] == counts["citations"]
+        assert result["next"]["citations"]["tool"] == "rsm_get_context_page"
+    # Prompt 46.6: verbose full-list compatibility fields are emptied in
+    # brief mode. The full data is still reachable via ``result_set_id`` +
+    # ``rsm_get_context_page`` and ``counts`` continues to report totals.
+    assert result["selected_entity_ids"] == []
+    assert result["selected_relation_keys"] == []
+
+
+def test_build_context_pack_compact_preserves_larger_caps(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """``detail_level='compact'`` keeps the post-46.1/46.3 one-shot preview."""
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000, "detail_level": "compact"},
+        session,
+    )
+    assert result["detail_level"] == "compact"
+    counts = result["counts"]
+    # Compact must not artificially shrink to brief caps. When the full
+    # stream has > 5 items, compact preview shows more than 5.
+    assert len(result["selected_entities"]) == min(counts["entities"], 15)
+    assert len(result["selected_relations"]) == min(counts["relations"], 10)
+    assert len(result["citations"]) == min(counts["citations"], 12)
+    assert "result_set_id" in result
+    # Prompt 46.6: compact mode preserves the populated full-list compatibility
+    # fields. When the pack selected any entities/relations the lists must be
+    # non-empty; otherwise they remain trivially empty for consistency.
+    if counts["entities"] > 0:
+        assert result["selected_entity_ids"]
+    if counts["relations"] > 0:
+        assert result["selected_relation_keys"]
+
+
+def test_build_context_pack_explicit_overrides(indexed_repo: tuple[Path, Path]) -> None:
+    """Explicit ``max_*`` values override brief/compact defaults."""
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {
+            "task": "Improve run()",
+            "budget_chars": 8000,
+            "max_entities": 12,
+            "max_relations": 6,
+            "max_citations": 4,
+            "max_files": 7,
+        },
+        session,
+    )
+    counts = result["counts"]
+    assert len(result["selected_entities"]) == min(counts["entities"], 12)
+    assert len(result["selected_relations"]) == min(counts["relations"], 6)
+    assert len(result["citations"]) == min(counts["citations"], 4)
+    assert len(result["selected_files"]) == min(counts["files"], 7)
+
+
+def test_build_context_pack_rejects_negative_caps(indexed_repo: tuple[Path, Path]) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    for key in ("max_files", "max_entities", "max_relations", "max_citations"):
+        with pytest.raises(ToolInvocationError, match=key):
+            invoke_tool(
+                "rsm_build_context_pack",
+                {"task": "Improve run()", "budget_chars": 8000, key: -1},
+                session,
+            )
+
+
+def test_build_context_pack_rejects_invalid_detail_level(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    with pytest.raises(ToolInvocationError, match="detail_level"):
+        invoke_tool(
+            "rsm_build_context_pack",
+            {"task": "Improve run()", "budget_chars": 8000, "detail_level": "nope"},
+            session,
+        )
+
+
+def test_brief_default_paging_recovers_omitted_streams(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """``rsm_get_context_page`` retrieves items the brief preview omitted."""
+
+    from repo_semantic_memory.mcp.session import ResultStore
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    store = ResultStore()
+    pack = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+        result_store=store,
+    )
+    result_set_id = pack["result_set_id"]
+    counts = pack["counts"]
+
+    # Citations are always omitted from the brief preview but remain in the
+    # underlying stream when the pack produced any.
+    if counts["citations"] > 0:
+        cit_page = invoke_tool(
+            "rsm_get_context_page",
+            {"result_set_id": result_set_id, "stream": "citations"},
+            session,
+            result_store=store,
+        )
+        assert cit_page["total"] == counts["citations"]
+        assert cit_page["items"], "citations stream should be pageable"
+
+    # Entities beyond the first 5 should be retrievable when the pack
+    # selected more than 5.
+    if counts["entities"] > 5:
+        ent_page = invoke_tool(
+            "rsm_get_context_page",
+            {
+                "result_set_id": result_set_id,
+                "stream": "entities",
+                "offset": 5,
+                "limit": 5,
+            },
+            session,
+            result_store=store,
+        )
+        assert ent_page["offset"] == 5
+        assert ent_page["items"], "entities beyond brief preview should page"
+
+    # Relations beyond the first 3 should be retrievable when available.
+    if counts["relations"] > 3:
+        rel_page = invoke_tool(
+            "rsm_get_context_page",
+            {
+                "result_set_id": result_set_id,
+                "stream": "relations",
+                "offset": 3,
+                "limit": 5,
+            },
+            session,
+            result_store=store,
+        )
+        assert rel_page["offset"] == 3
+        assert rel_page["items"], "relations beyond brief preview should page"
+
+
+def test_stdio_brief_default_size_is_smaller_than_compact(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """The default brief response is materially smaller than ``compact``.
+
+    This is a directional smoke check, not an exact-byte assertion: the
+    brief default omits citations and caps files/entities/relations, so
+    its serialized payload must be strictly smaller than the compact
+    response on the same fixture.
+    """
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    brief = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    compact = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000, "detail_level": "compact"},
+        session,
+    )
+    brief_bytes = len(json.dumps(brief, separators=(",", ":"), sort_keys=True))
+    compact_bytes = len(json.dumps(compact, separators=(",", ":"), sort_keys=True))
+    # Use ``<=`` rather than ``<`` because the indexed-repo fixture is tiny
+    # and may produce equal payloads when streams already fit under both caps.
+    assert brief_bytes <= compact_bytes

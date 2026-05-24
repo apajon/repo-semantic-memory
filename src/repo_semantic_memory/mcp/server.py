@@ -34,6 +34,7 @@ from repo_semantic_memory.mcp.runtime import (
     invoke_tool,
     validate_session,
 )
+from repo_semantic_memory.mcp.session import ResultStore
 from repo_semantic_memory.version import get_version_info
 
 # Protocol version negotiated during ``initialize``. ``2024-11-05`` is the
@@ -95,9 +96,12 @@ def _tools_list_result() -> dict[str, Any]:
 
 
 def _tool_call_result(
-    name: str, arguments: Mapping[str, Any], session: SessionConfig
+    name: str,
+    arguments: Mapping[str, Any],
+    session: SessionConfig,
+    result_store: ResultStore,
 ) -> dict[str, Any]:
-    payload = invoke_tool(name, arguments, session)
+    payload = invoke_tool(name, arguments, session, result_store=result_store)
     text = json.dumps(payload, separators=(",", ":"), sort_keys=True)
     return {"content": [{"type": "text", "text": text}], "isError": False}
 
@@ -106,7 +110,11 @@ def _tool_error_result(message: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
-def _dispatch(message: Mapping[str, Any], session: SessionConfig) -> dict[str, Any] | None:
+def _dispatch(
+    message: Mapping[str, Any],
+    session: SessionConfig,
+    result_store: ResultStore,
+) -> dict[str, Any] | None:
     """Dispatch a single JSON-RPC message and return an outbound payload.
 
     Returns ``None`` for notifications (no response). Returns a JSON-RPC error
@@ -146,7 +154,9 @@ def _dispatch(message: Mapping[str, Any], session: SessionConfig) -> dict[str, A
         if name not in PHASE1_TOOL_NAMES:
             return _result(request_id, _tool_error_result(f"unknown tool: {name}"))
         try:
-            return _result(request_id, _tool_call_result(name, arguments_raw, session))
+            return _result(
+                request_id, _tool_call_result(name, arguments_raw, session, result_store)
+            )
         except ToolInvocationError as exc:
             return _result(request_id, _tool_error_result(str(exc)))
         except (ValueError, FileNotFoundError) as exc:
@@ -176,6 +186,11 @@ def serve_stdio(
     in_stream = stdin if stdin is not None else sys.stdin
     out_stream = stdout if stdout is not None else sys.stdout
 
+    # One ResultStore per MCP session. The store lives only for this
+    # ``serve_stdio`` call and is discarded with the process when the client
+    # closes stdin. No disk state.
+    result_store = ResultStore()
+
     for raw_line in in_stream:
         line = raw_line.strip()
         if not line:
@@ -195,7 +210,7 @@ def serve_stdio(
             )
             continue
         try:
-            response = _dispatch(message, session)
+            response = _dispatch(message, session, result_store)
         except Exception as exc:  # noqa: BLE001 - top-level safety net
             _write_message(
                 out_stream,

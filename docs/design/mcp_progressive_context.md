@@ -1,6 +1,6 @@
 # MCP progressive context retrieval
 
-Status: design proposal (no implementation in this change).
+Status: implemented in Prompt 46.3 (runtime: `src/repo_semantic_memory/mcp/session.py`, `rsm_get_context_page` tool). See [`docs/usage/mcp.md`](../usage/mcp.md) for the user-facing contract.
 
 This document proposes a progressive retrieval model for RSM's MCP context-pack
 tool. It builds on the compact-by-default behavior introduced in Prompt 46.1
@@ -187,6 +187,17 @@ The first response from `rsm_build_context_pack` becomes a brief page:
 
 Defaults aim for ≤ 3–4 entries per preview stream so the first response stays
 on the order of 2–4 KB in typical repositories.
+
+The implementation in Prompt 46.4 lands these defaults as a **brief** preview
+profile (`detail_level="brief"`, `max_files=5`, `max_entities=5`,
+`max_relations=3`, `max_citations=0`). `citations` are intentionally omitted
+from the brief preview and retrieved exclusively via `rsm_get_context_page`.
+`detail_level="compact"` preserves the post-46.1/46.3 one-shot preview shape
+(`max_entities=15`, `max_relations=10`, `max_citations=12`) for agents that
+want a larger first response. Explicit `max_*` arguments override the profile
+defaults and are clamped to a safety cap; negative values are rejected as
+tool-call errors. The response also carries a `next` map of streams that have
+additional items available via `rsm_get_context_page`.
 
 ## Follow-up tool: `rsm_get_context_page` (future, optional)
 
