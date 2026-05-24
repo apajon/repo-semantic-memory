@@ -26,12 +26,15 @@ Build the local index first. The MCP server only reads from it.
 # Option A: explicit DB path (original workflow, unchanged)
 uv run rsm index /path/to/target-repo --db /path/to/target-repo/.rsm/index.sqlite
 
-# Option B: index and register in the RSM Index Store in one step
-uv run rsm index /path/to/target-repo --db /path/to/target-repo/.rsm/index.sqlite --register
+# Option B: index directly into the RSM Index Store and register in one step (recommended)
+uv run rsm index /path/to/target-repo --register
 
-# Option C: let the store manage the DB location entirely
+# Option C: register an existing DB into the store without re-indexing
 uv run rsm store register /path/to/target-repo --index
 ```
+
+Option B (`rsm index --register` without `--db`) writes the DB to the RSM Index Store canonical
+path and does **not** write anything to the target repository.
 
 If the database is missing or out of date, regenerate it with `rsm index`
 before launching the MCP server. The server will report missing/stale state
@@ -91,8 +94,8 @@ is not required.
 **With RSM Index Store (register once, no `--db` in config):**
 
 ```bash
-# One-time setup: register the repo in the RSM Index Store.
-uv run rsm store register /absolute/path/to/target-repo --index
+# One-time setup: index directly into the RSM Index Store.
+uv run rsm index /absolute/path/to/target-repo --register
 ```
 
 ```json

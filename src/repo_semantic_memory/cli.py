@@ -79,8 +79,12 @@ def build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument("path", help="Repository root path to index.")
     index_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "Defaults to the RSM Index Store canonical path when --register is set, "
+            "otherwise defaults to .rsm/index.sqlite in the current directory."
+        ),
     )
     index_parser.add_argument(
         "--with-git",
@@ -498,8 +502,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_format_index_python_summary(entities, relations))
         return 0
     if args.command == "index":
+        if args.db is None:
+            if args.register:
+                from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+                repo_root = Path(args.path).resolve()
+                resolved_db = str(IndexRegistry(resolve_store_home()).default_db_path(repo_root))
+            else:
+                resolved_db = ".rsm/index.sqlite"
+        else:
+            resolved_db = args.db
         return _run_index_command(
-            path=args.path, db=args.db, with_git=args.with_git, register=args.register
+            path=args.path, db=resolved_db, with_git=args.with_git, register=args.register
         )
     if args.command == "git":
         if args.git_target == "summary":

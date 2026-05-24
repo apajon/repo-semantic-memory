@@ -56,14 +56,18 @@ uv run rsm store unregister /path/to/repo
 ### Register during indexing
 
 Pass `--register` to `rsm index` to record the repo → DB mapping in the store immediately after
-indexing:
+indexing.
+
+**Recommended: let the store manage the DB location.** When `--register` is set and `--db` is
+omitted, the DB is written directly to the RSM Index Store canonical path
+(`<store_home>/indexes/<repo_id>/index.sqlite`). Nothing is written inside the target repository.
 
 ```bash
-# Index to the default local path and register.
-uv run rsm index . --db .rsm/index.sqlite --register
+# Index to the RSM Index Store canonical path and register (recommended).
+uv run rsm index /path/to/repo --register
 
-# Index to an explicit path and register.
-uv run rsm index /path/to/repo --db /custom/path/index.sqlite --register
+# Index to an explicit path and register (alternative, explicit --db preserved).
+uv run rsm index /path/to/repo --db /path/to/repo/.rsm/index.sqlite --register
 ```
 
 Once registered, `rsm mcp serve` can omit `--db`:
@@ -72,7 +76,8 @@ Once registered, `rsm mcp serve` can omit `--db`:
 uv run rsm mcp serve --repo /path/to/repo
 ```
 
-The existing explicit `--db` workflow is unchanged; the store is purely additive.
+When `--register` is not set and `--db` is omitted, the existing default of `.rsm/index.sqlite`
+(relative to the current directory) is preserved. The store is purely additive.
 
 ## Export/import
 

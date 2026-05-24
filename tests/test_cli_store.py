@@ -274,6 +274,28 @@ def test_index_register_flag_writes_to_store(
     assert result == db_path.resolve()
 
 
+def test_index_register_without_db_uses_store_canonical_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """rsm index <repo> --register with no --db writes to the RSM Index Store path."""
+    store_home = tmp_path / "store"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with mock.patch.dict("os.environ", {"RSM_HOME": str(store_home)}):
+        code = main(["index", str(repo), "--register"])
+    assert code == 0
+
+    registry = IndexRegistry(store_home)
+    result = registry.lookup(repo)
+    # DB must exist in the store, not in the repo's .rsm/ directory.
+    assert result is not None
+    assert result.exists()
+    assert str(store_home) in str(result), "DB should be inside the RSM Index Store"
+    assert not str(result).startswith(str(repo)), "DB must NOT be in the repo directory"
+    assert result.name == "index.sqlite"
+
+
 def test_index_without_register_flag_does_not_write_to_store(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
