@@ -418,6 +418,206 @@ def test_build_context_pack_existing_fields_still_present(indexed_repo: tuple[Pa
     assert hasattr(response, "uncertainties")
 
 
+# ---------------------------------------------------------------------------
+# Compact-by-default progressive disclosure for rsm_build_context_pack
+# ---------------------------------------------------------------------------
+
+
+def test_build_context_pack_compact_default_omits_rendered_and_payload(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    # Defaults: rendered/payload/ranking_breakdowns are omitted.
+    assert response.rendered == ""
+    assert response.payload == {}
+    assert "rendered" in response.omitted_sections
+    assert "payload" in response.omitted_sections
+    assert "ranking_breakdowns" in response.omitted_sections
+
+
+def test_build_context_pack_compact_default_includes_selected_files(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert response.selected_files
+    for path in response.selected_files:
+        assert isinstance(path, str) and path.strip()
+
+
+def test_build_context_pack_compact_bounds_entities_and_relations(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+            max_entities=2,
+            max_relations=1,
+            max_citations=3,
+        ),
+        repo_root=repo_root,
+    )
+    assert len(response.selected_entities) <= 2
+    assert len(response.selected_relations) <= 1
+    assert len(response.citations) <= 3
+
+
+def test_build_context_pack_compact_entity_shape_is_flat(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert response.selected_entities, "expected at least one selected entity"
+    for entity in response.selected_entities:
+        assert "entity_id" in entity
+        assert "kind" in entity
+        assert "name" in entity
+        assert "qualified_name" in entity
+        assert "path" in entity
+        assert "start_line" in entity
+        assert "end_line" in entity
+        # Compact shape must not nest source_range under entries.
+        assert "source_range" not in entity
+
+
+def test_build_context_pack_compact_relation_shape_is_flat(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    for relation in response.selected_relations:
+        assert {"kind", "source_entity_id", "target_entity_id"} <= set(relation.keys())
+
+
+def test_build_context_pack_compact_default_includes_how_to_get_more(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    assert response.how_to_get_more
+    joined = " ".join(response.how_to_get_more)
+    assert "include_rendered=true" in joined
+    assert "rsm_explain_entity" in joined
+
+
+def test_build_context_pack_agent_instructions_mention_explain_entity(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+        ),
+        repo_root=repo_root,
+    )
+    joined = " ".join(response.agent_instructions)
+    assert "rsm_explain_entity" in joined
+
+
+def test_build_context_pack_include_rendered_true_returns_rendered(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+            include_rendered=True,
+        ),
+        repo_root=repo_root,
+    )
+    assert response.rendered.strip()
+    assert "rendered" not in response.omitted_sections
+
+
+def test_build_context_pack_include_payload_true_returns_payload(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+            include_payload=True,
+        ),
+        repo_root=repo_root,
+    )
+    assert response.payload, "payload should be non-empty when include_payload=True"
+    assert "task" in response.payload
+    assert "payload" not in response.omitted_sections
+
+
+def test_build_context_pack_include_ranking_breakdowns_true_returns_ranking(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    repo_root, db_path = indexed_repo
+    response = handle_build_context_pack(
+        BuildContextPackRequest(
+            task="Update run behavior",
+            db_path=str(db_path),
+            budget_chars=8000,
+            profile="agent_standard",
+            explain_ranking=True,
+            include_ranking_breakdowns=True,
+        ),
+        repo_root=repo_root,
+    )
+    assert "ranking_breakdowns" in response.payload
+    assert "ranking_breakdowns" not in response.omitted_sections
+
+
 def test_get_git_summary_is_graceful_for_non_git_repo(indexed_repo: tuple[Path, Path]) -> None:
     repo_root, _ = indexed_repo
     response = handle_get_git_summary(

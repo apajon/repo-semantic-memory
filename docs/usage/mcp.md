@@ -170,3 +170,50 @@ Agents should not infer paths, symbols, or classes that are not listed in the to
 ```
 Use RSM MCP and print `selected_files`, `selected_entities`, and `selected_relations` exactly as returned before summarizing.
 ```
+
+## Compact-by-default context packs and progressive disclosure
+
+`rsm_build_context_pack` returns a **compact** machine-friendly summary by default. The full Markdown/YAML rendering and the full nested `payload` are not emitted unless the caller explicitly opts in. This is a deliberate MCP-prototype evolution: large tool outputs are often spilled by MCP clients into temporary resource files that an agent then has to fetch again, which is wasteful and bad as a default workflow. The CLI `rsm pack` command is unchanged and still emits the full pack.
+
+### Default MCP response shape
+
+A default `rsm_build_context_pack` MCP call returns roughly:
+
+- `task` — the requested task string.
+- `truncated` — whether the budget cap or pack size forced truncation.
+- `budget` — `requested_chars`, `used_chars`, `truncated`.
+- `selected_files` — repo-relative file paths the agent should read.
+- `selected_entities` — bounded list of flattened entries with `entity_id`, `kind`, `name`, `qualified_name`, `path`, `start_line`, `end_line`.
+- `selected_relations` — bounded list of `{kind, source_entity_id, target_entity_id}` entries.
+- `citations` — bounded list of source citations.
+- `uncertainties` — machine-readable uncertainty envelopes.
+- `agent_instructions` — verbatim guidance to print before summarizing.
+- `omitted_sections` — names of bulky sections omitted from the response (e.g. `rendered`, `payload`, `ranking_breakdowns`).
+- `how_to_get_more` — concrete follow-up calls to retrieve the omitted material.
+
+`rendered` and `payload` are still present as keys, but are empty (`""` and `{}`) by default, so existing consumers that check for key presence keep working.
+
+### Opt-in flags
+
+Pass these in `arguments` to opt into heavier output:
+
+| Argument                       | Default | Effect                                                                 |
+| ------------------------------ | ------- | ---------------------------------------------------------------------- |
+| `include_rendered`             | `false` | Include Markdown (or YAML when `format=yaml`) rendering of the pack.   |
+| `include_payload`              | `false` | Include the full nested context-pack payload dict.                     |
+| `include_ranking_breakdowns`   | `false` | Include `ranking_breakdowns` under `payload` (or alone if no payload). |
+| `max_entities`                 | `15`    | Maximum `selected_entities` returned.                                  |
+| `max_relations`                | `10`    | Maximum `selected_relations` returned.                                 |
+| `max_citations`                | `12`    | Maximum `citations` returned.                                          |
+
+Even when included, output remains bounded by the existing budget and profile behavior. Some MCP clients store long tool outputs as temporary content resources rather than inlining them; that is expected for `include_rendered=true` debug runs and acceptable, but should not be the default workflow.
+
+### Recommended progressive workflow
+
+1. Call `rsm_build_context_pack` with defaults to get a compact summary.
+2. Inspect `selected_files`, `selected_entities`, and `selected_relations`.
+3. Call `rsm_explain_entity` with a specific `entity_id` for focused details.
+4. Only call `rsm_build_context_pack` again with `include_rendered=true` if a full Markdown pack is actually needed (e.g. debugging the ranking output).
+
+Ranking behavior, selected entities, and selected relations are **not** changed by these MCP defaults; only the response shape is.
+

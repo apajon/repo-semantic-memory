@@ -249,6 +249,12 @@ def _tool_build_context_pack(args: Mapping[str, Any], session: SessionConfig) ->
         profile=str(args.get("profile", "agent_standard")),
         explain_ranking=_optional_bool(args, "explain_ranking", False),
         include_semantic_components=_optional_bool(args, "include_semantic_components", True),
+        include_rendered=_optional_bool(args, "include_rendered", False),
+        include_payload=_optional_bool(args, "include_payload", False),
+        include_ranking_breakdowns=_optional_bool(args, "include_ranking_breakdowns", False),
+        max_entities=_optional_int(args, "max_entities", 15),
+        max_relations=_optional_int(args, "max_relations", 10),
+        max_citations=_optional_int(args, "max_citations", 12),
     )
     response = _handlers.handle_build_context_pack(request, repo_root=session.repo_root)
     return _serialize_response(response)
@@ -370,7 +376,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
             name="rsm_build_context_pack",
             description=(
                 "Build a deterministic, source-cited, budget-bounded context pack for a task. "
-                "Read-only."
+                "Returns a compact summary by default; opt in to full output with "
+                "include_rendered, include_payload, or include_ranking_breakdowns. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -380,6 +387,12 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                     "profile": {"type": "string"},
                     "explain_ranking": {"type": "boolean"},
                     "include_semantic_components": {"type": "boolean"},
+                    "include_rendered": {"type": "boolean"},
+                    "include_payload": {"type": "boolean"},
+                    "include_ranking_breakdowns": {"type": "boolean"},
+                    "max_entities": {"type": "integer", "minimum": 0},
+                    "max_relations": {"type": "integer", "minimum": 0},
+                    "max_citations": {"type": "integer", "minimum": 0},
                 },
                 ["task"],
             ),
