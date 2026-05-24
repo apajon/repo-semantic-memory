@@ -9,6 +9,13 @@ uv run rsm pack --db .rsm/index.sqlite --task "<task>" --budget 8000 --profile a
 Context packs combine lexical scoring, path-role signals, semantic component hints, BM25-style
 ranking, and graph relation selection. They are deterministic for the same inputs.
 
+Import relations are weighted as heuristic structural signals. Local package imports and relative
+imports can help surface nearby implementation modules, including test-to-source imports for
+regression tasks. Standard-library imports and common third-party imports such as `numpy`, `pandas`,
+or `pytest` are kept as graph facts when present, but contribute little or no ranking weight. Import
+signals are tie-breakers and navigation hints; they do not prove behavior, and source citations
+remain authoritative.
+
 ## What a pack contains
 
 - **Selected entities**: the ranked files, modules, symbols, docs, or tests judged most relevant

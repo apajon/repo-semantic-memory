@@ -13,6 +13,7 @@ from repo_semantic_memory.context.compression import (
     resolve_profile,
 )
 from repo_semantic_memory.context.context_pack import relation_key
+from repo_semantic_memory.context.import_scoring import build_import_scoring_context
 from repo_semantic_memory.context.pack_builder import (
     _PACK_FIXED_OVERHEAD_CHARS,
     _build_bm25_index,
@@ -2172,3 +2173,192 @@ def test_explain_ranking_cleanup_and_activation_nonempty_relations_tight_budget(
             f"Expected source/structural relations for task: {task!r}; "
             f"got: {[r.kind for r in pack.selected_relations]}"
         )
+
+
+def test_public_api_relation_priority_prefers_exports_over_imports() -> None:
+    package = Entity(
+        id=StableId("python:module:pkg"),
+        kind="module",
+        name="pkg",
+        qualified_name="pkg",
+        source_range=SourceRange(path="src/pkg/__init__.py", start_line=1, end_line=5),
+    )
+    api = Entity(
+        id=StableId("python:function:pkg.api"),
+        kind="function",
+        name="api",
+        qualified_name="pkg.api",
+        source_range=SourceRange(path="src/pkg/api.py", start_line=1, end_line=5),
+    )
+    entity_by_id = {package.id.value: package, api.id.value: api}
+    import_context = build_import_scoring_context([package, api])
+    export_relation = Relation(kind="exports", source_entity_id=package.id, target_entity_id=api.id)
+    import_relation = Relation(
+        kind="imports",
+        source_entity_id=package.id,
+        target_entity_id=StableId("python:imports:pkg.api"),
+        metadata={"imported_name": "pkg.api"},
+    )
+
+    assert _relation_budget_priority(
+        export_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"public_api"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(entity_by_id),
+        kept_entity_ids=frozenset(entity_by_id),
+        import_context=import_context,
+    ) < _relation_budget_priority(
+        import_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"public_api"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(entity_by_id),
+        kept_entity_ids=frozenset(entity_by_id),
+        import_context=import_context,
+    )
+
+
+def test_test_task_relation_priority_keeps_tests_above_pytest_imports() -> None:
+    test_module = Entity(
+        id=StableId("python:module:tests.test_core"),
+        kind="module",
+        name="test_core",
+        qualified_name="tests.test_core",
+        source_range=SourceRange(path="tests/test_core.py", start_line=1, end_line=20),
+    )
+    source_module = Entity(
+        id=StableId("python:module:pkg.core"),
+        kind="module",
+        name="core",
+        qualified_name="pkg.core",
+        source_range=SourceRange(path="src/pkg/core.py", start_line=1, end_line=20),
+    )
+    entity_by_id = {test_module.id.value: test_module, source_module.id.value: source_module}
+    import_context = build_import_scoring_context([test_module, source_module])
+    tests_relation = Relation(
+        kind="tests",
+        source_entity_id=test_module.id,
+        target_entity_id=source_module.id,
+    )
+    pytest_import = Relation(
+        kind="imports",
+        source_entity_id=test_module.id,
+        target_entity_id=StableId("python:imports:pytest"),
+        metadata={"imported_name": "pytest"},
+    )
+
+    assert _relation_budget_priority(
+        tests_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"tests"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(entity_by_id),
+        kept_entity_ids=frozenset(entity_by_id),
+        import_context=import_context,
+    ) < _relation_budget_priority(
+        pytest_import,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"tests"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(entity_by_id),
+        kept_entity_ids=frozenset(entity_by_id),
+        import_context=import_context,
+    )
+
+
+def test_import_weighting_does_not_change_non_import_relation_priority() -> None:
+    module = Entity(
+        id=StableId("python:module:pkg.core"),
+        kind="module",
+        name="core",
+        qualified_name="pkg.core",
+        source_range=SourceRange(path="src/pkg/core.py", start_line=1, end_line=20),
+    )
+    function = Entity(
+        id=StableId("python:function:pkg.core.run"),
+        kind="function",
+        name="run",
+        qualified_name="pkg.core.run",
+        source_range=SourceRange(path="src/pkg/core.py", start_line=4, end_line=8),
+    )
+    dependency = Entity(
+        id=StableId("python:module:pkg.dependency"),
+        kind="module",
+        name="dependency",
+        qualified_name="pkg.dependency",
+        source_range=SourceRange(path="src/pkg/dependency.py", start_line=1, end_line=20),
+    )
+    entity_by_id = {entity.id.value: entity for entity in (module, function, dependency)}
+    contains_relation = Relation(
+        kind="contains",
+        source_entity_id=module.id,
+        target_entity_id=function.id,
+    )
+    uses_relation = Relation(
+        kind="uses",
+        source_entity_id=function.id,
+        target_entity_id=dependency.id,
+    )
+
+    assert _relation_budget_priority(
+        contains_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"implementation"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(entity_by_id),
+        kept_entity_ids=frozenset(entity_by_id),
+    ) < _relation_budget_priority(
+        uses_relation,
+        prefer_structural_relations=True,
+        task_hints=frozenset({"implementation"}),
+        entity_by_id=entity_by_id,
+        selected_entity_ids=frozenset(entity_by_id),
+        kept_entity_ids=frozenset(entity_by_id),
+    )
+
+
+def test_realistic_fixture_favors_local_helper_import_over_dependency_noise(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "src" / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "helper.py").write_text("def assist() -> str:\n    return 'ok'\n", encoding="utf-8")
+    (package / "logic.py").write_text(
+        "from pkg.helper import assist\n\ndef business_logic() -> str:\n    return assist()\n",
+        encoding="utf-8",
+    )
+    (package / "numeric.py").write_text("import numpy\n", encoding="utf-8")
+    (package / "paths.py").write_text("from pathlib import Path\n", encoding="utf-8")
+
+    entities, relations = index_python_path(tmp_path)
+    pack = build_context_pack(
+        task="business logic",
+        entities=entities,
+        relations=relations,
+        budget_chars=4000,
+        explain_ranking=True,
+        profile="agent_standard",
+    )
+
+    selected_names = [entity.qualified_name for entity in pack.selected_entities]
+    assert "pkg.helper.assist" in selected_names
+    missing_dependency_rank = len(selected_names) + 1
+    numeric_index = (
+        selected_names.index("pkg.numeric")
+        if "pkg.numeric" in selected_names
+        else missing_dependency_rank
+    )
+    paths_index = (
+        selected_names.index("pkg.paths")
+        if "pkg.paths" in selected_names
+        else missing_dependency_rank
+    )
+    helper_index = selected_names.index("pkg.helper.assist")
+    assert helper_index < numeric_index
+    assert helper_index < paths_index
+    helper_breakdown = pack.ranking_breakdowns[
+        "python:src/pkg/helper.py:function:pkg.helper.assist"
+    ]
+    assert any("imports/local_package" in reason.message for reason in helper_breakdown.reasons)

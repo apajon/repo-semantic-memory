@@ -10,6 +10,7 @@ from repo_semantic_memory.context.graph_selection import (
     GraphSelectionResult,
     select_graph_neighbors,
 )
+from repo_semantic_memory.context.import_scoring import build_import_scoring_context
 from repo_semantic_memory.model import Entity, Relation, SourceRange, StableId
 
 # ---------------------------------------------------------------------------
@@ -42,6 +43,15 @@ def _relation(
         target_entity_id=StableId(tgt),
         kind=kind,  # type: ignore[arg-type]
         metadata=metadata,
+    )
+
+
+def _import_relation(src: str, imported_name: str, target: str | None = None) -> Relation:
+    return Relation(
+        source_entity_id=StableId(src),
+        target_entity_id=StableId(target or f"python:imports:{imported_name}"),
+        kind="imports",
+        metadata={"imported_name": imported_name},
     )
 
 
@@ -108,6 +118,57 @@ def test_tests_relation_preferred_over_import_relation() -> None:
     tests_score = result.scores_by_id["python:module:test_core"]
     import_score = result.scores_by_id["python:module:util"]
     assert tests_score > import_score
+
+
+def test_local_import_relation_outranks_stdlib_import_relation() -> None:
+    seed = _entity("python:module:pkg.core", kind="module")
+    local_helper = _entity("python:module:pkg.helper", kind="module")
+    stdlib_target = _entity("python:imports:pathlib.Path", kind="external", name="Path")
+    entities = (seed, local_helper, stdlib_target)
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    import_context = build_import_scoring_context(entities)
+
+    result = select_graph_neighbors(
+        seed_ids=[seed.id.value],
+        entity_id_set=_entity_id_set(*entities),
+        relations=[
+            _import_relation(seed.id.value, "pkg.helper", target="python:imports:pkg.helper"),
+            _import_relation(seed.id.value, "pathlib.Path"),
+        ],
+        config=GraphSelectionConfig(max_depth=1),
+        exclude_ids=frozenset([seed.id.value]),
+        entity_by_id=entity_by_id,
+        import_context=import_context,
+    )
+
+    assert result.scores_by_id[local_helper.id.value] > result.scores_by_id[stdlib_target.id.value]
+    assert any(
+        "imports/local_package" in reason for reason in result.reasons_by_id[local_helper.id.value]
+    )
+
+
+def test_common_third_party_imports_do_not_dominate_local_imports() -> None:
+    seed = _entity("python:module:pkg.core", kind="module")
+    local_helper = _entity("python:module:pkg.helper", kind="module")
+    numpy_target = _entity("python:imports:numpy", kind="external", name="numpy")
+    entities = (seed, local_helper, numpy_target)
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    import_context = build_import_scoring_context(entities)
+
+    result = select_graph_neighbors(
+        seed_ids=[seed.id.value],
+        entity_id_set=_entity_id_set(*entities),
+        relations=[
+            _import_relation(seed.id.value, "pkg.helper", target="python:imports:pkg.helper"),
+            _import_relation(seed.id.value, "numpy"),
+        ],
+        config=GraphSelectionConfig(max_depth=1),
+        exclude_ids=frozenset([seed.id.value]),
+        entity_by_id=entity_by_id,
+        import_context=import_context,
+    )
+
+    assert result.scores_by_id[local_helper.id.value] > result.scores_by_id[numpy_target.id.value]
 
 
 def test_unresolved_inheritance_creates_uncertainty_and_low_score() -> None:

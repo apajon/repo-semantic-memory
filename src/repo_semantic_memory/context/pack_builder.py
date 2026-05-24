@@ -19,6 +19,12 @@ from repo_semantic_memory.context.graph_selection import (
     GraphSelectionConfig,
     select_graph_neighbors,
 )
+from repo_semantic_memory.context.import_scoring import (
+    ImportScoringContext,
+    build_import_scoring_context,
+    classify_import_relation,
+    import_class_priority,
+)
 from repo_semantic_memory.context.path_roles import (
     DOC_ROLE,
     SOURCE_ROLE,
@@ -165,6 +171,7 @@ def build_context_pack(
         relations=normalized_relations,
     )
     source_roots = infer_source_roots(normalized_entities)
+    import_context = build_import_scoring_context(normalized_entities)
     public_api_entity_ids = {
         component.entity_id.value
         for component in inferred_components
@@ -238,6 +245,8 @@ def build_context_pack(
         relations=normalized_relations,
         config=GraphSelectionConfig(),
         exclude_ids=frozenset(graph_seed_ids),
+        entity_by_id=entity_by_id,
+        import_context=import_context,
     )
     for neighbor_id in graph_result.selected_ids:
         is_new = _add_entity(neighbor_id, selected_entity_ids, selected_entity_set)
@@ -320,6 +329,7 @@ def build_context_pack(
         entity_by_id=entity_by_id,
         selected_entity_ids=frozenset(selected_entity_ids),
         selected_entity_ranks=selected_entity_ranks,
+        import_context=import_context,
     )
     selected_relations = filter_related_relations(selected_relations, profile=resolved_profile)
     score_capped_reasons_by_key = _cap_reasons_per_item(
@@ -341,6 +351,7 @@ def build_context_pack(
         preserve_at_least_one_relation=explain_ranking,
         task_hints=task_hints,
         entity_by_id=entity_by_id,
+        import_context=import_context,
     )
 
     suggested_files = _suggested_files(budgeted_entities)
@@ -1094,6 +1105,7 @@ def _truncate_to_budget(
     preserve_at_least_one_relation: bool = False,
     task_hints: set[str] | None = None,
     entity_by_id: Mapping[str, Entity] | None = None,
+    import_context: ImportScoringContext | None = None,
 ) -> tuple[list[Entity], list[Relation], bool]:
     # Reserve fixed space for markdown/yaml section scaffolding and uncertainty headings.
     used = len(task) + _PACK_FIXED_OVERHEAD_CHARS
@@ -1103,6 +1115,7 @@ def _truncate_to_budget(
 
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+    _import_context = import_context or build_import_scoring_context(tuple(_entity_by_id.values()))
     selected_entity_ids = frozenset(entity.id.value for entity in selected_entities)
     selected_entity_ranks = {
         entity.id.value: index for index, entity in enumerate(selected_entities)
@@ -1120,6 +1133,7 @@ def _truncate_to_budget(
                 selected_entity_ids=selected_entity_ids,
                 kept_entity_ranks=selected_entity_ranks,
                 selected_entity_ranks=selected_entity_ranks,
+                import_context=_import_context,
             ),
         )
         relation_budget_reservation = _estimate_relation_chars(
@@ -1151,6 +1165,7 @@ def _truncate_to_budget(
                 entity.id.value: index for index, entity in enumerate(kept_entities)
             },
             selected_entity_ranks=selected_entity_ranks,
+            import_context=_import_context,
         ),
     )
     kept_relations: list[Relation] = []
@@ -1242,6 +1257,7 @@ def _relation_budget_priority(
     selected_entity_ids: set[str] | frozenset[str] | None = None,
     kept_entity_ranks: Mapping[str, int] | None = None,
     selected_entity_ranks: Mapping[str, int] | None = None,
+    import_context: ImportScoringContext | None = None,
 ) -> tuple[int, int, int, int, int, int, int, int, int, str, str, str]:
     """Compute a sort key for relation budget ordering (lower = higher priority).
 
@@ -1256,6 +1272,12 @@ def _relation_budget_priority(
     resolved = relation.metadata.get("resolved") is True
     _task_hints: set[str] | frozenset[str] = task_hints if task_hints is not None else frozenset()
     _entity_by_id: Mapping[str, Entity] = entity_by_id if entity_by_id is not None else {}
+    _import_context = import_context or build_import_scoring_context(tuple(_entity_by_id.values()))
+    import_class_order = _relation_import_class_priority(
+        relation,
+        entity_by_id=_entity_by_id,
+        import_context=_import_context,
+    )
     if not prefer_structural_relations:
         # Non-structural mode: keep original ordering (unresolved imports/inherits first).
         kind_priority = 0 if relation.kind in {"imports", "inherits"} and not resolved else 1
@@ -1331,11 +1353,27 @@ def _relation_budget_priority(
         kept_rank_priority[2],
         selected_rank_priority[0],
         selected_rank_priority[1],
-        kind_priority,
+        import_class_order if relation.kind == "imports" else kind_priority,
         relation.kind,
         relation.source_entity_id.value,
         relation.target_entity_id.value,
     )
+
+
+def _relation_import_class_priority(
+    relation: Relation,
+    *,
+    entity_by_id: Mapping[str, Entity],
+    import_context: ImportScoringContext,
+) -> int:
+    if relation.kind != "imports":
+        return 0
+    import_class = classify_import_relation(
+        relation,
+        entity_by_id=entity_by_id,
+        context=import_context,
+    )
+    return import_class_priority(import_class)
 
 
 def _order_relations_for_profile_cap(
@@ -1346,6 +1384,7 @@ def _order_relations_for_profile_cap(
     entity_by_id: Mapping[str, Entity],
     selected_entity_ids: frozenset[str],
     selected_entity_ranks: Mapping[str, int],
+    import_context: ImportScoringContext | None = None,
 ) -> list[Relation]:
     """Deterministically order relations before profile-level relation cap is applied."""
     if not prefer_structural_relations:
@@ -1368,6 +1407,7 @@ def _order_relations_for_profile_cap(
             selected_entity_ids=selected_entity_ids,
             kept_entity_ranks=selected_entity_ranks,
             selected_entity_ranks=selected_entity_ranks,
+            import_context=import_context,
         ),
     )
 
