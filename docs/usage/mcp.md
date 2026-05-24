@@ -198,6 +198,8 @@ A default `rsm_build_context_pack` MCP call returns roughly:
 
 `rendered` and `payload` are still present as keys, but are empty (`""` and `{}`) by default, so existing consumers that check for key presence keep working.
 
+In brief mode, the verbose full-list compatibility fields `selected_entity_ids` and `selected_relation_keys` are intentionally returned as empty arrays (`[]`). The full data is still reachable through `result_set_id` + `rsm_get_context_page`, and `counts.entities` / `counts.relations` continue to report the full totals. `detail_level="compact"` keeps these lists populated for agents that rely on the post-46.1/46.3 one-shot shape; `include_payload=true` continues to expose the full nested payload.
+
 ### Preview profiles and per-stream caps
 
 | `detail_level` | `max_files` | `max_entities` | `max_relations` | `max_citations` |

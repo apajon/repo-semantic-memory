@@ -353,6 +353,14 @@ def _tool_build_context_pack(
     payload["selected_relations"] = full_relations[: preview_caps["relations"]]
     payload["citations"] = full_citations[: preview_caps["citations"]]
 
+    # In brief mode, intentionally empty the verbose full-list compatibility
+    # fields. The full data remains accessible via ``result_set_id`` +
+    # ``rsm_get_context_page``; ``counts`` still reports full totals. Compact
+    # mode keeps the previous post-46.1/46.3 populated shape.
+    if detail_level == "brief":
+        payload["selected_entity_ids"] = []
+        payload["selected_relation_keys"] = []
+
     _register_pack_result_set(
         payload,
         store,

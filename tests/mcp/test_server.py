@@ -790,6 +790,11 @@ def test_build_context_pack_brief_default_caps(indexed_repo: tuple[Path, Path]) 
         assert "citations" in result["next"]
         assert result["next"]["citations"]["available"] == counts["citations"]
         assert result["next"]["citations"]["tool"] == "rsm_get_context_page"
+    # Prompt 46.6: verbose full-list compatibility fields are emptied in
+    # brief mode. The full data is still reachable via ``result_set_id`` +
+    # ``rsm_get_context_page`` and ``counts`` continues to report totals.
+    assert result["selected_entity_ids"] == []
+    assert result["selected_relation_keys"] == []
 
 
 def test_build_context_pack_compact_preserves_larger_caps(
@@ -812,6 +817,13 @@ def test_build_context_pack_compact_preserves_larger_caps(
     assert len(result["selected_relations"]) == min(counts["relations"], 10)
     assert len(result["citations"]) == min(counts["citations"], 12)
     assert "result_set_id" in result
+    # Prompt 46.6: compact mode preserves the populated full-list compatibility
+    # fields. When the pack selected any entities/relations the lists must be
+    # non-empty; otherwise they remain trivially empty for consistency.
+    if counts["entities"] > 0:
+        assert result["selected_entity_ids"]
+    if counts["relations"] > 0:
+        assert result["selected_relation_keys"]
 
 
 def test_build_context_pack_explicit_overrides(indexed_repo: tuple[Path, Path]) -> None:
