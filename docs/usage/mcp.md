@@ -80,6 +80,7 @@ is not required.
 | `rsm_search_symbols`          | `handle_search_symbols`                               |
 | `rsm_explain_entity`          | `handle_explain_entity`                               |
 | `rsm_build_context_pack`      | `handle_build_context_pack`                           |
+| `rsm_get_context_page`        | session-local result store (no recompute)             |
 | `rsm_query_graph`             | `handle_query_graph`                                  |
 | `rsm_validate_patch_context`  | `handle_validate_patch_context`                       |
 | `rsm_get_git_summary`         | `handle_get_git_summary`                              |
@@ -190,6 +191,8 @@ A default `rsm_build_context_pack` MCP call returns roughly:
 - `agent_instructions` — verbatim guidance to print before summarizing.
 - `omitted_sections` — names of bulky sections omitted from the response (e.g. `rendered`, `payload`, `ranking_breakdowns`).
 - `how_to_get_more` — concrete follow-up calls to retrieve the omitted material.
+- `result_set_id` — opaque session-scoped ID (`pack_<10 hex>`) usable with `rsm_get_context_page` to page over additional items without recomputing.
+- `counts` — per-stream item counts (`files`, `entities`, `relations`, `citations`, `ranking_breakdowns`) stored in the session-local result set.
 
 `rendered` and `payload` are still present as keys, but are empty (`""` and `{}`) by default, so existing consumers that check for key presence keep working.
 
@@ -210,10 +213,56 @@ Even when included, output remains bounded by the existing budget and profile be
 
 ### Recommended progressive workflow
 
-1. Call `rsm_build_context_pack` with defaults to get a compact summary.
+1. Call `rsm_build_context_pack` with defaults to get a compact summary plus an opaque `result_set_id` and per-stream `counts`.
 2. Inspect `selected_files`, `selected_entities`, and `selected_relations`.
 3. Call `rsm_explain_entity` with a specific `entity_id` for focused details.
-4. Only call `rsm_build_context_pack` again with `include_rendered=true` if a full Markdown pack is actually needed (e.g. debugging the ranking output).
+4. Call `rsm_get_context_page` with the `result_set_id` from step 1 to page over additional `files`, `entities`, `relations`, `citations`, or `ranking_breakdowns` without recomputing the pack.
+5. Only call `rsm_build_context_pack` again with `include_rendered=true` if a full Markdown pack is actually needed (e.g. debugging the ranking output).
 
 Ranking behavior, selected entities, and selected relations are **not** changed by these MCP defaults; only the response shape is.
+
+## Progressive context retrieval (`rsm_get_context_page`)
+
+`rsm_build_context_pack` registers its compact streams (`files`, `entities`, `relations`, `citations`, and optional `ranking_breakdowns`) in a small **in-memory session-local result store**. The build response carries an opaque `result_set_id` (format: `pack_<10 hex chars>`) and a `counts` object listing how many items each stream has. Agents page over those streams by calling `rsm_get_context_page` with the same `result_set_id`.
+
+Key properties:
+
+- **Read-only and bounded.** No disk writes, no background timers. The store keeps at most 8 result sets and at most 256 KB per result set; oldest entries are evicted on insertion.
+- **No recompute.** `rsm_get_context_page` only ever returns slices of the already-stored streams. It does not re-run ranking, selection, or budget evaluation.
+- **Session-scoped IDs.** `result_set_id` is stable only within the current MCP server process. It is not reproducible across sessions and must not be persisted by the client.
+- **Short per-entry IDs.** Each stored entry has a short stable ID inside its result set: `f1, f2, …` for files, `e1, e2, …` for entities, `r1, r2, …` for relations, `c1, c2, …` for citations, `b1, b2, …` for ranking breakdowns.
+
+### `rsm_get_context_page` arguments
+
+| Argument         | Required | Default | Effect                                                                                |
+| ---------------- | -------- | ------- | ------------------------------------------------------------------------------------- |
+| `result_set_id`  | yes      | —       | The opaque ID returned by a previous `rsm_build_context_pack` call in the same session.|
+| `stream`         | yes      | —       | One of `files`, `entities`, `relations`, `citations`, `ranking_breakdowns`.            |
+| `offset`         | no       | `0`     | Zero-based start offset within the stream.                                            |
+| `limit`          | no       | `5`     | Maximum entries to return. Hard upper bound: `20`.                                    |
+
+### `rsm_get_context_page` response
+
+```jsonc
+{
+  "result_set_id": "pack_4f3a91c2b8",
+  "stream": "entities",
+  "offset": 0,
+  "limit": 5,
+  "total": 12,
+  "next_offset": 5,
+  "items": [
+    {"id": "e1", "entity_id": "python:function:...", "name": "...", "path": "...", "start_line": 1, "end_line": 10},
+    ...
+  ],
+  "uncertainties": []
+}
+```
+
+`next_offset` is `null` when the stream is exhausted. `items` is empty (and `next_offset` is `null`) when `offset` is past the end.
+
+### Error handling
+
+- **Unknown or expired `result_set_id`** is a *recoverable tool-level outcome*: the response includes a `result_set_unknown` entry under `uncertainties` with `recoverable: true`. The suggested action is to call `rsm_build_context_pack` again to mint a fresh result set. This is **not** surfaced as a JSON-RPC protocol error.
+- **Malformed arguments** (missing `result_set_id`/`stream`, unknown `stream` value, out-of-range `offset`/`limit`) are normal MCP tool-call errors: the response carries `isError: true` and a short message, leaving the JSON-RPC envelope intact.
 

@@ -1,6 +1,6 @@
 # MCP progressive context retrieval
 
-Status: design proposal (no implementation in this change).
+Status: implemented in Prompt 46.3 (runtime: `src/repo_semantic_memory/mcp/session.py`, `rsm_get_context_page` tool). See [`docs/usage/mcp.md`](../usage/mcp.md) for the user-facing contract.
 
 This document proposes a progressive retrieval model for RSM's MCP context-pack
 tool. It builds on the compact-by-default behavior introduced in Prompt 46.1
