@@ -258,12 +258,68 @@ def _tool_explain_entity(
     return _serialize_response(response)
 
 
+# Internal store cap used when collecting pack streams to make available via
+# ``rsm_get_context_page``. The handler will not slice beyond this, so the
+# session-local result store sees the full pack output (subject to the pack's
+# own ranking/selection budget) while the response shows a smaller preview.
+_PACK_STORE_CAP = 1000
+
+# Hard safety cap for user-supplied per-stream preview values. Mirrors the
+# handler's own non-negative check while preventing accidental enormous
+# previews from MCP callers.
+_PACK_PREVIEW_SAFETY_CAP = 200
+
+# Per-``detail_level`` brief/compact preview defaults.
+_DETAIL_LEVEL_DEFAULTS: dict[str, dict[str, int]] = {
+    "brief": {
+        "max_files": 5,
+        "max_entities": 5,
+        "max_relations": 3,
+        "max_citations": 0,
+    },
+    "compact": {
+        # ``compact`` preserves the post-46.1/46.3 one-shot preview shape so
+        # agents that want a larger first response keep their behavior. Files
+        # are intentionally not capped in compact mode.
+        "max_files": _PACK_STORE_CAP,
+        "max_entities": 15,
+        "max_relations": 10,
+        "max_citations": 12,
+    },
+}
+
+
+def _bounded_preview_int(args: Mapping[str, Any], key: str, default: int) -> int:
+    """Parse an optional preview cap; reject negatives, clamp to safety cap."""
+
+    value = _optional_int(args, key, default)
+    if value < 0:
+        raise ToolInvocationError(f"argument {key!r} must be >= 0")
+    return min(value, _PACK_PREVIEW_SAFETY_CAP)
+
+
 def _tool_build_context_pack(
     args: Mapping[str, Any], session: SessionConfig, store: ResultStore
 ) -> dict[str, Any]:
     fmt = args.get("format", "markdown")
     if fmt not in ("markdown", "yaml"):
         raise ToolInvocationError("argument 'format' must be 'markdown' or 'yaml'")
+    detail_level = args.get("detail_level", "brief")
+    if detail_level not in _DETAIL_LEVEL_DEFAULTS:
+        raise ToolInvocationError(
+            f"argument 'detail_level' must be one of {sorted(_DETAIL_LEVEL_DEFAULTS)}"
+        )
+    defaults = _DETAIL_LEVEL_DEFAULTS[detail_level]
+    preview_caps = {
+        "files": _bounded_preview_int(args, "max_files", defaults["max_files"]),
+        "entities": _bounded_preview_int(args, "max_entities", defaults["max_entities"]),
+        "relations": _bounded_preview_int(args, "max_relations", defaults["max_relations"]),
+        "citations": _bounded_preview_int(args, "max_citations", defaults["max_citations"]),
+    }
+
+    # Always ask the handler for the full pack streams so ``rsm_get_context_page``
+    # can later page over items that the preview omitted (e.g. citations under
+    # the brief default). Preview-side caps are applied in this runtime layer.
     request = BuildContextPackRequest(
         task=_require_str(args, "task"),
         db_path=str(session.db_path),
@@ -275,29 +331,59 @@ def _tool_build_context_pack(
         include_rendered=_optional_bool(args, "include_rendered", False),
         include_payload=_optional_bool(args, "include_payload", False),
         include_ranking_breakdowns=_optional_bool(args, "include_ranking_breakdowns", False),
-        max_entities=_optional_int(args, "max_entities", 15),
-        max_relations=_optional_int(args, "max_relations", 10),
-        max_citations=_optional_int(args, "max_citations", 12),
+        max_entities=_PACK_STORE_CAP,
+        max_relations=_PACK_STORE_CAP,
+        max_citations=_PACK_STORE_CAP,
     )
     response = _handlers.handle_build_context_pack(request, repo_root=session.repo_root)
     payload = _serialize_response(response)
-    _register_pack_result_set(payload, store)
+
+    # Snapshot the full streams (as returned by the handler) before applying
+    # the per-stream preview caps so the result store can serve subsequent
+    # ``rsm_get_context_page`` calls without recomputing the pack.
+    full_files = list(payload.get("selected_files") or [])
+    full_entities = list(payload.get("selected_entities") or [])
+    full_relations = list(payload.get("selected_relations") or [])
+    full_citations = list(payload.get("citations") or [])
+
+    # Apply preview caps to the user-facing response. Underlying streams
+    # remain in the result store (see ``_register_pack_result_set``).
+    payload["selected_files"] = full_files[: preview_caps["files"]]
+    payload["selected_entities"] = full_entities[: preview_caps["entities"]]
+    payload["selected_relations"] = full_relations[: preview_caps["relations"]]
+    payload["citations"] = full_citations[: preview_caps["citations"]]
+
+    _register_pack_result_set(
+        payload,
+        store,
+        full_files=full_files,
+        full_entities=full_entities,
+        full_relations=full_relations,
+        full_citations=full_citations,
+        preview_caps=preview_caps,
+    )
+    payload["detail_level"] = detail_level
     return payload
 
 
-def _register_pack_result_set(payload: dict[str, Any], store: ResultStore) -> None:
-    """Register the compact pack streams with the session-local result store.
+def _register_pack_result_set(
+    payload: dict[str, Any],
+    store: ResultStore,
+    *,
+    full_files: list[Any],
+    full_entities: list[Any],
+    full_relations: list[Any],
+    full_citations: list[Any],
+    preview_caps: Mapping[str, int],
+) -> None:
+    """Register full pack streams and inject result_set_id/counts/next hints.
 
-    The store keeps already-computed slices so a follow-up
-    ``rsm_get_context_page`` call never recomputes the context pack. The
-    JSON payload is extended with an opaque ``result_set_id`` and per-stream
-    ``counts`` so agents can drive paging.
+    The store keeps the full streams (not just the preview slice) so a
+    follow-up ``rsm_get_context_page`` call never recomputes the context
+    pack and can return items beyond the preview cap (for example, the
+    citations omitted from the brief default).
     """
 
-    files = payload.get("selected_files") or []
-    entities = payload.get("selected_entities") or []
-    relations = payload.get("selected_relations") or []
-    citations = payload.get("citations") or []
     ranking_breakdowns: list[Any] = []
     payload_section = payload.get("payload")
     if isinstance(payload_section, Mapping):
@@ -306,15 +392,40 @@ def _register_pack_result_set(payload: dict[str, Any], store: ResultStore) -> No
             ranking_breakdowns = list(raw_breakdowns)
 
     streams = {
-        "files": _short_id_stream("f", _file_entries(files)),
-        "entities": _short_id_stream("e", entities),
-        "relations": _short_id_stream("r", relations),
-        "citations": _short_id_stream("c", citations),
+        "files": _short_id_stream("f", _file_entries(full_files)),
+        "entities": _short_id_stream("e", full_entities),
+        "relations": _short_id_stream("r", full_relations),
+        "citations": _short_id_stream("c", full_citations),
         "ranking_breakdowns": _short_id_stream("b", ranking_breakdowns),
     }
     result_set = store.put(streams)
+    counts: dict[str, int] = dict(result_set.counts)
     payload["result_set_id"] = result_set.result_set_id
-    payload["counts"] = dict(result_set.counts)
+    payload["counts"] = counts
+
+    # ``next`` advertises per-stream availability beyond what the preview
+    # shows so agents know which streams they can page with
+    # ``rsm_get_context_page``. ``ranking_breakdowns`` is included whenever
+    # any are stored (the preview never embeds them).
+    shown_counts: dict[str, int] = {
+        "files": min(len(full_files), preview_caps.get("files", 0)),
+        "entities": min(len(full_entities), preview_caps.get("entities", 0)),
+        "relations": min(len(full_relations), preview_caps.get("relations", 0)),
+        "citations": min(len(full_citations), preview_caps.get("citations", 0)),
+        "ranking_breakdowns": 0,
+    }
+    next_hints: dict[str, dict[str, Any]] = {}
+    for stream_name in ("files", "entities", "relations", "citations", "ranking_breakdowns"):
+        available = counts.get(stream_name, 0)
+        shown = shown_counts[stream_name]
+        if available > shown:
+            next_hints[stream_name] = {
+                "stream": stream_name,
+                "available": available,
+                "shown": shown,
+                "tool": "rsm_get_context_page",
+            }
+    payload["next"] = next_hints
 
 
 def _file_entries(files: Any) -> list[dict[str, Any]]:
@@ -530,8 +641,11 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
             name="rsm_build_context_pack",
             description=(
                 "Build a deterministic, source-cited, budget-bounded context pack for a task. "
-                "Returns a compact summary by default; opt in to full output with "
-                "include_rendered, include_payload, or include_ranking_breakdowns. Read-only."
+                "Returns a brief first-page preview by default (5 files, 5 entities, 3 relations, "
+                "0 citations) plus a session-scoped result_set_id; use rsm_get_context_page to "
+                "page over omitted items. Pass detail_level='compact' for the larger one-shot "
+                "preview, or opt in to full output with include_rendered, include_payload, or "
+                "include_ranking_breakdowns. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -539,11 +653,16 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                     "budget_chars": {"type": "integer", "minimum": 1},
                     "format": {"type": "string", "enum": ["markdown", "yaml"]},
                     "profile": {"type": "string"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": sorted(_DETAIL_LEVEL_DEFAULTS),
+                    },
                     "explain_ranking": {"type": "boolean"},
                     "include_semantic_components": {"type": "boolean"},
                     "include_rendered": {"type": "boolean"},
                     "include_payload": {"type": "boolean"},
                     "include_ranking_breakdowns": {"type": "boolean"},
+                    "max_files": {"type": "integer", "minimum": 0},
                     "max_entities": {"type": "integer", "minimum": 0},
                     "max_relations": {"type": "integer", "minimum": 0},
                     "max_citations": {"type": "integer", "minimum": 0},

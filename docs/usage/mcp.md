@@ -174,7 +174,7 @@ Use RSM MCP and print `selected_files`, `selected_entities`, and `selected_relat
 
 ## Compact-by-default context packs and progressive disclosure
 
-`rsm_build_context_pack` returns a **compact** machine-friendly summary by default. The full Markdown/YAML rendering and the full nested `payload` are not emitted unless the caller explicitly opts in. This is a deliberate MCP-prototype evolution: large tool outputs are often spilled by MCP clients into temporary resource files that an agent then has to fetch again, which is wasteful and bad as a default workflow. The CLI `rsm pack` command is unchanged and still emits the full pack.
+`rsm_build_context_pack` returns a **brief first-page preview** by default. The full Markdown/YAML rendering, the full nested `payload`, citations, and items beyond the brief caps are not emitted unless the caller explicitly opts in or pages over the session-local result set with `rsm_get_context_page`. This is a deliberate MCP-prototype evolution: large tool outputs are often spilled by MCP clients into temporary resource files that an agent then has to fetch again, which is wasteful and bad as a default workflow. The CLI `rsm pack` command is unchanged and still emits the full pack.
 
 ### Default MCP response shape
 
@@ -183,41 +183,55 @@ A default `rsm_build_context_pack` MCP call returns roughly:
 - `task` — the requested task string.
 - `truncated` — whether the budget cap or pack size forced truncation.
 - `budget` — `requested_chars`, `used_chars`, `truncated`.
-- `selected_files` — repo-relative file paths the agent should read.
-- `selected_entities` — bounded list of flattened entries with `entity_id`, `kind`, `name`, `qualified_name`, `path`, `start_line`, `end_line`.
-- `selected_relations` — bounded list of `{kind, source_entity_id, target_entity_id}` entries.
-- `citations` — bounded list of source citations.
+- `detail_level` — echoes the resolved preview profile (`"brief"` by default).
+- `selected_files` — repo-relative file paths the agent should read (brief: up to 5).
+- `selected_entities` — bounded list of flattened entries with `entity_id`, `kind`, `name`, `qualified_name`, `path`, `start_line`, `end_line` (brief: up to 5).
+- `selected_relations` — bounded list of `{kind, source_entity_id, target_entity_id}` entries (brief: up to 3).
+- `citations` — bounded list of source citations (brief: empty by default; full list paged via `rsm_get_context_page`).
 - `uncertainties` — machine-readable uncertainty envelopes.
 - `agent_instructions` — verbatim guidance to print before summarizing.
 - `omitted_sections` — names of bulky sections omitted from the response (e.g. `rendered`, `payload`, `ranking_breakdowns`).
 - `how_to_get_more` — concrete follow-up calls to retrieve the omitted material.
 - `result_set_id` — opaque session-scoped ID (`pack_<10 hex>`) usable with `rsm_get_context_page` to page over additional items without recomputing.
-- `counts` — per-stream item counts (`files`, `entities`, `relations`, `citations`, `ranking_breakdowns`) stored in the session-local result set.
+- `counts` — per-stream item counts (`files`, `entities`, `relations`, `citations`, `ranking_breakdowns`) stored in the session-local result set. Always reflects the full stream size, even when the preview is empty.
+- `next` — per-stream availability hints. Each entry advertises a stream where more items are available than the preview shows, e.g. `{"citations": {"stream": "citations", "available": 12, "shown": 0, "tool": "rsm_get_context_page"}}`.
 
 `rendered` and `payload` are still present as keys, but are empty (`""` and `{}`) by default, so existing consumers that check for key presence keep working.
+
+### Preview profiles and per-stream caps
+
+| `detail_level` | `max_files` | `max_entities` | `max_relations` | `max_citations` |
+| -------------- | ----------- | -------------- | --------------- | --------------- |
+| `brief` (default) | 5         | 5              | 3               | 0               |
+| `compact`      | unbounded   | 15             | 10              | 12              |
+
+Brief is the default because the result set is always built and registered for paging; an agent that needs more items should call `rsm_get_context_page` rather than asking for a heavier first response. `compact` preserves the post-46.1/46.3 one-shot preview shape for agents that want a larger first answer.
 
 ### Opt-in flags
 
 Pass these in `arguments` to opt into heavier output:
 
-| Argument                       | Default | Effect                                                                 |
-| ------------------------------ | ------- | ---------------------------------------------------------------------- |
-| `include_rendered`             | `false` | Include Markdown (or YAML when `format=yaml`) rendering of the pack.   |
-| `include_payload`              | `false` | Include the full nested context-pack payload dict.                     |
-| `include_ranking_breakdowns`   | `false` | Include `ranking_breakdowns` under `payload` (or alone if no payload). |
-| `max_entities`                 | `15`    | Maximum `selected_entities` returned.                                  |
-| `max_relations`                | `10`    | Maximum `selected_relations` returned.                                 |
-| `max_citations`                | `12`    | Maximum `citations` returned.                                          |
+| Argument                       | Default   | Effect                                                                 |
+| ------------------------------ | --------- | ---------------------------------------------------------------------- |
+| `detail_level`                 | `"brief"` | `"brief"` (small preview) or `"compact"` (larger one-shot preview).    |
+| `include_rendered`             | `false`   | Include Markdown (or YAML when `format=yaml`) rendering of the pack.   |
+| `include_payload`              | `false`   | Include the full nested context-pack payload dict.                     |
+| `include_ranking_breakdowns`   | `false`   | Include `ranking_breakdowns` under `payload` (or alone if no payload). |
+| `max_files`                    | profile   | Override the per-profile file preview cap.                             |
+| `max_entities`                 | profile   | Override the per-profile entity preview cap.                           |
+| `max_relations`                | profile   | Override the per-profile relation preview cap.                         |
+| `max_citations`                | profile   | Override the per-profile citation preview cap.                         |
 
-Even when included, output remains bounded by the existing budget and profile behavior. Some MCP clients store long tool outputs as temporary content resources rather than inlining them; that is expected for `include_rendered=true` debug runs and acceptable, but should not be the default workflow.
+Explicit `max_*` values take precedence over the profile defaults and are clamped to a safety cap (200). Negative values are rejected as tool-call errors. Even when included, output remains bounded by the existing budget and profile behavior. Some MCP clients store long tool outputs as temporary content resources rather than inlining them; that is expected for `include_rendered=true` debug runs and acceptable, but should not be the default workflow.
 
 ### Recommended progressive workflow
 
-1. Call `rsm_build_context_pack` with defaults to get a compact summary plus an opaque `result_set_id` and per-stream `counts`.
+1. Call `rsm_build_context_pack` with defaults to get a brief preview plus an opaque `result_set_id`, per-stream `counts`, and a `next` map of streams that have more items available.
 2. Inspect `selected_files`, `selected_entities`, and `selected_relations`.
 3. Call `rsm_explain_entity` with a specific `entity_id` for focused details.
-4. Call `rsm_get_context_page` with the `result_set_id` from step 1 to page over additional `files`, `entities`, `relations`, `citations`, or `ranking_breakdowns` without recomputing the pack.
-5. Only call `rsm_build_context_pack` again with `include_rendered=true` if a full Markdown pack is actually needed (e.g. debugging the ranking output).
+4. Call `rsm_get_context_page` with the `result_set_id` from step 1 to page over additional `files`, `entities`, `relations`, `citations`, or `ranking_breakdowns` without recomputing the pack. The brief default omits `citations`; they are always retrievable this way when the pack produced any.
+5. Pass `detail_level="compact"` if you want a larger one-shot preview without paging.
+6. Only call `rsm_build_context_pack` again with `include_rendered=true` if a full Markdown pack is actually needed (e.g. debugging the ranking output).
 
 Ranking behavior, selected entities, and selected relations are **not** changed by these MCP defaults; only the response shape is.
 
