@@ -195,13 +195,16 @@ on three guarantees, which the implementation must honor:
 
 1. Every `Entity` carries its repo-relative source path in its existing
    `path` field (already true today).
-2. Every `Relation` carries the repo-relative source path of the file
-   that produced the relation (the "producer file"). This is **already
-   present** in today's relation evidence for most extractors but is
-   not yet a hard schema-level guarantee. The implementation prompt
-   must verify per-extractor and add an explicit `producer_path`
-   accessor on `Relation` if needed. **This is the single non-trivial
-   schema-touching change required to make incremental safe.**
+2. Every `Relation` can be attributed to the repo-relative source path
+   of the file that produced it (its "producer file"). Per the
+   Prompt 50.1 audit (§11), this is **already true for every relation
+   kind today**, derivable as
+   `relation.evidence.source_range.path` when evidence is present,
+   else `Entity.source_range.path` of the relation's
+   `source_entity_id`. No schema change is required to start
+   implementing incremental indexing; an explicit `producer_path`
+   column on the SQLite `relations` table is an optional later
+   optimization, not a prerequisite.
 3. A given producer file's full set of entities/relations is the union
    of what its extractors return; no extractor mutates another file's
    rows.
@@ -475,3 +478,189 @@ store, and falls back to a full rebuild whenever safety cannot be
 proven. It is design-only in this prompt; implementation lands behind
 an experimental flag in follow-up prompts, gated by the validation
 matrix in §7.
+
+## 11. Relation producer-path attribution audit (Prompt 50.1)
+
+This section verifies the §3.1 invariant — *every relation can be
+attributed to an owning producer file* — against the current extractor
+pipeline. It is the prerequisite the incremental design depends on; if
+any current relation kind were unattributable, incremental indexing
+would be blocked until either the schema or the extractor changed.
+
+**Result: every relation kind currently produced by RSM is
+attributable to a producer file path without any schema change.**
+Incremental implementation is unblocked.
+
+### 11.1 Inventory
+
+Source of truth: `Relation.kind` literal in
+`src/repo_semantic_memory/model/relation.py` and every `Relation(...)`
+construction site in `src/repo_semantic_memory/extractors/`.
+
+Eleven relation kinds are declared in `RELATION_KINDS`:
+
+```
+contains, imports, inherits, calls, uses, tests, documents,
+owns, requires, violates, exports
+```
+
+Of those, only five are actually produced by the current pipeline.
+The remaining six (`calls`, `uses`, `documents`, `owns`, `requires`,
+`violates`) are reserved kinds with **no producer extractor today**;
+they exist in the schema for forward compatibility (e.g. the
+`graph_selection` weight table references them) but are never written
+to the SQLite store. They cannot create incremental-safety problems
+because they cannot exist in any current index. If a future extractor
+adds them, that extractor must satisfy the same producer-path rule.
+
+| Relation | Producer pass                                       | Source kind                       | Target kind                                | Scope            | Evidence?  | Producer path source                                            |
+| -------- | --------------------------------------------------- | --------------------------------- | ------------------------------------------ | ---------------- | ---------- | --------------------------------------------------------------- |
+| `contains` (Python) | `extractors.python_ast`               | `module` / `class`                | `function` / `class` / `method`            | intra-file       | **none**   | `source_entity_id` → `Entity.source_range.path` (module path).  |
+| `contains` (Markdown) | `extractors.markdown_outline`       | `doc` / section `doc`             | section `doc`                              | intra-file       | yes        | `evidence.source_range.path` = target heading path = doc path.  |
+| `inherits` | `extractors.python_ast`                            | `class`                           | unresolved `python_symbol`                 | cross-file       | **none**   | `source_entity_id` → owning class's module path.                |
+| `imports` | `extractors.python_ast`                             | `module`                          | external symbol id                         | cross-file       | **none**   | `source_entity_id` → owning module path.                        |
+| `exports` | `extractors.python_exports`                         | `module` (`__init__.py`)          | unresolved export id                       | cross-file       | yes        | `evidence.source_range.path` = `__init__.py` path.              |
+| `tests`   | `extractors.test_relationships` (post-pass)        | `test` / `function` / `class`      | tested entity                              | cross-file       | yes        | `evidence.source_range.path` = test file (source) path.         |
+
+### 11.2 Producer-path derivation rule
+
+For every relation in the store, the producer file path is computed
+deterministically as:
+
+```
+producer_path(relation) =
+    relation.evidence.source_range.path        if evidence is present
+    else entity_path(relation.source_entity_id) if source is an indexed entity
+    else None
+```
+
+`entity_path` is just `Entity.source_range.path`, which is a required
+non-empty string (`SourceRange.__post_init__`).
+
+The fall-back to `source_entity_id`'s entity path is sound because all
+relations produced today have a source side that is **always an
+indexed entity in the same DB**:
+
+- `contains` (Python): source is a `module`/`class` entity emitted by
+  the same `python_ast` pass.
+- `inherits`: source is a `class` entity emitted by the same pass.
+- `imports`: source is a `module` entity emitted by the same pass.
+- `contains` (Markdown), `exports`, `tests` already carry explicit
+  `evidence.source_range.path`, so the fall-back is not needed.
+
+In every case the producer file is uniquely determined.
+
+### 11.3 Classification
+
+Using the categories from the task description:
+
+| Category                                       | Kinds                                                  | Rationale                                                                                                                                                          |
+| ---------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `safe_file_scoped`                             | `contains` (Python), `contains` (Markdown)             | Source and target live in the same producer file. Purging by producer path is exact.                                                                               |
+| `safe_cross_file_with_global_recompute`        | `imports`, `inherits`, `exports`, `tests`              | Producer path is well-defined (source-side) and re-extracted from the changed file. The target may be unresolved or live in another file; correctness is preserved by the dangling-relation sweep (§3.2 step (e) of executor) plus repo-wide re-runs for `tests` and ECS `PublicAPI` confirmation. |
+| `requires_full_rebuild`                        | *(none)*                                               | No current relation kind requires it.                                                                                                                              |
+| `unknown`                                      | *(none)*                                               | All produced kinds are accounted for.                                                                                                                              |
+
+The reserved-but-unused kinds (`calls`, `uses`, `documents`, `owns`,
+`requires`, `violates`) are deliberately **not** classified above
+because they have no producer today and therefore cannot appear in any
+index. The incremental change detector treats any extractor that
+emits an unrecognized or unattributable kind as a fallback trigger
+(§4.1, `incremental_unattributable_relation`). This makes "unknown"
+the safe default for any future extractor that has not been audited.
+
+### 11.4 Invalidation strategy per class
+
+- **File-scoped (`contains` Python, `contains` Markdown).**
+  Purge by producer path = re-extract the changed file. No
+  cross-file impact.
+- **Cross-file with global recompute (`imports`, `inherits`).**
+  Purge relations whose producer path is in the change set. Re-extract
+  the changed module via the existing `python_ast` pass. Targets are
+  unresolved or external ids; the dangling-relation sweep (§3.4
+  invariant 2) removes any relation whose target no longer resolves
+  after the changed file's deletions land.
+- **Cross-file with global recompute (`exports`).**
+  Purge relations whose producer (`__init__.py`) is in the change
+  set. Re-extract the changed `__init__.py` via `python_exports`.
+  Repo-wide ECS `PublicAPI` confirmation (§3.3) runs once over the
+  updated graph regardless of which files changed.
+- **Cross-file with global recompute (`tests`).**
+  `test_relationships` is a post-pass that reads *all* entities and
+  pre-existing relations. The incremental executor treats it as a
+  global recompute step (§3.3): after per-file extraction completes,
+  re-run `extract_test_relationships(repo_root, entities, relations)`
+  and replace all existing `tests` relations atomically inside the
+  same transaction. This is cheap relative to AST extraction and
+  keeps test attribution correct even when a non-test file changes.
+
+### 11.5 Required metadata changes
+
+**None for the current relation set.** The producer path is derivable
+from existing fields:
+
+- `relation.evidence.source_range.path` when present.
+- `entity.source_range.path` for the relation's `source_entity_id`
+  otherwise.
+
+The incremental change detector (Prompt 50, step 8.2) will expose this
+derivation as a single helper, e.g. `producer_path(relation, store) ->
+str | None`. Returning `None` triggers the
+`incremental_unattributable_relation` fallback (§4.1) — but as
+established above, that branch is unreachable with today's extractors.
+
+The "explicit `producer_path` accessor on `Relation`" suggestion in
+§3.1 of the original incremental design is therefore **downgraded to
+optional**:
+
+- It is **not required** to start implementing incremental indexing.
+- It **may** be added later as a cached column on the SQLite
+  `relations` table for query speed, behind a schema version bump.
+  Until then the derivation is cheap (single dict lookup per relation
+  against the entity table).
+
+### 11.6 Tests proposed for Prompt 50.2+
+
+The implementation prompt that adds the change detector should ship
+the following tests (one per concern):
+
+1. `test_producer_path_for_every_relation_kind` — index a small
+   fixture repo, walk every relation in the store, assert that the
+   derivation rule (§11.2) returns a non-`None` path for every
+   relation. Snapshot the (kind, path) pairs.
+2. `test_no_unknown_relation_kind_in_classification` — assert that
+   every value in `RELATION_KINDS` is either in the classification
+   table (§11.3) or has no producer extractor today. Fails if a new
+   relation kind is wired in without an audit update.
+3. `test_incremental_fallback_on_unattributable_relation` — inject a
+   synthetic relation whose source entity is not in the store, run
+   the change planner, assert it returns the
+   `incremental_unattributable_relation` fallback.
+4. `test_purge_by_producer_path_leaves_no_dangling_relations` — set
+   up a fixture with cross-file `imports`/`inherits`/`exports`/`tests`
+   relations; delete a producer file; run the executor; assert no
+   relation in the store references a missing entity id and no
+   relation has `producer_path` pointing at the purged file.
+5. `test_python_ast_relations_have_resolvable_source_entity` — guard
+   the §11.2 fall-back: every `contains`/`inherits`/`imports`
+   relation produced by `python_ast` must have its `source_entity_id`
+   present in the same extractor batch.
+
+These tests live alongside the change-detector module in Prompt 50.2.
+This audit prompt does **not** add them, because no production code
+has changed.
+
+### 11.7 Conclusion
+
+- **5 relation kinds** are currently produced.
+- **All 5** are safely attributable to a producer file path with no
+  schema change.
+- **0** are unattributable or require full rebuild.
+- **6 reserved kinds** are unused and therefore non-issues today; any
+  future extractor that emits one must update §11.1–§11.3 and is
+  guarded by the `incremental_unattributable_relation` fallback in the
+  meantime.
+
+Incremental implementation (Prompt 50.2 — change detector,
+Prompt 50.3 — executor) is **unblocked** by this audit and may proceed
+without a schema change.
