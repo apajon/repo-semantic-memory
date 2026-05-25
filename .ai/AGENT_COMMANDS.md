@@ -70,11 +70,28 @@ uv run rsm index . --register        # index to the store's canonical path
 uv run rsm store status .            # check freshness
 ```
 
-DB resolution order for `pack`, `repo-map`, `inspect`, `components`, `invariants`, `eval`, `export-ai`, `export-jsonl`:
+See the [Reader DB resolution](#reader-db-resolution) section below for
+the full resolution order and diagnostics.
 
-1. Explicit `--db` argument — always wins.
-2. RSM Index Store entry for the current working directory.
-3. `.rsm/index.sqlite` — legacy fallback.
+## Reader DB resolution
+
+For reader commands, prefer omitting `--db` when the repository has been
+registered in the RSM Index Store.
+
+Resolution order:
+
+1. explicit `--db`
+2. RSM Index Store entry for the current working directory
+3. `.rsm/index.sqlite`
+
+If a command appears to read an unexpected index, run:
+
+```bash
+rsm store db .
+rsm store status .
+```
+
+Then check whether `.rsm/index.sqlite` also exists.
 
 ## Regeneration / staleness
 

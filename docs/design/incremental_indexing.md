@@ -1,8 +1,23 @@
-# Incremental indexing via Git diff (design)
+# Incremental indexing
 
-This document specifies how RSM can update an existing index for only the
-files that changed since the last successful indexing run, instead of
-rebuilding the full index every time.
+Status: implemented behind explicit `rsm index --incremental`.
+
+Full rebuild remains the default indexing mode. Incremental indexing is opt-in
+and falls back to a full rebuild whenever safety cannot be proven.
+
+The implementation updates an existing index using local Git signals:
+`git diff --name-status <indexed_head> HEAD` and `git status --porcelain`.
+It re-extracts changed files, removes deleted paths from the index, refreshes
+affected relations, and updates index metadata inside a SQLite transaction.
+
+MCP remains read-only: the MCP server reports index status but does not
+auto-index, auto-refresh, or mutate indexes for the client.
+
+---
+
+This document originated as the design specification for incremental indexing.
+The current implementation follows the staged design and keeps incremental
+indexing explicit via `--incremental`. Design rationale is preserved below.
 
 It builds on:
 
@@ -20,9 +35,27 @@ The metadata rows already persisted by Prompt 49.1 (`indexed_at`,
 truth** for "what state was this index built against". Incremental
 indexing reuses them; **no second metadata system is introduced**.
 
-The goal of this prompt is **design only**. Nothing is implemented here.
-Implementation will land in a dedicated follow-up prompt where it can be
-reviewed in isolation and gated behind a feature flag until proven safe.
+## Implementation status
+
+Implemented:
+
+- `rsm index <repo> --incremental`
+- incremental planning from local Git diff/status signals
+- full rebuild fallback when safety cannot be proven
+- file-level purge and re-extraction for changed/deleted paths
+- transactional SQLite update path
+- index metadata updates after successful indexing
+- reader-command DB resolution through the RSM Index Store
+- local dogfooding for Index Store + incremental indexing
+
+Still deferred:
+
+- automatic indexing from MCP
+- daemon/watch mode
+- background refresh
+- non-Git incremental guarantees
+- public benchmark claims
+- aggressive fine-grained cross-file invalidation beyond the current safe model
 
 ## Non-goals
 
@@ -73,7 +106,7 @@ Rationale:
 Full rebuild remains the default. `--incremental` is opt-in until the
 mode is proven stable across the validation matrix in §7.
 
-Example invocations (design intent — not yet implemented):
+Example invocations:
 
 ```bash
 # Explicit --db, incremental update
@@ -327,8 +360,8 @@ correct. The cost is wall-clock time, not correctness.
 
 ## 5. Metadata model (reuse, not extend)
 
-Incremental indexing **does not** add new metadata rows. It writes the
-same rows Prompt 49.1 already writes:
+Incremental indexing writes the same staleness rows Prompt 49.1 established,
+plus one additional diagnostic row:
 
 ```jsonc
 {
@@ -338,21 +371,19 @@ same rows Prompt 49.1 already writes:
   "entity_count": "<decimal>",
   "relation_count": "<decimal>",
   "context_pack_version": "<runtime>",
-  "schema_version": "<runtime>"
+  "schema_version": "<runtime>",
+  "last_index_mode": "incremental"   // written by incremental runs only
 }
 ```
 
-A future prompt may add a small diagnostic row (e.g.
-`last_index_mode = "incremental" | "full"`) **only if** the staleness
-detector or the CLI status command needs to distinguish the two. The
-default for this design is: no new row. The Index Store's
-`registry.json` is likewise untouched; its `last_indexed_at` continues
-to mean "last successful `rsm index` for this repo", regardless of
-mode.
+`last_index_mode = "incremental"` is written after every successful incremental
+update. Full rebuilds do not write `last_index_mode`; the key is absent from
+those metadata rows. Full-rebuild writes remain unchanged from Prompt 49.1,
+with only the incremental path adding the new key.
 
-This is the explicit reason this prompt is design-only and not
-implementation: we do **not** want to grow the metadata schema for a
-mode that has not been validated end-to-end.
+The Index Store's `registry.json` is likewise untouched; its `last_indexed_at`
+continues to mean "last successful `rsm index` for this repo", regardless of
+mode.
 
 ## 6. CLI / MCP surface
 
@@ -380,20 +411,19 @@ freshness via `indexed_at`, `indexed_git_head`, `current_git_head`,
 `working_tree_dirty`, and `index_status`. Incremental indexing simply
 keeps those fields up-to-date faster.
 
-If a future prompt adds `last_index_mode`, it would appear as an
-additional top-level string in both outputs; absent until then.
+`last_index_mode` is written by incremental runs (see §5); it is not
+currently surfaced in the `rsm_status` JSON output.
 
-## 7. Validation plan
+## 7. Validation
 
-When implementation lands, validation must include the following on top
-of the standard suite (`uv run ruff format --check .`,
+Validation covers the standard suite (`uv run ruff format --check .`,
 `uv run ruff check .`, `uv run mypy src`,
-`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest`):
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest`) plus the following:
 
 1. **Determinism parity.** For a fixed repo state, the final DB
    produced by `rsm index --incremental` (starting from any reachable
    prior index) must be **byte-identical** to a fresh full rebuild,
-   modulo `indexed_at` and any future `last_index_mode` row. This
+   modulo `indexed_at` and `last_index_mode`. This
    includes entity ids, relation ids, sort orders, and metadata
    counts. Add a focused test that runs both modes against a fixture
    repo and diffs `list_entities()` / `list_relations()`.
@@ -415,49 +445,38 @@ of the standard suite (`uv run ruff format --check .`,
    incrementally-updated DB and a freshly-rebuilt DB on the same
    commit must produce identical metrics.
 
-Until these pass, `--incremental` is **not** advertised in user-facing
-docs (`docs/usage/cli.md`, `README.md`) outside an "experimental"
-callout.
+All items above are covered by `tests/indexing/test_parity.py` (13 parity
+scenarios) and `tests/indexing/test_executor.py` (20 executor tests).
 
-## 8. Implementation staging
+## 8. Implementation history
 
-This prompt ships **design only**. The pieces below are sequenced for
-later prompts, each small enough to review in isolation:
+The design was implemented in four stages, each reviewed in isolation:
 
-1. **Producer-path guarantee.** Audit every extractor and add an
-   explicit `producer_path` accessor on `Relation` if any extractor
-   currently produces a relation without an attributable source file.
-   Tests cover every extractor. No CLI / MCP surface change.
-2. **Change detector module.** New
-   `src/repo_semantic_memory/incremental.py` (or similar) exposing a
-   pure function `plan_incremental_update(repo_root, db_path) ->
-   IncrementalPlan | FullRebuildRequired`. No DB writes; pure
-   computation over inputs from §2.1. Heavily unit-tested.
-3. **Executor.** Wire `plan_incremental_update` into `rsm index` behind
-   the `--incremental` flag. Deletes + extractor scoping + dangling
-   sweep + metadata refresh, all inside a single transaction.
-4. **Docs.** Update `docs/usage/cli.md` and `README.md` once §7
-   validation passes; remove the experimental callout.
-
-Steps 2 and 3 are **gated** behind §7 validation. Step 1 is safe to land
-on its own because it only tightens an existing extractor contract.
+1. **Producer-path guarantee (Prompt 50.1).** Audited every extractor. All current
+   relation kinds are attributable to a producer file path without any schema change.
+   No CLI / MCP surface change.
+2. **Change detector module (Prompt 50.2).** `src/repo_semantic_memory/indexing/incremental.py`
+   exposes `plan_incremental_update(repo_root, indexed_head, ...) -> IncrementalPlan`.
+   No DB writes; pure computation from Git signals. 48 unit tests.
+3. **Executor (Prompt 50.3).** `run_incremental_index()` wired into `rsm index` behind
+   the `--incremental` flag. Purge + re-extract + global recompute + metadata refresh,
+   all inside a single `SQLiteStore._transaction()`. 20 executor tests.
+4. **Docs (Prompt 50.6).** `docs/usage/cli.md` documents reader DB resolution; this file
+   updated to reflect the implemented state.
 
 ## 9. Open questions
 
 - **Per-file extractor scoping.** Today's extractor pipeline takes a
-  repo root and discovers files internally. Step 8.3 needs a clean way
-  to constrain it to a path list without forking the pipeline.
-  Candidate: pass an optional `paths_filter: set[Path] | None` through
-  the existing entry points. Decision deferred to the implementation
-  prompt; if the change is non-trivial, fall back to running each
-  extractor on each changed file individually.
-- **`last_index_mode` metadata row.** Whether to record incremental
-  vs full mode in the metadata table. Default for this design: no.
-  Revisit if §7 validation surfaces a need (e.g. easier debugging of
-  drift bugs).
+  repo root and discovers files internally. The executor constrains
+  extraction to changed files by running each extractor on each
+  changed file individually (the approach chosen as the non-trivial
+  alternative).
+- **`last_index_mode` metadata row.** Resolved: `last_index_mode = "incremental"`
+  is written by incremental runs. Full-rebuild runs do not write `last_index_mode`.
+  See §5.
 - **Safety threshold default.** §2.3 suggests "50% of indexed files".
-  The exact constant is finalized during implementation against the
-  benchmark repo; the design only requires *some* threshold.
+  The constant `max_changed_paths=500` is used in the implementation;
+  users can override via the `plan_incremental_update` keyword argument.
 - **Renames without `-M`/`-C` detection.** `git diff --name-status`
   detection of renames is heuristic. Treating an undetected rename as
   delete-plus-add is **safe** (the new file's relations are
@@ -473,11 +492,10 @@ on its own because it only tightens an existing extractor contract.
 
 `rsm index --incremental` is an opt-in mode that, when safe, updates
 only the files changed since the last successful index. It reuses the
-Prompt 49.1 metadata model verbatim, never invents a second metadata
-store, and falls back to a full rebuild whenever safety cannot be
-proven. It is design-only in this prompt; implementation lands behind
-an experimental flag in follow-up prompts, gated by the validation
-matrix in §7.
+Prompt 49.1 metadata model, never invents a second metadata store, and
+falls back to a full rebuild whenever safety cannot be proven. It is
+implemented and validated; see §7 for the validation matrix and
+`tests/indexing/test_parity.py` for the test scenarios.
 
 ## 11. Relation producer-path attribution audit (Prompt 50.1)
 
