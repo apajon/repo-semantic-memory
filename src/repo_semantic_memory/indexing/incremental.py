@@ -287,9 +287,10 @@ def _parse_diff_name_status(
                     renamed.append((old, new))
         elif status in ("A", "M", "T"):
             changed.add(_normalize_path(parts[1]))
-        elif len(parts) >= 2 and parts[1]:
+        else:
             # Unknown status: treat conservatively as changed.
-            changed.add(_normalize_path(parts[1]))
+            if len(parts) >= 2 and parts[1]:
+                changed.add(_normalize_path(parts[1]))
 
     return changed, deleted, renamed
 

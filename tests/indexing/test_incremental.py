@@ -490,7 +490,7 @@ def test_parse_diff_empty() -> None:
     assert not renamed
 
 
-def test_parse_diff_normalises_backslashes() -> None:
+def test_parse_diff_normalizes_backslashes() -> None:
     changed, deleted, _ = _parse_diff_name_status("A\tsrc\\new.py\n")
     assert "src/new.py" in changed
 
