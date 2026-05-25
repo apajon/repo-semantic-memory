@@ -634,9 +634,9 @@ def test_repo_map_emits_stale_warning(tmp_path: Path, capsys: pytest.CaptureFixt
 def test_index_command_writes_staleness_metadata(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """rsm index writes indexed_at, entity_count, relation_count, context_pack_version."""
-
+    """rsm index writes indexed_at, schema_version, entity_count, relation_count, context_pack_version."""  # noqa: E501
     from repo_semantic_memory.cli import main
+    from repo_semantic_memory.version import SCHEMA_VERSION
 
     fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
     db = tmp_path / "index.sqlite"
@@ -657,6 +657,8 @@ def test_index_command_writes_staleness_metadata(
     assert int(meta["entity_count"]) > 0
     assert "relation_count" in meta
     assert int(meta["relation_count"]) >= 0
+    assert "schema_version" in meta
+    assert meta["schema_version"] == SCHEMA_VERSION
     assert "context_pack_version" in meta
     assert meta["context_pack_version"] == CONTEXT_PACK_VERSION
     # git_head may be present or empty depending on CI environment

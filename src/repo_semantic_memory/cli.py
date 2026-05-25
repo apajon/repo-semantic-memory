@@ -44,7 +44,7 @@ from repo_semantic_memory.memory import (
 )
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
-from repo_semantic_memory.version import CONTEXT_PACK_VERSION, get_version_info
+from repo_semantic_memory.version import CONTEXT_PACK_VERSION, SCHEMA_VERSION, get_version_info
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -717,6 +717,7 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
         "indexed_at": now_iso,
         "entity_count": str(len(all_entities)),
         "relation_count": str(len(all_relations)),
+        "schema_version": SCHEMA_VERSION,
         "context_pack_version": CONTEXT_PACK_VERSION,
     }
     if git_summary.in_git_repo and git_summary.current_commit:
