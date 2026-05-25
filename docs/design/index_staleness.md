@@ -407,14 +407,41 @@ command safe in CI, agent loops, and `&&`-chained scripts.
 | ------------------------------------------------------ | -------------------- | -------------------------------------------------------------------------------- |
 | `rsm mcp serve` with missing DB                        | startup              | Hard error, exit 2, stderr `error:` line. **Unchanged from Prompt 48.1.**         |
 | `rsm mcp serve` with stale DB                          | `rsm_status`         | Server starts; status reports `stale` with a `suggested_action`.                  |
-| `rsm mcp serve` with `schema_mismatch`                 | startup or per-tool  | Startup fails if `SQLiteStore.initialize()` raises (current behavior). If the runtime gains a soft-compatible path later, it would surface via `rsm_status` only. |
+| `rsm mcp serve` with `schema_mismatch` (DB unreadable by runtime) | startup | **Hard error, exit 2**, stderr `error:` line. The current `SQLiteStore.initialize()` already raises on any `schema_version` divergence; that behavior is kept as the safe default. |
+| `rsm mcp serve` with `schema_mismatch` (DB still readable, contextual metadata only) | `rsm_status` | The implementation *may* choose to start and surface `index_status: "schema_mismatch"` via `rsm_status` with a suggested rebuild action. The hard-error default remains acceptable. |
 | `rsm mcp serve` with `unknown` status                  | `rsm_status`         | Server starts; status reports `unknown`.                                          |
 | `rsm store status` for missing/stale/etc.              | CLI                  | Print status, exit 0.                                                             |
 | `rsm store status` for invalid arguments               | CLI                  | Exit 2, stderr `error:` line.                                                     |
 | `rsm pack`/`rsm repo-map` against stale DB             | CLI                  | Run normally. Print a single-line `warning:` to stderr identifying the stale status and suggested action. Do not fail. |
-| `rsm pack`/`rsm repo-map` against `schema_mismatch` DB | CLI                  | Hard error (already raised by `SQLiteStore.initialize()`). No change.            |
+| `rsm pack`/`rsm repo-map` against `schema_mismatch` DB (unreadable) | CLI | **Hard error** (already raised by `SQLiteStore.initialize()`). No change. |
+| `rsm pack`/`rsm repo-map` against `schema_mismatch` DB (contextual only) | CLI | Print a `warning:` to stderr; continue if the DB is safely readable. Hard error remains the acceptable default. |
 
-The warning emitted by `rsm pack` / `rsm repo-map` is the smallest
+### `schema_mismatch` error vs. warning distinction
+
+The detector distinguishes two flavours of `schema_mismatch`:
+
+1. **DB unreadable / structurally incompatible.** `SQLiteStore.initialize()`
+   raises a `ValueError` because the stored `schema_version` does not match
+   the runtime. This is a **hard error** in all contexts (`rsm mcp serve`,
+   `rsm pack`, `rsm repo-map`, `rsm store status`). The safe default is to
+   refuse to operate on an index whose entity/relation encoding may be
+   incompatible.
+
+2. **DB readable, contextual metadata divergence only.** If a future
+   migration policy allows the runtime to open a DB that has an older
+   `schema_version` (e.g. a forward-compatible additive change), the
+   implementation *may* choose to start and report
+   `index_status: "schema_mismatch"` via `rsm_status` / `rsm store status`
+   instead of hard-erroring. The suggested action is always a rebuild.
+   **The hard-error default remains acceptable;** this soft path is opt-in
+   at the implementation level and requires an explicit compatibility
+   annotation in `SQLiteStore`.
+
+Until an explicit soft-compatibility path is implemented, all
+`schema_mismatch` conditions are treated as hard errors. This keeps the
+safety boundary simple and auditable.
+
+The warning emitted by `rsm pack` / `rsm repo-map` against a *stale* DB is the smallest
 behavioral nudge we add outside `rsm store status`. It is deliberately not
 a fatal error so existing scripts keep working.
 
