@@ -15,10 +15,19 @@ uv run rsm pack --db .rsm/index.sqlite --task "<task description>" --budget 8000
 
 Read the context pack first, then inspect cited files, symbols, and relations. Avoid speculative full-file reads when the pack gives narrower citations.
 
+If the repository is registered in the RSM Index Store (see below), `--db` can be omitted from all reader commands:
+
+```bash
+uv run rsm index . --register
+uv run rsm pack --task "<task description>" --budget 8000 --profile agent_standard
+```
+
 ## Orientation workflow
 
 ```bash
 uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
+# or, if registered in the Index Store:
+uv run rsm repo-map --budget 4000 --profile agent_standard
 ```
 
 Use a repo map for broad structure before deep inspection. For committed or generated `.ai/` snapshots, load only the files needed for the task.
@@ -51,6 +60,21 @@ Treat benchmark results as internal and directional. Token savings matter only w
 - `context_policy.md`: loading order, budget guidance, and interpretation rules.
 
 Do not load all `.ai/` files by default. Start with the smallest artifact that answers the task.
+
+## RSM Index Store
+
+Register a repo once to skip `--db` for all reader commands:
+
+```bash
+uv run rsm index . --register        # index to the store's canonical path
+uv run rsm store status .            # check freshness
+```
+
+DB resolution order for `pack`, `repo-map`, `inspect`, `components`, `invariants`, `eval`, `export-ai`, `export-jsonl`:
+
+1. Explicit `--db` argument — always wins.
+2. RSM Index Store entry for the current working directory.
+3. `.rsm/index.sqlite` — legacy fallback.
 
 ## Regeneration / staleness
 

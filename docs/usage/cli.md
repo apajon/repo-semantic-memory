@@ -84,6 +84,57 @@ designed `rsm store status` command, the status state machine
 (`fresh` / `missing` / `stale` / `maybe_stale` / `schema_mismatch` / `unknown`),
 and the suggested-action rules for explicit-`--db` vs Index Store modes.
 
+## Database resolution for reader commands
+
+Reader commands can use an explicit `--db`, an entry in the RSM Index Store, or the legacy
+repo-local `.rsm/index.sqlite`. They resolve the database path in this order:
+
+1. **Explicit `--db`** — always wins; the Index Store is not consulted.
+2. **RSM Index Store entry for the current working directory** — used when `--db` is omitted and
+   the CWD is a registered repo root.
+3. **`.rsm/index.sqlite`** — the legacy fallback used when neither of the above applies.
+
+This applies to:
+
+| Command | Notes |
+|---|---|
+| `rsm pack` | Task-specific context pack |
+| `rsm repo-map` | Broad structural orientation |
+| `rsm inspect entities` / `rsm inspect relations` | Raw entity/relation queries |
+| `rsm components infer` / `rsm components list` | ECS-style semantic components |
+| `rsm invariants export` / `rsm invariants import` | Claim/invariant documents |
+| `rsm eval retrieval` / `rsm eval compare` | Evaluation benchmarks |
+| `rsm export-ai` | `.ai/` artifact generation |
+| `rsm export-jsonl` | JSONL interchange export |
+
+### Typical workflow without `--db`
+
+```bash
+# Register the repo in the Index Store (once).
+uv run rsm store register . --index
+
+# Reader commands now resolve the DB automatically.
+uv run rsm pack --task "Find where incremental indexing is implemented"
+uv run rsm repo-map --budget 4000
+uv run rsm eval retrieval --dataset benchmarks/tasks.yaml --json
+```
+
+### Force a specific database
+
+```bash
+rsm pack --db /path/to/index.sqlite --task "..."
+rsm repo-map --db /path/to/index.sqlite --budget 4000
+```
+
+### Precedence when both a store entry and `.rsm/index.sqlite` exist
+
+If a repo has a registered Index Store entry **and** a local `.rsm/index.sqlite`, the Index Store
+entry wins (step 2 above) unless `--db` is explicit. To use the local file instead:
+
+```bash
+rsm pack --db .rsm/index.sqlite --task "..."
+```
+
 ## Export/import
 
 ```bash
