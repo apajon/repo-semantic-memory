@@ -79,6 +79,11 @@ uv run rsm mcp serve --repo /path/to/repo
 When `--register` is not set and `--db` is omitted, the existing default of `.rsm/index.sqlite`
 (relative to the current directory) is preserved. The store is purely additive.
 
+See [`docs/design/index_staleness.md`](../design/index_staleness.md) for the
+designed `rsm store status` command, the status state machine
+(`fresh` / `missing` / `stale` / `maybe_stale` / `schema_mismatch` / `unknown`),
+and the suggested-action rules for explicit-`--db` vs Index Store modes.
+
 ## Export/import
 
 ```bash

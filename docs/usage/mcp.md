@@ -38,7 +38,10 @@ path and does **not** write anything to the target repository.
 
 If the database is missing or out of date, regenerate it with `rsm index`
 before launching the MCP server. The server will report missing/stale state
-but does **not** rebuild it.
+but does **not** rebuild it. See
+[`docs/design/index_staleness.md`](../design/index_staleness.md) for the
+status states, the `rsm_status` payload contract, and the policy for
+stale / `schema_mismatch` / `unknown` indexes.
 
 ## Starting the server
 
