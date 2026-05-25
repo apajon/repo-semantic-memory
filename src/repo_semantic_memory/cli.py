@@ -8,6 +8,10 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from repo_semantic_memory.indexing.executor import IncrementalResult
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
 from repo_semantic_memory.context import (
@@ -97,6 +101,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Register the repository in the RSM Index Store after successful indexing. "
             "Records the repo/db mapping so --db can be omitted from rsm mcp serve."
+        ),
+    )
+    index_parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "Attempt an incremental index update using local Git signals. "
+            "Falls back to a full rebuild if incremental safety cannot be proven. "
+            "Full rebuild is the default."
         ),
     )
 
@@ -537,7 +550,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             resolved_db = args.db
         return _run_index_command(
-            path=args.path, db=resolved_db, with_git=args.with_git, register=args.register
+            path=args.path,
+            db=resolved_db,
+            with_git=args.with_git,
+            register=args.register,
+            incremental=args.incremental,
         )
     if args.command == "git":
         if args.git_target == "summary":
@@ -652,10 +669,30 @@ def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence
     return f"entities={len(entities)} relations={len(relations)}"
 
 
-def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = False) -> int:
+def _run_index_command(
+    *, path: str, db: str, with_git: bool, register: bool = False, incremental: bool = False
+) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if incremental and db_path.exists():
+        result = _attempt_incremental_index(repository_root, db_path, with_git=with_git)
+        if result is not None:
+            if register:
+                _do_register(repository_root, db_path)
+            mode_suffix = " mode=incremental"
+            if with_git:
+                print(
+                    f"entities={result.entity_count} relations={result.relation_count}"
+                    f" git_metadata=attached{mode_suffix}"
+                )
+            else:
+                print(
+                    f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}"
+                )
+            return 0
+        # result is None: planner or executor rejected incremental; fall through to full rebuild.
 
     filesystem_entities = extract_filesystem_entities(repository_root)
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
@@ -747,6 +784,63 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
         return 0
     print(f"entities={len(all_entities)} relations={len(all_relations)}")
     return 0
+
+
+def _do_register(repository_root: Path, db_path: Path) -> None:
+    """Register *repository_root* / *db_path* in the RSM Index Store."""
+    from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+    IndexRegistry(resolve_store_home()).register(repository_root, db_path.resolve(), indexed=True)
+
+
+def _attempt_incremental_index(
+    repo_root: Path,
+    db_path: Path,
+    *,
+    with_git: bool,
+) -> IncrementalResult | None:
+    """Try an incremental index update.
+
+    Returns an :class:`~repo_semantic_memory.indexing.executor.IncrementalResult`
+    on success, or ``None`` when the planner rejects or the executor raises
+    (in both cases a fallback message is printed to stderr).
+    """
+    from repo_semantic_memory.indexing import IncrementalFallbackReason, plan_incremental_update
+    from repo_semantic_memory.indexing.executor import run_incremental_index
+
+    # Read existing metadata to feed the planner.
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        meta = store.get_metadata()
+    finally:
+        store.close()
+
+    indexed_head = meta.get("git_head") or None
+    plan = plan_incremental_update(
+        repo_root,
+        indexed_head,
+        indexed_git_dirty=meta.get("git_dirty"),
+        indexed_schema_version=meta.get("schema_version"),
+        indexed_context_pack_version=meta.get("context_pack_version"),
+    )
+
+    if not plan.can_incremental:
+        print(
+            f"info: incremental index fallback: {plan.fallback_reason}; running full rebuild",
+            file=sys.stderr,
+        )
+        return None
+
+    try:
+        return run_incremental_index(repo_root, db_path, plan, with_git=with_git)
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"info: incremental index fallback:"
+            f" {IncrementalFallbackReason.INTERNAL_ERROR} ({exc}); running full rebuild",
+            file=sys.stderr,
+        )
+        return None
 
 
 def _run_git_summary_command(*, path: str, emit_json: bool) -> int:

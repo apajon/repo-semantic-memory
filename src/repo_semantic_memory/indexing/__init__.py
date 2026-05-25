@@ -1,5 +1,6 @@
-"""Incremental indexing layer (planning and future execution)."""
+"""Incremental indexing layer (planning and execution)."""
 
+from repo_semantic_memory.indexing.executor import IncrementalResult, run_incremental_index
 from repo_semantic_memory.indexing.incremental import (
     IncrementalFallbackReason,
     IncrementalPlan,
@@ -9,5 +10,7 @@ from repo_semantic_memory.indexing.incremental import (
 __all__ = [
     "IncrementalFallbackReason",
     "IncrementalPlan",
+    "IncrementalResult",
     "plan_incremental_update",
+    "run_incremental_index",
 ]

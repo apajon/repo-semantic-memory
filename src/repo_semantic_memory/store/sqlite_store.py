@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +113,96 @@ class SQLiteStore:
         """Return metadata rows ordered by key."""
         rows = self._conn.execute("SELECT key, value FROM metadata ORDER BY key ASC").fetchall()
         return {key: value for key, value in rows}
+
+    def apply_incremental_update(
+        self,
+        *,
+        purge_paths: frozenset[str],
+        new_entities: Sequence[Entity],
+        new_relations: Sequence[Relation],
+        global_recompute_kinds: frozenset[str],
+        compute_global_relations: Callable[[list[Entity], list[Relation]], list[Relation]],
+    ) -> tuple[int, int]:
+        """Apply a transactional incremental index update.
+
+        Within a single transaction:
+
+        1. Delete all relations of *global_recompute_kinds* (will be rebuilt).
+        2. Identify entity IDs whose ``source_range.path`` is in *purge_paths*
+           and delete their source-side relations.
+        3. Delete entities whose ``source_range.path`` is in *purge_paths*.
+        4. Upsert *new_entities* and *new_relations*.
+        5. Load the current entity/relation snapshot, call
+           *compute_global_relations*, and upsert the results.
+        6. Return ``(entity_count, relation_count)`` after the update.
+
+        Rolls back on any exception, leaving the previous index intact.
+
+        Args:
+            purge_paths: Repo-relative paths whose entities and source-side
+                relations should be removed before upserting.
+            new_entities: Freshly extracted entities to upsert.
+            new_relations: Freshly extracted non-global relations to upsert.
+            global_recompute_kinds: Relation kinds purged before upsert and
+                fully recomputed via *compute_global_relations* afterward.
+            compute_global_relations: Callable invoked with the post-upsert
+                entity and relation snapshot; its return value is upserted.
+
+        Returns:
+            ``(entity_count, relation_count)`` — total counts after commit.
+        """
+        with self._transaction():
+            # 1. Purge global-recompute relation kinds.
+            for kind in sorted(global_recompute_kinds):
+                self._conn.execute("DELETE FROM relations WHERE kind = ?", (kind,))
+
+            # 2. Find entity IDs for purge_paths; delete their source relations.
+            entity_ids = self._entity_ids_for_source_paths(purge_paths)
+            if entity_ids:
+                sorted_ids = sorted(entity_ids)
+                placeholders = ",".join("?" * len(sorted_ids))
+                self._conn.execute(
+                    f"DELETE FROM relations WHERE source_id IN ({placeholders})",
+                    sorted_ids,
+                )
+
+            # 3. Delete entities for purge_paths.
+            if purge_paths:
+                sorted_paths = sorted(purge_paths)
+                placeholders = ",".join("?" * len(sorted_paths))
+                self._conn.execute(
+                    "DELETE FROM entities WHERE"
+                    f" json_extract(source_range_json, '$.path') IN ({placeholders})",
+                    sorted_paths,
+                )
+
+            # 4. Upsert freshly extracted content.
+            self._upsert_entities(list(new_entities))
+            self._upsert_relations(list(new_relations))
+
+            # 5. Global recompute (reads see uncommitted writes on same conn).
+            current_entities = self.list_entities()
+            current_relations = self.list_relations()
+            global_relations = compute_global_relations(current_entities, current_relations)
+            self._upsert_relations(global_relations)
+
+            # 6. Return final counts.
+            entity_count: int = self._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            relation_count: int = self._conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
+            return entity_count, relation_count
+
+    def _entity_ids_for_source_paths(self, paths: frozenset[str]) -> frozenset[str]:
+        """Return entity IDs whose ``source_range.path`` is in *paths*."""
+        if not paths:
+            return frozenset()
+        sorted_paths = sorted(paths)
+        placeholders = ",".join("?" * len(sorted_paths))
+        rows = self._conn.execute(
+            "SELECT id FROM entities WHERE"
+            f" json_extract(source_range_json, '$.path') IN ({placeholders})",
+            sorted_paths,
+        ).fetchall()
+        return frozenset(str(row[0]) for row in rows)
 
     def write_extra_metadata(self, extra: dict[str, str]) -> None:
         """Upsert additional key/value rows into the metadata table.
