@@ -114,6 +114,18 @@ class SQLiteStore:
         rows = self._conn.execute("SELECT key, value FROM metadata ORDER BY key ASC").fetchall()
         return {key: value for key, value in rows}
 
+    def write_extra_metadata(self, extra: dict[str, str]) -> None:
+        """Upsert additional key/value rows into the metadata table.
+
+        Used after a successful :meth:`persist_index` call to record
+        staleness-detection fields (``indexed_at``, ``git_head``,
+        ``git_dirty``, ``entity_count``, ``relation_count``,
+        ``context_pack_version``).  Callers must call :meth:`initialize`
+        before this method.
+        """
+        with self._transaction():
+            self._upsert_metadata(extra)
+
     def list_entities(self) -> list[Entity]:
         """Return entities in deterministic ordering."""
         rows = self._conn.execute(

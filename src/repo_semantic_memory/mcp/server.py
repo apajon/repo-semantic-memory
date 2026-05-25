@@ -256,7 +256,12 @@ def run_serve(repo: str, db: str | None) -> int:
         db_from_registry = True
 
     try:
-        session = validate_session(repo, resolved_db, require_db_inside_repo=not db_from_registry)
+        session = validate_session(
+            repo,
+            resolved_db,
+            require_db_inside_repo=not db_from_registry,
+            index_mode="store" if db_from_registry else "explicit_db",
+        )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
