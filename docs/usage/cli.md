@@ -15,6 +15,70 @@ uv run rsm pack --db .rsm/index.sqlite --task "<task description>" --budget 8000
 - `rsm pack` renders a task-specific context pack; add `--explain-ranking` when diagnosing
   selection.
 
+## RSM Index Store
+
+The RSM Index Store is a central local directory that maps repository roots to their index files,
+so `rsm mcp serve` can omit `--db` once a repo is registered.
+
+### Store home resolution
+
+The store home is resolved in this order:
+
+1. `RSM_HOME` environment variable, if set and non-empty.
+2. OS-specific default:
+   - **Linux / Ubuntu**: `$XDG_DATA_HOME/repo-semantic-memory` or `~/.local/share/repo-semantic-memory`
+   - **macOS**: `~/Library/Application Support/repo-semantic-memory`
+   - **Windows**: `%LOCALAPPDATA%\repo-semantic-memory`
+
+### Store commands
+
+```bash
+# Print the active store home directory.
+uv run rsm store path
+
+# List all registered repositories.
+uv run rsm store list
+uv run rsm store list --json
+
+# Register a repository (without indexing yet).
+uv run rsm store register /path/to/repo
+
+# Register and immediately build the index.
+uv run rsm store register /path/to/repo --index
+
+# Print the registered DB path for a repository.
+uv run rsm store db /path/to/repo
+
+# Remove a repository from the registry (does not delete the index file).
+uv run rsm store unregister /path/to/repo
+```
+
+### Register during indexing
+
+Pass `--register` to `rsm index` to record the repo → DB mapping in the store immediately after
+indexing.
+
+**Recommended: let the store manage the DB location.** When `--register` is set and `--db` is
+omitted, the DB is written directly to the RSM Index Store canonical path
+(`<store_home>/indexes/<repo_id>/index.sqlite`). Nothing is written inside the target repository.
+
+```bash
+# Index to the RSM Index Store canonical path and register (recommended).
+uv run rsm index /path/to/repo --register
+
+# Index to an explicit path and register (alternative, explicit --db preserved).
+uv run rsm index /path/to/repo --db /path/to/repo/.rsm/index.sqlite --register
+```
+
+Once registered, `rsm mcp serve` can omit `--db`:
+
+```bash
+uv run rsm mcp serve --repo /path/to/repo
+```
+
+When `--register` is not set and `--db` is omitted, the existing default of `.rsm/index.sqlite`
+(relative to the current directory) is preserved. The store is purely additive.
+
 ## Export/import
 
 ```bash

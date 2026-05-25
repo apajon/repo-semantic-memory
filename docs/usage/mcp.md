@@ -23,8 +23,18 @@ with hardcoded arguments, not arbitrary command execution.
 Build the local index first. The MCP server only reads from it.
 
 ```bash
+# Option A: explicit DB path (original workflow, unchanged)
 uv run rsm index /path/to/target-repo --db /path/to/target-repo/.rsm/index.sqlite
+
+# Option B: index directly into the RSM Index Store and register in one step (recommended)
+uv run rsm index /path/to/target-repo --register
+
+# Option C: register an existing DB into the store without re-indexing
+uv run rsm store register /path/to/target-repo --index
 ```
+
+Option B (`rsm index --register` without `--db`) writes the DB to the RSM Index Store canonical
+path and does **not** write anything to the target repository.
 
 If the database is missing or out of date, regenerate it with `rsm index`
 before launching the MCP server. The server will report missing/stale state
@@ -33,22 +43,31 @@ but does **not** rebuild it.
 ## Starting the server
 
 ```bash
+# With explicit --db (original, always works)
 uv run rsm mcp serve \
   --repo /absolute/path/to/target-repo \
   --db /absolute/path/to/target-repo/.rsm/index.sqlite
+
+# Without --db (requires prior rsm store register or rsm index --register)
+uv run rsm mcp serve \
+  --repo /absolute/path/to/target-repo
 ```
 
-`--repo` and `--db` are required. The server validates them at startup:
+`--repo` is required. `--db` is optional:
 
-- `--repo` must exist and be a directory.
-- `--db` must exist and be a regular file (no auto-creation).
-- `--db` must resolve to a path inside `--repo`.
-- Invalid inputs exit with code `2` and a clear `error:` line on stderr.
+- When `--db` is provided: the existing validation rules apply (must be an existing file;
+  when inside `--repo`, it must resolve within the repo tree).
+- When `--db` is absent: the RSM Index Store registry is consulted. If no entry is found the
+  command exits with code `2` and a clear `error:` line on stderr.
+
+Invalid inputs always exit with code `2` and a clear `error:` line on stderr.
 
 ## From-source MCP client configuration
 
 This is the supported configuration during local dogfooding. PyPI installation
 is not required.
+
+**With explicit `--db` (original workflow, unchanged):**
 
 ```json
 {
@@ -66,6 +85,33 @@ is not required.
         "/absolute/path/to/target-repo",
         "--db",
         "/absolute/path/to/target-repo/.rsm/index.sqlite"
+      ]
+    }
+  }
+}
+```
+
+**With RSM Index Store (register once, no `--db` in config):**
+
+```bash
+# One-time setup: index directly into the RSM Index Store.
+uv run rsm index /absolute/path/to/target-repo --register
+```
+
+```json
+{
+  "mcpServers": {
+    "repo-semantic-memory": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/absolute/path/to/repo-semantic-memory",
+        "rsm",
+        "mcp",
+        "serve",
+        "--repo",
+        "/absolute/path/to/target-repo"
       ]
     }
   }

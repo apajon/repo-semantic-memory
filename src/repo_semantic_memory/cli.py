@@ -79,13 +79,25 @@ def build_parser() -> argparse.ArgumentParser:
     index_parser.add_argument("path", help="Repository root path to index.")
     index_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "Defaults to the RSM Index Store canonical path when --register is set, "
+            "otherwise defaults to .rsm/index.sqlite in the current directory."
+        ),
     )
     index_parser.add_argument(
         "--with-git",
         action="store_true",
         help="Attach optional local Git temporal metadata to indexed entities.",
+    )
+    index_parser.add_argument(
+        "--register",
+        action="store_true",
+        help=(
+            "Register the repository in the RSM Index Store after successful indexing. "
+            "Records the repo/db mapping so --db can be omitted from rsm mcp serve."
+        ),
     )
 
     git_parser = subparsers.add_parser(
@@ -395,12 +407,57 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mcp_serve_parser.add_argument(
         "--db",
-        required=True,
+        default=None,
         help=(
-            "Path to an existing .rsm/index.sqlite database located inside --repo. "
-            "Build it first with: rsm index <repo> --db <repo>/.rsm/index.sqlite"
+            "Path to an existing SQLite index database. "
+            "When omitted, the RSM Index Store registry is consulted for a registered index. "
+            "Build an index first with: rsm index <repo> [--register] or "
+            "rsm store register <repo> --index"
         ),
     )
+
+    store_parser = subparsers.add_parser(
+        "store",
+        help="Manage the central local RSM Index Store.",
+    )
+    store_subparsers = store_parser.add_subparsers(dest="store_target")
+    store_subparsers.add_parser(
+        "path",
+        help="Print the RSM Index Store home directory.",
+    )
+    store_list_parser = store_subparsers.add_parser(
+        "list",
+        help="List all repositories registered in the RSM Index Store.",
+    )
+    store_list_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit entries as JSON.",
+    )
+    store_register_parser = store_subparsers.add_parser(
+        "register",
+        help="Register a repository in the RSM Index Store.",
+    )
+    store_register_parser.add_argument("repo", help="Repository root path to register.")
+    store_register_parser.add_argument(
+        "--index",
+        action="store_true",
+        help=(
+            "Also run rsm index on the repository and write the index to the store's "
+            "canonical DB path. Does not modify the target repository."
+        ),
+    )
+    store_unregister_parser = store_subparsers.add_parser(
+        "unregister",
+        help="Remove a repository from the RSM Index Store registry.",
+    )
+    store_unregister_parser.add_argument("repo", help="Repository root path to unregister.")
+    store_db_parser = store_subparsers.add_parser(
+        "db",
+        help="Print the registered index DB path for a repository.",
+    )
+    store_db_parser.add_argument("repo", help="Repository root path.")
+
     return parser
 
 
@@ -445,7 +502,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(_format_index_python_summary(entities, relations))
         return 0
     if args.command == "index":
-        return _run_index_command(path=args.path, db=args.db, with_git=args.with_git)
+        if args.db is None:
+            if args.register:
+                from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+                repo_root = Path(args.path).resolve()
+                resolved_db = str(IndexRegistry(resolve_store_home()).default_db_path(repo_root))
+            else:
+                resolved_db = ".rsm/index.sqlite"
+        else:
+            resolved_db = args.db
+        return _run_index_command(
+            path=args.path, db=resolved_db, with_git=args.with_git, register=args.register
+        )
     if args.command == "git":
         if args.git_target == "summary":
             return _run_git_summary_command(path=args.path, emit_json=args.json)
@@ -519,6 +588,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return run_serve(repo=args.repo, db=args.db)
         parser.print_help()
         return 2
+    if args.command == "store":
+        if args.store_target == "path":
+            return _run_store_path_command()
+        if args.store_target == "list":
+            return _run_store_list_command(emit_json=args.json)
+        if args.store_target == "register":
+            return _run_store_register_command(repo=args.repo, do_index=args.index)
+        if args.store_target == "unregister":
+            return _run_store_unregister_command(repo=args.repo)
+        if args.store_target == "db":
+            return _run_store_db_command(repo=args.repo)
+        parser.print_help()
+        return 2
 
     parser.print_help()
     return 0
@@ -540,7 +622,7 @@ def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence
     return f"entities={len(entities)} relations={len(relations)}"
 
 
-def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
+def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = False) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -598,6 +680,12 @@ def _run_index_command(*, path: str, db: str, with_git: bool) -> int:
         store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
     finally:
         store.close()
+    if register:
+        from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+        IndexRegistry(resolve_store_home()).register(
+            repository_root, db_path.resolve(), indexed=True
+        )
     if with_git:
         print(
             f"entities={len(all_entities)} relations={len(all_relations)} git_metadata={git_status}"
@@ -952,3 +1040,120 @@ def _format_components_table(components: Sequence[SemanticComponent]) -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# RSM Index Store commands
+# ---------------------------------------------------------------------------
+
+
+def _run_store_path_command() -> int:
+    from repo_semantic_memory.store_home import resolve_store_home
+
+    print(resolve_store_home())
+    return 0
+
+
+def _run_store_list_command(*, emit_json: bool) -> int:
+    from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+    store_home = resolve_store_home()
+    registry = IndexRegistry(store_home)
+    entries = registry.list_entries()
+
+    if emit_json:
+        payload = {
+            key: {
+                "db": entry.db_relative,
+                "registered_at": entry.registered_at,
+                "last_indexed_at": entry.last_indexed_at,
+                "db_exists": (
+                    store_home / entry.db_relative
+                    if not Path(entry.db_relative).is_absolute()
+                    else Path(entry.db_relative)
+                ).exists(),
+            }
+            for key, entry in entries.items()
+        }
+        print(json.dumps(payload, separators=(",", ":")))
+        return 0
+
+    if not entries:
+        print("No repositories registered in the RSM Index Store.")
+        print(f"Store home: {store_home}")
+        return 0
+
+    rows: list[tuple[str, str, str, str]] = [("REPO", "DB (relative)", "EXISTS", "LAST INDEXED")]
+    for repo_key, entry in entries.items():
+        db_abs = (
+            Path(entry.db_relative)
+            if Path(entry.db_relative).is_absolute()
+            else store_home / entry.db_relative
+        )
+        exists = "yes" if db_abs.exists() else "no"
+        last_indexed = entry.last_indexed_at[:10] if entry.last_indexed_at else "never"
+        rows.append((repo_key, entry.db_relative, exists, last_indexed))
+
+    columns = zip(*rows, strict=True)
+    widths = [max(len(v) for v in col) for col in columns]
+    print("\n".join("  ".join(v.ljust(widths[i]) for i, v in enumerate(row)) for row in rows))
+    return 0
+
+
+def _run_store_register_command(*, repo: str, do_index: bool) -> int:
+    from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+    repo_root = Path(repo).expanduser().resolve()
+    if not repo_root.exists():
+        print(f"error: repository path does not exist: {repo_root}", file=sys.stderr)
+        return 2
+    if not repo_root.is_dir():
+        print(f"error: repository path is not a directory: {repo_root}", file=sys.stderr)
+        return 2
+
+    store_home = resolve_store_home()
+    registry = IndexRegistry(store_home)
+    db_path = registry.default_db_path(repo_root)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if do_index:
+        exit_code = _run_index_command(
+            path=str(repo_root), db=str(db_path), with_git=False, register=False
+        )
+        if exit_code != 0:
+            return exit_code
+        registry.register(repo_root, db_path, indexed=True)
+    else:
+        registry.register(repo_root, db_path, indexed=False)
+
+    print(f"Registered: {repo_root}")
+    print(f"Index DB:   {db_path}")
+    if not do_index and not db_path.exists():
+        print(f"Note: index not yet built. Run: rsm store register {repo_root} --index")
+    return 0
+
+
+def _run_store_unregister_command(*, repo: str) -> int:
+    from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+    repo_root = Path(repo).expanduser().resolve()
+    registry = IndexRegistry(resolve_store_home())
+    removed = registry.unregister(repo_root)
+    if not removed:
+        print(f"error: no entry found for {repo_root}", file=sys.stderr)
+        return 2
+    print(f"Unregistered: {repo_root}")
+    return 0
+
+
+def _run_store_db_command(*, repo: str) -> int:
+    from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+    repo_root = Path(repo).expanduser().resolve()
+    registry = IndexRegistry(resolve_store_home())
+    db_path = registry.lookup(repo_root)
+    if db_path is None:
+        print(f"error: no entry found for {repo_root}", file=sys.stderr)
+        return 2
+    print(db_path)
+    return 0

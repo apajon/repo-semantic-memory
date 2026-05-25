@@ -138,6 +138,18 @@ def test_validate_session_rejects_db_outside_repo(
         validate_session(other_repo, db)
 
 
+def test_validate_session_allows_db_outside_repo_when_flag_false(
+    tmp_path: Path, indexed_repo: tuple[Path, Path]
+) -> None:
+    # When require_db_inside_repo=False, a DB outside the repo is accepted.
+    repo, db = indexed_repo
+    other_repo = tmp_path / "other_repo"
+    other_repo.mkdir()
+    session = validate_session(other_repo, db, require_db_inside_repo=False)
+    assert session.db_path == db.resolve()
+    assert session.repo_root == other_repo.resolve()
+
+
 def test_cli_mcp_serve_missing_db_returns_clean_error(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -173,6 +185,66 @@ def test_cli_mcp_serve_invalid_repo_returns_clean_error(
     )
     assert code == 2
     assert "--repo path does not exist" in capsys.readouterr().err
+
+
+def test_cli_mcp_serve_optional_db_uses_registry(
+    tmp_path: Path,
+    indexed_repo: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When --db is omitted, run_serve resolves the DB from the Index Store."""
+    from unittest import mock
+
+    from repo_semantic_memory.store_home import IndexRegistry
+
+    repo, db = indexed_repo
+    store_home = tmp_path / "store"
+    store_home.mkdir()
+    (store_home / "indexes").mkdir()
+
+    with mock.patch.dict("os.environ", {"RSM_HOME": str(store_home)}):
+        registry = IndexRegistry(store_home)
+        registry.register(repo, db)
+
+        from repo_semantic_memory.mcp.server import run_serve
+
+        # Mock serve_stdio so we don't need a real stdin/stdout.
+        with mock.patch(
+            "repo_semantic_memory.mcp.server.serve_stdio", return_value=0
+        ) as mock_serve:
+            code = run_serve(repo=str(repo), db=None)
+
+    assert code == 0
+    # Confirm serve_stdio was called with a valid session pointing at the registered DB.
+    mock_serve.assert_called_once()
+    session = mock_serve.call_args[0][0]
+    assert session.db_path == db.resolve()
+    assert session.repo_root == repo.resolve()
+    capsys.readouterr()  # drain any captured output
+
+
+def test_cli_mcp_serve_without_db_and_not_registered_returns_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When --db is omitted and the repo is not registered, exit code 2."""
+    from unittest import mock
+
+    store_home = tmp_path / "store"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with mock.patch.dict("os.environ", {"RSM_HOME": str(store_home)}):
+        code = cli_main(["mcp", "serve", "--repo", str(repo)])
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "no index registered" in err
+
+
+def test_cli_mcp_serve_db_optional_default_is_none() -> None:
+    """Confirm --db defaults to None (not required) after our change."""
+    parser = build_parser()
+    args = parser.parse_args(["mcp", "serve", "--repo", "/some/repo"])
+    assert args.db is None
 
 
 # ---------------------------------------------------------------------------

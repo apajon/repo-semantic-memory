@@ -90,13 +90,20 @@ class ToolInvocationError(ValueError):
     """Raised when a tool invocation fails for a known, user-facing reason."""
 
 
-def validate_session(repo: str | Path, db: str | Path) -> SessionConfig:
+def validate_session(
+    repo: str | Path,
+    db: str | Path,
+    *,
+    require_db_inside_repo: bool = True,
+) -> SessionConfig:
     """Validate ``--repo`` and ``--db`` paths and return a session config.
 
     Phase 1 rules:
     - ``repo`` must exist and be a directory.
     - ``db`` must exist and be a regular file (no auto-creation).
-    - ``db`` must live inside ``repo`` after resolving symlinks.
+    - When ``require_db_inside_repo=True`` (the default), ``db`` must live
+      inside ``repo`` after resolving symlinks.  Pass ``False`` when the DB
+      lives in the central RSM Index Store rather than inside the repository.
     """
 
     repo_path = Path(repo).expanduser()
@@ -115,12 +122,13 @@ def validate_session(repo: str | Path, db: str | Path) -> SessionConfig:
     if not db_path_input.is_file():
         raise ValueError(f"--db path is not a file: {db_path_input}")
     resolved_db = db_path_input.resolve(strict=True)
-    try:
-        resolved_db.relative_to(resolved_repo)
-    except ValueError as exc:
-        raise ValueError(
-            f"--db path must be inside --repo (got db={resolved_db}, repo={resolved_repo})"
-        ) from exc
+    if require_db_inside_repo:
+        try:
+            resolved_db.relative_to(resolved_repo)
+        except ValueError as exc:
+            raise ValueError(
+                f"--db path must be inside --repo (got db={resolved_db}, repo={resolved_repo})"
+            ) from exc
     return SessionConfig(repo_root=resolved_repo, db_path=resolved_db)
 
 
