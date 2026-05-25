@@ -835,11 +835,14 @@ def _attempt_incremental_index(
     try:
         return run_incremental_index(repo_root, db_path, plan, with_git=with_git)
     except Exception as exc:  # noqa: BLE001
+        import traceback
+
         print(
             f"info: incremental index fallback:"
             f" {IncrementalFallbackReason.INTERNAL_ERROR} ({exc}); running full rebuild",
             file=sys.stderr,
         )
+        traceback.print_exc(file=sys.stderr)
         return None
 
 

@@ -99,10 +99,13 @@ def run_incremental_index(
             .incremental.plan_incremental_update`.  Must have
             ``can_incremental=True``; callers should run a full rebuild
             when it is ``False``.
-        with_git: Passed through to the metadata write.  Git temporal
-            metadata is not re-attached to individual entities in this
-            executor (Prompt 50.3 MVP scope); the flag only affects which
-            ``git_head`` / ``git_dirty`` values are written to metadata.
+        with_git: Whether git temporal metadata was requested for this index
+            run.  The flag is forwarded to :func:`~repo_semantic_memory
+            .extractors.get_git_repository_summary` to populate ``git_head``
+            and ``git_dirty`` in the post-update metadata.  When ``True`` the
+            git summary is used only for the metadata write; per-entity
+            git-temporal metadata is **not** re-attached in this MVP executor
+            (Prompt 50.3 scope).
 
     Returns:
         :class:`IncrementalResult` with ``used_incremental=True``.

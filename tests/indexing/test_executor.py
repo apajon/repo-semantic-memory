@@ -477,7 +477,7 @@ def test_executor_entity_and_relation_counts_accurate(tmp_path: Path) -> None:
 
 
 def test_executor_extraction_error_propagates(tmp_path: Path) -> None:
-    """A SyntaxError in a changed .py file propagates to the caller."""
+    """A SyntaxError in a changed .py file propagates, and the DB stays intact."""
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "mod.py").write_text(_PY_SRC, encoding="utf-8")
@@ -485,12 +485,25 @@ def test_executor_extraction_error_propagates(tmp_path: Path) -> None:
     db_path = tmp_path / "idx.sqlite"
     _bootstrap_full_index(repo, db_path)
 
+    # Record the entity IDs before the failure.
+    store = SQLiteStore(db_path)
+    store.initialize()
+    before_ids = {e.id.value for e in store.list_entities()}
+    store.close()
+
     # Write invalid Python.
     (repo / "mod.py").write_text("def broken(:\n", encoding="utf-8")
 
     plan = _make_plan(repo_root=repo, changed_paths=("mod.py",))
     with pytest.raises((SyntaxError, ValueError)):
         run_incremental_index(repo, db_path, plan)
+
+    # Extraction runs before the transaction opens, so the DB must be unchanged.
+    store = SQLiteStore(db_path)
+    store.initialize()
+    after_ids = {e.id.value for e in store.list_entities()}
+    store.close()
+    assert before_ids == after_ids, "DB must be unchanged when extraction raises"
 
 
 def test_executor_nonexistent_path_skipped_gracefully(tmp_path: Path) -> None:
