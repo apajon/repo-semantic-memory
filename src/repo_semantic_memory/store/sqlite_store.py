@@ -253,12 +253,20 @@ class SQLiteStore:
         """Remove relations whose ``source_id`` or ``target_id`` no longer exists
         as a real entity in the index.
 
-        .. note::
+        .. warning::
             Some relation kinds (e.g. ``exports``, ``imports``) intentionally
-            use placeholder / unresolved target IDs that are never inserted as
-            entities.  Use :meth:`_delete_relations_for_targets` with a known
-            set of deleted entity IDs when you need targeted cleanup; only call
-            this method when you are certain all valid targets are indexed.
+            use placeholder / unresolved target IDs (such as
+            ``unresolved:export:…`` or ``python:imports:…``) that are **never**
+            inserted into the entities table.  Calling this method will also
+            delete those relations.
+
+            **Safe to call** only when you are certain every valid relation
+            endpoint in the index is represented as an entity row — for example,
+            right after a fresh full rebuild where all targets are resolved.
+
+            For incremental updates (where unresolved IDs coexist with real
+            entity IDs), use :meth:`_delete_relations_for_targets` with the
+            specific set of deleted entity IDs instead.
 
         Must be called inside an open transaction.
 

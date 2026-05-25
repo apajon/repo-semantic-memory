@@ -666,9 +666,9 @@ def test_delete_dangling_relations_removes_orphaned_target(tmp_path: Path) -> No
     store = SQLiteStore(db_path)
     store.initialize()
     all_entities = store.list_entities()
-    a_entities = [e for e in all_entities if "b.py" not in (e.source_range.path or "")]
+    non_b_entities = [e for e in all_entities if "b.py" not in (e.source_range.path or "")]
     b_entities = [e for e in all_entities if "b.py" in (e.source_range.path or "")]
-    assert a_entities, "expected at least one entity from a.py"
+    assert non_b_entities, "expected at least one entity from a.py"
     assert b_entities, "expected at least one entity from b.py"
 
     conn = store._conn
@@ -676,7 +676,7 @@ def test_delete_dangling_relations_removes_orphaned_target(tmp_path: Path) -> No
     conn.execute(
         "INSERT INTO relations(source_id, target_id, kind, evidence_json, metadata_json) "
         "VALUES(?, ?, 'uses', NULL, '{}')",
-        (a_entities[0].id.value, b_entities[0].id.value),
+        (non_b_entities[0].id.value, b_entities[0].id.value),
     )
     conn.execute("COMMIT")
 
