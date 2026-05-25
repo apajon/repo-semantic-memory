@@ -44,7 +44,7 @@ from repo_semantic_memory.memory import (
 )
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
-from repo_semantic_memory.version import get_version_info
+from repo_semantic_memory.version import CONTEXT_PACK_VERSION, get_version_info
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -458,6 +458,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     store_db_parser.add_argument("repo", help="Repository root path.")
 
+    store_status_parser = store_subparsers.add_parser(
+        "status",
+        help="Report the staleness status of a repository's index.",
+    )
+    store_status_parser.add_argument(
+        "repo",
+        nargs="?",
+        default=".",
+        help="Repository root path (default: current directory).",
+    )
+    store_status_parser.add_argument(
+        "--db",
+        default=None,
+        help=(
+            "Explicit SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted."
+        ),
+    )
+    store_status_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit status as JSON.",
+    )
+
     return parser
 
 
@@ -599,6 +623,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _run_store_unregister_command(repo=args.repo)
         if args.store_target == "db":
             return _run_store_db_command(repo=args.repo)
+        if args.store_target == "status":
+            return _run_store_status_command(
+                repo=args.repo,
+                db=args.db,
+                emit_json=args.json,
+            )
         parser.print_help()
         return 2
 
@@ -642,9 +672,13 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
         all_relations,
     )
     all_relations = [*all_relations, *test_relations]
+
+    # Always fetch a lightweight git summary for staleness metadata.
+    # This is a bounded local call; it does not attach per-file history.
+    git_summary = get_git_repository_summary(repository_root)
+
     git_status = "disabled"
     if with_git:
-        git_summary = get_git_repository_summary(repository_root)
         temporal_result = attach_git_metadata_to_entities(
             all_entities,
             repository_root=repository_root,
@@ -654,6 +688,8 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
         git_status = temporal_result.status
         if temporal_result.warning:
             print(f"git metadata: {temporal_result.warning}", file=sys.stderr)
+
+    now_iso = datetime.now(tz=UTC).isoformat()
     metadata = build_default_extraction_metadata(
         repository_root=repository_root,
         extractor_names=(
@@ -672,12 +708,29 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
             "python_exports",
             "test_relationships",
         ),
-        timestamp=datetime.now(tz=UTC).isoformat(),
+        timestamp=now_iso,
     )
+
+    # Build staleness metadata rows.  git_head / git_dirty are left empty
+    # when git is unavailable so the detector can return "unknown" safely.
+    extra_meta: dict[str, str] = {
+        "indexed_at": now_iso,
+        "entity_count": str(len(all_entities)),
+        "relation_count": str(len(all_relations)),
+        "context_pack_version": CONTEXT_PACK_VERSION,
+    }
+    if git_summary.in_git_repo and git_summary.current_commit:
+        extra_meta["git_head"] = git_summary.current_commit.strip()
+        extra_meta["git_dirty"] = "true" if git_summary.is_dirty else "false"
+    else:
+        extra_meta["git_head"] = ""
+        extra_meta["git_dirty"] = ""
+
     store = SQLiteStore(db_path)
     try:
         store.initialize()
         store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
+        store.write_extra_metadata(extra_meta)
     finally:
         store.close()
     if register:
@@ -757,8 +810,11 @@ def _run_repo_map_command(*, path: str | None, db: str | None, budget: int, prof
         store.initialize()
         entities = store.list_entities()
         relations = store.list_relations()
+        metadata = store.get_metadata()
     finally:
         store.close()
+
+    _warn_if_stale(db=db_path, metadata=metadata)
     print(build_repo_map_markdown(entities, relations, budget_chars=budget, profile=profile))
     return 0
 
@@ -828,8 +884,11 @@ def _run_pack_command(
         store.initialize()
         entities = store.list_entities()
         relations = store.list_relations()
+        metadata = store.get_metadata()
     finally:
         store.close()
+
+    _warn_if_stale(db=db, metadata=metadata)
 
     resolved_profile = resolve_profile(profile)
     include_ranking = explain_ranking or resolved_profile.include_ranking_breakdown
@@ -1156,4 +1215,107 @@ def _run_store_db_command(*, repo: str) -> int:
         print(f"error: no entry found for {repo_root}", file=sys.stderr)
         return 2
     print(db_path)
+    return 0
+
+
+def _warn_if_stale(*, db: str, metadata: dict[str, str]) -> None:
+    """Print a single-line stderr warning when the index is stale or maybe_stale.
+
+    Never raises; errors are silently suppressed so the main command always
+    continues.  This is the minimal behavioral nudge described in §7 of
+    ``docs/design/index_staleness.md``.
+    """
+    from repo_semantic_memory.index_status import IndexStatus, detect_stale_from_metadata
+
+    try:
+        repo_root_str = metadata.get("repository_root")
+        if not repo_root_str:
+            return
+        report = detect_stale_from_metadata(
+            repo_root=Path(repo_root_str),
+            db_path=Path(db),
+            index_mode="explicit_db",
+            metadata=metadata,
+        )
+        if report.index_status in (IndexStatus.STALE, IndexStatus.MAYBE_STALE):
+            action = f" Suggested: {report.suggested_action}" if report.suggested_action else ""
+            print(
+                f"warning: index is {report.index_status.value} "
+                f"({report.index_status_reason}).{action}",
+                file=sys.stderr,
+            )
+    except Exception:  # noqa: BLE001 — warnings must never block the main command
+        pass
+
+
+def _run_store_status_command(*, repo: str, db: str | None, emit_json: bool) -> int:
+    """Implement ``rsm store status [REPO] [--db PATH] [--json]``."""
+    from typing import Literal
+
+    from repo_semantic_memory.index_status import detect_index_status
+
+    repo_root = Path(repo).expanduser().resolve()
+    if not repo_root.exists():
+        print(f"error: repository path does not exist: {repo_root}", file=sys.stderr)
+        return 2
+    if not repo_root.is_dir():
+        print(f"error: repository path is not a directory: {repo_root}", file=sys.stderr)
+        return 2
+
+    # Determine index mode and DB path.
+    index_mode: Literal["explicit_db", "store"]
+    resolved_db: Path | None
+    if db is not None:
+        index_mode = "explicit_db"
+        resolved_db = Path(db).expanduser()
+    else:
+        from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+        index_mode = "store"
+        resolved_db = IndexRegistry(resolve_store_home()).lookup(repo_root)
+
+    report = detect_index_status(
+        repo_root=repo_root,
+        db_path=resolved_db,
+        index_mode=index_mode,
+    )
+
+    if emit_json:
+        payload: dict[str, object] = {
+            "repo": str(report.repo_root),
+            "db": str(report.db_path) if report.db_path else None,
+            "index_mode": report.index_mode,
+            "index_status": report.index_status.value,
+            "index_status_reason": report.index_status_reason,
+            "indexed_at": report.indexed_at,
+            "indexed_git_head": report.indexed_git_head,
+            "current_git_head": report.current_git_head,
+            "working_tree_dirty": report.working_tree_dirty,
+            "schema_version": report.schema_version,
+            "context_pack_version": report.context_pack_version,
+            "suggested_action": report.suggested_action,
+        }
+        print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+        return 0
+
+    # Human output
+    db_display = str(report.db_path) if report.db_path else "<none>"
+    print(f"Repo:   {report.repo_root}")
+    print(f"Index:  {db_display}")
+    print(f"Mode:   {report.index_mode}")
+    print(f"Status: {report.index_status.value}")
+    if report.indexed_at:
+        print(f"Indexed at: {report.indexed_at}")
+    if report.indexed_git_head:
+        print(f"Indexed HEAD:  {report.indexed_git_head}")
+    if report.current_git_head:
+        print(f"Current HEAD:  {report.current_git_head}")
+    if report.working_tree_dirty is not None:
+        print(f"Working tree dirty: {'yes' if report.working_tree_dirty else 'no'}")
+    if report.schema_version:
+        print(f"Schema version: {report.schema_version}")
+    if report.context_pack_version:
+        print(f"Context pack version: {report.context_pack_version}")
+    if report.suggested_action:
+        print(f"Suggested action: {report.suggested_action}")
     return 0

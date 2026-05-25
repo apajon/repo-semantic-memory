@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from repo_semantic_memory.mcp import handlers as _handlers
 from repo_semantic_memory.mcp.session import (
@@ -69,6 +69,7 @@ class SessionConfig:
 
     repo_root: Path
     db_path: Path
+    index_mode: Literal["explicit_db", "store"] = "explicit_db"
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,7 @@ def validate_session(
     db: str | Path,
     *,
     require_db_inside_repo: bool = True,
+    index_mode: Literal["explicit_db", "store"] = "explicit_db",
 ) -> SessionConfig:
     """Validate ``--repo`` and ``--db`` paths and return a session config.
 
@@ -104,6 +106,8 @@ def validate_session(
     - When ``require_db_inside_repo=True`` (the default), ``db`` must live
       inside ``repo`` after resolving symlinks.  Pass ``False`` when the DB
       lives in the central RSM Index Store rather than inside the repository.
+    - ``index_mode`` is recorded in the returned :class:`SessionConfig` so
+      tools like ``rsm_status`` can emit mode-aware suggested actions.
     """
 
     repo_path = Path(repo).expanduser()
@@ -129,7 +133,7 @@ def validate_session(
             raise ValueError(
                 f"--db path must be inside --repo (got db={resolved_db}, repo={resolved_repo})"
             ) from exc
-    return SessionConfig(repo_root=resolved_repo, db_path=resolved_db)
+    return SessionConfig(repo_root=resolved_repo, db_path=resolved_db, index_mode=index_mode)
 
 
 def to_jsonable(value: Any) -> Any:
@@ -214,6 +218,31 @@ def _tool_status(
     payload["index_metadata"] = dict(sorted(metadata.items()))
     payload["entity_count"] = entity_count
     payload["relation_count"] = relation_count
+
+    # Extend with staleness detection fields.
+    try:
+        from repo_semantic_memory.index_status import detect_stale_from_metadata  # noqa: PLC0415
+
+        report = detect_stale_from_metadata(
+            repo_root=session.repo_root,
+            db_path=session.db_path,
+            index_mode=session.index_mode,
+            metadata=metadata,
+        )
+        payload["index_status"] = report.index_status.value
+        payload["index_status_reason"] = report.index_status_reason
+        payload["indexed_at"] = report.indexed_at
+        payload["indexed_git_head"] = report.indexed_git_head
+        payload["current_git_head"] = report.current_git_head
+        payload["working_tree_dirty"] = report.working_tree_dirty
+        payload["index_mode"] = report.index_mode
+        payload["suggested_action"] = report.suggested_action
+    except Exception:  # noqa: BLE001 — staleness errors must not break status
+        payload["index_status"] = "unknown"
+        payload["index_status_reason"] = "detection_error"
+        payload["index_mode"] = session.index_mode
+        payload["suggested_action"] = None
+
     return payload
 
 
