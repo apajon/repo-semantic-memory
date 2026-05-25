@@ -644,3 +644,130 @@ def test_cli_incremental_mode_suffix_in_output(
     assert exit_code == 0
     out = capsys.readouterr().out
     assert "mode=incremental" in out
+
+
+# ---------------------------------------------------------------------------
+# Dangling relation sweep
+# ---------------------------------------------------------------------------
+
+
+def test_delete_dangling_relations_removes_orphaned_target(tmp_path: Path) -> None:
+    """After deleting an entity, any relation pointing at it must be swept."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    # a.py stays; b.py will be deleted.
+    (repo / "a.py").write_text("class A: pass\n", encoding="utf-8")
+    (repo / "b.py").write_text("class B: pass\n", encoding="utf-8")
+
+    db_path = tmp_path / "idx.sqlite"
+    _bootstrap_full_index(repo, db_path)
+
+    # Manually inject a cross-file relation A → B (simulates e.g. an imports/tests rel).
+    store = SQLiteStore(db_path)
+    store.initialize()
+    all_entities = store.list_entities()
+    a_entities = [e for e in all_entities if "b.py" not in (e.source_range.path or "")]
+    b_entities = [e for e in all_entities if "b.py" in (e.source_range.path or "")]
+    assert a_entities, "expected at least one entity from a.py"
+    assert b_entities, "expected at least one entity from b.py"
+
+    conn = store._conn
+    conn.execute("BEGIN")
+    conn.execute(
+        "INSERT INTO relations(source_id, target_id, kind, evidence_json, metadata_json) "
+        "VALUES(?, ?, 'uses', NULL, '{}')",
+        (a_entities[0].id.value, b_entities[0].id.value),
+    )
+    conn.execute("COMMIT")
+
+    # Now delete b.py's entities via incremental update (empty re-extract set).
+    store.apply_incremental_update(
+        purge_paths=frozenset({"b.py"}),
+        new_entities=[],
+        new_relations=[],
+        global_recompute_kinds=frozenset(),
+        compute_global_relations=lambda e, r: [],
+    )
+
+    remaining_relations = store.list_relations()
+    store.close()
+
+    # The incoming "uses" relation targeting the deleted B entity must be swept.
+    for rel in remaining_relations:
+        assert rel.kind != "uses", "dangling 'uses' relation must have been removed"
+
+
+def test_delete_dangling_relations_helper_returns_count(tmp_path: Path) -> None:
+    """_delete_dangling_relations returns the number of deleted rows."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+
+    db_path = tmp_path / "idx.sqlite"
+    _bootstrap_full_index(repo, db_path)
+
+    store = SQLiteStore(db_path)
+    store.initialize()
+    # Inject a dangling relation with nonexistent endpoints.
+    conn = store._conn
+    conn.execute("BEGIN")
+    conn.execute(
+        "INSERT INTO relations(source_id, target_id, kind, evidence_json, metadata_json) "
+        "VALUES('ghost_src', 'ghost_tgt', 'imports', NULL, '{}')"
+    )
+    conn.execute("COMMIT")
+
+    with store._transaction():
+        deleted = store._delete_dangling_relations()
+    store.close()
+
+    assert deleted >= 1, "at least the ghost relation must have been deleted"
+
+
+# ---------------------------------------------------------------------------
+# last_index_mode consistency
+# ---------------------------------------------------------------------------
+
+
+def test_full_rebuild_writes_last_index_mode_full(tmp_path: Path) -> None:
+    """A full rebuild (no --incremental) writes last_index_mode=full."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text(_PY_SRC, encoding="utf-8")
+
+    db_path = tmp_path / "idx.sqlite"
+    exit_code = main(["index", str(repo), "--db", str(db_path)])
+    assert exit_code == 0
+
+    store = SQLiteStore(db_path)
+    store.initialize()
+    meta = store.get_metadata()
+    store.close()
+
+    assert meta.get("last_index_mode") == "full"
+
+
+def test_incremental_fallback_full_rebuild_writes_last_index_mode_full(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """When --incremental falls back to a full rebuild, last_index_mode=full is written."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.py").write_text(_PY_SRC, encoding="utf-8")
+
+    db_path = tmp_path / "idx.sqlite"
+    # First full index.
+    main(["index", str(repo), "--db", str(db_path)])
+    capsys.readouterr()
+
+    # Second run with --incremental in a non-git dir (planner falls back).
+    exit_code = main(["index", str(repo), "--db", str(db_path), "--incremental"])
+    assert exit_code == 0
+    capsys.readouterr()
+
+    store = SQLiteStore(db_path)
+    store.initialize()
+    meta = store.get_metadata()
+    store.close()
+
+    assert meta.get("last_index_mode") == "full"

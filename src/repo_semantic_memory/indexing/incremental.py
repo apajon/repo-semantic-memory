@@ -255,10 +255,14 @@ def _parse_diff_name_status(
     Returns ``(changed, deleted, renamed)`` where:
 
     - *changed* — paths that need re-extraction (statuses ``A``, ``M``, ``T``,
-      ``C``, and the new-path side of ``R`` entries).
+      the new-path side of ``R`` entries, and the new-path side of ``C`` entries).
     - *deleted* — paths that need purging (status ``D`` and the old-path side
-      of ``R`` entries).
-    - *renamed* — ``(old_path, new_path)`` pairs for ``R``-status entries.
+      of ``R`` entries only; the source of a ``C`` copy is **not** deleted).
+    - *renamed* — ``(old_path, new_path)`` pairs for ``R``-status entries only.
+
+    ``Cxxx old new`` (file copy): only the *new* destination is added to
+    *changed*.  The *old* source is **not** added to *deleted* because the
+    original file still exists in the tree.
 
     All paths are normalised to forward slashes.
     """
@@ -277,14 +281,18 @@ def _parse_diff_name_status(
 
         if status == "D":
             deleted.add(_normalize_path(parts[1]))
-        elif status.startswith("R") or status.startswith("C"):
+        elif status.startswith("R"):
             if len(parts) >= 3:
                 old = _normalize_path(parts[1])
                 new = _normalize_path(parts[2])
                 deleted.add(old)
                 changed.add(new)
-                if status.startswith("R"):
-                    renamed.append((old, new))
+                renamed.append((old, new))
+        elif status.startswith("C"):
+            # Copy: destination is new content to index; source is unchanged.
+            if len(parts) >= 3:
+                new = _normalize_path(parts[2])
+                changed.add(new)
         elif status in ("A", "M", "T"):
             changed.add(_normalize_path(parts[1]))
         else:

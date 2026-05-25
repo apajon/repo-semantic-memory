@@ -817,6 +817,7 @@ def _run_index_command(
         "relation_count": str(len(all_relations)),
         "schema_version": SCHEMA_VERSION,
         "context_pack_version": CONTEXT_PACK_VERSION,
+        "last_index_mode": "full",
     }
     if git_summary.in_git_repo and git_summary.current_commit:
         extra_meta["git_head"] = git_summary.current_commit.strip()

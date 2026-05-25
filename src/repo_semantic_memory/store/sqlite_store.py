@@ -128,13 +128,15 @@ class SQLiteStore:
         Within a single transaction:
 
         1. Delete all relations of *global_recompute_kinds* (will be rebuilt).
-        2. Identify entity IDs whose ``source_range.path`` is in *purge_paths*
-           and delete their source-side relations.
-        3. Delete entities whose ``source_range.path`` is in *purge_paths*.
-        4. Upsert *new_entities* and *new_relations*.
-        5. Load the current entity/relation snapshot, call
+        2. Identify entity IDs whose ``source_range.path`` is in *purge_paths*.
+        3. Delete their outgoing relations (where ``source_id`` matches).
+        4. Delete incoming relations pointing at those same entity IDs
+           (cross-file relations from unchanged files targeting deleted entities).
+        5. Delete entities whose ``source_range.path`` is in *purge_paths*.
+        6. Upsert *new_entities* and *new_relations*.
+        7. Load the current entity/relation snapshot, call
            *compute_global_relations*, and upsert the results.
-        6. Return ``(entity_count, relation_count)`` after the update.
+        8. Return ``(entity_count, relation_count)`` after the update.
 
         Rolls back on any exception, leaving the previous index intact.
 
@@ -153,43 +155,123 @@ class SQLiteStore:
         """
         with self._transaction():
             # 1. Purge global-recompute relation kinds.
-            for kind in sorted(global_recompute_kinds):
-                self._conn.execute("DELETE FROM relations WHERE kind = ?", (kind,))
+            self._delete_relation_kinds(global_recompute_kinds)
 
-            # 2. Find entity IDs for purge_paths; delete their source relations.
+            # 2. Find entity IDs for purge_paths.
             entity_ids = self._entity_ids_for_source_paths(purge_paths)
-            if entity_ids:
-                sorted_ids = sorted(entity_ids)
-                placeholders = ",".join("?" * len(sorted_ids))
-                self._conn.execute(
-                    f"DELETE FROM relations WHERE source_id IN ({placeholders})",
-                    sorted_ids,
-                )
 
-            # 3. Delete entities for purge_paths.
-            if purge_paths:
-                sorted_paths = sorted(purge_paths)
-                placeholders = ",".join("?" * len(sorted_paths))
-                self._conn.execute(
-                    "DELETE FROM entities WHERE"
-                    f" json_extract(source_range_json, '$.path') IN ({placeholders})",
-                    sorted_paths,
-                )
+            # 3. Delete outgoing relations (source_id in purge set).
+            self._delete_relations_for_sources(entity_ids)
 
-            # 4. Upsert freshly extracted content.
+            # 4. Delete incoming relations (target_id in purge set) so that
+            #    cross-file relations pointing at deleted entities are removed.
+            self._delete_relations_for_targets(entity_ids)
+
+            # 5. Delete entities for purge_paths.
+            self._delete_entities_for_paths(purge_paths)
+
+            # 6. Upsert freshly extracted content.
             self._upsert_entities(list(new_entities))
             self._upsert_relations(list(new_relations))
 
-            # 5. Global recompute (reads see uncommitted writes on same conn).
+            # 7. Global recompute (reads see uncommitted writes on same conn).
             current_entities = self.list_entities()
             current_relations = self.list_relations()
             global_relations = compute_global_relations(current_entities, current_relations)
             self._upsert_relations(global_relations)
 
-            # 6. Return final counts.
+            # 8. Return final counts.
             entity_count: int = self._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
             relation_count: int = self._conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
             return entity_count, relation_count
+
+    # ---------------------------------------------------------------------------
+    # Private helpers for incremental updates
+    # ---------------------------------------------------------------------------
+
+    def _delete_relation_kinds(self, kinds: frozenset[str]) -> int:
+        """Delete all relations whose ``kind`` is in *kinds*.
+
+        Returns the number of rows deleted.
+        """
+        deleted = 0
+        for kind in sorted(kinds):
+            cursor = self._conn.execute("DELETE FROM relations WHERE kind = ?", (kind,))
+            deleted += cursor.rowcount
+        return deleted
+
+    def _delete_relations_for_sources(self, entity_ids: frozenset[str]) -> int:
+        """Delete relations whose ``source_id`` is in *entity_ids*.
+
+        Returns the number of rows deleted.
+        """
+        if not entity_ids:
+            return 0
+        sorted_ids = sorted(entity_ids)
+        placeholders = ",".join("?" * len(sorted_ids))
+        cursor = self._conn.execute(
+            f"DELETE FROM relations WHERE source_id IN ({placeholders})",
+            sorted_ids,
+        )
+        return cursor.rowcount
+
+    def _delete_relations_for_targets(self, entity_ids: frozenset[str]) -> int:
+        """Delete relations whose ``target_id`` is in *entity_ids*.
+
+        This removes incoming cross-file relations that point at entities
+        about to be (or already) deleted, preventing dangling references.
+
+        Returns the number of rows deleted.
+        """
+        if not entity_ids:
+            return 0
+        sorted_ids = sorted(entity_ids)
+        placeholders = ",".join("?" * len(sorted_ids))
+        cursor = self._conn.execute(
+            f"DELETE FROM relations WHERE target_id IN ({placeholders})",
+            sorted_ids,
+        )
+        return cursor.rowcount
+
+    def _delete_entities_for_paths(self, paths: frozenset[str]) -> int:
+        """Delete entities whose ``source_range.path`` is in *paths*.
+
+        Returns the number of rows deleted.
+        """
+        if not paths:
+            return 0
+        sorted_paths = sorted(paths)
+        placeholders = ",".join("?" * len(sorted_paths))
+        cursor = self._conn.execute(
+            "DELETE FROM entities WHERE"
+            f" json_extract(source_range_json, '$.path') IN ({placeholders})",
+            sorted_paths,
+        )
+        return cursor.rowcount
+
+    def _delete_dangling_relations(self) -> int:
+        """Remove relations whose ``source_id`` or ``target_id`` no longer exists
+        as a real entity in the index.
+
+        .. note::
+            Some relation kinds (e.g. ``exports``, ``imports``) intentionally
+            use placeholder / unresolved target IDs that are never inserted as
+            entities.  Use :meth:`_delete_relations_for_targets` with a known
+            set of deleted entity IDs when you need targeted cleanup; only call
+            this method when you are certain all valid targets are indexed.
+
+        Must be called inside an open transaction.
+
+        Returns the number of rows deleted.
+        """
+        cursor = self._conn.execute(
+            """
+            DELETE FROM relations
+            WHERE source_id NOT IN (SELECT id FROM entities)
+               OR target_id NOT IN (SELECT id FROM entities)
+            """
+        )
+        return cursor.rowcount
 
     def _entity_ids_for_source_paths(self, paths: frozenset[str]) -> frozenset[str]:
         """Return entity IDs whose ``source_range.path`` is in *paths*."""

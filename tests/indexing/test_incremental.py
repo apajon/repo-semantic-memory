@@ -320,10 +320,26 @@ def test_plan_copied_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
     )
     plan = plan_incremental_update(tmp_path, _FAKE_INDEXED_HEAD)
     assert plan.can_incremental is True
-    # Copied: new path in changed, old path in deleted, NOT in renamed_paths.
+    # Copied: only the new destination is marked changed; the source is NOT deleted.
     assert plan.changed_paths == ("src/copy.py",)
-    assert plan.deleted_paths == ("src/original.py",)
+    assert plan.deleted_paths == ()  # source file is not removed
     assert plan.renamed_paths == ()
+
+
+def test_plan_copied_file_source_not_in_changed_or_deleted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Copy source must appear in neither changed_paths nor deleted_paths."""
+    diff_out = "C090\tsrc/original.py\tsrc/copy.py\n"
+    monkeypatch.setattr(
+        "repo_semantic_memory.indexing.incremental._run_git",
+        _git_responses(_make_good_git(diff_out=diff_out)),
+    )
+    plan = plan_incremental_update(tmp_path, _FAKE_INDEXED_HEAD)
+    assert plan.can_incremental is True
+    assert "src/original.py" not in plan.changed_paths
+    assert "src/original.py" not in plan.deleted_paths
+    assert "src/copy.py" in plan.changed_paths
 
 
 def test_plan_type_changed_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -461,9 +477,10 @@ def test_parse_diff_renamed() -> None:
 
 
 def test_parse_diff_copied() -> None:
+    # Copy: only the destination is new; the source file still exists.
     changed, deleted, renamed = _parse_diff_name_status("C100\tsrc/orig.py\tsrc/copy.py\n")
-    assert "src/orig.py" in deleted
     assert "src/copy.py" in changed
+    assert "src/orig.py" not in deleted  # source is NOT deleted
     assert not renamed  # C does not produce renamed entries
 
 
