@@ -694,25 +694,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _resolve_reader_db(db: str | None) -> str:
     """Resolve the SQLite DB path for read-only commands.
 
-    Priority:
-
-    1. If *db* is not ``None`` (i.e. the caller supplied an explicit ``--db``),
-       use it as-is.
-    2. Check the RSM Index Store for the current working directory.
-    3. Fall back to the conventional ``.rsm/index.sqlite`` path (may not exist).
+    Delegates to :func:`~repo_semantic_memory.store_home.resolve_reader_db`
+    and returns the result as a string for CLI compatibility.
     """
-    if db is not None:
-        return db
-    try:
-        from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+    from repo_semantic_memory.store_home import resolve_reader_db
 
-        registry = IndexRegistry(resolve_store_home())
-        looked_up = registry.lookup(Path.cwd())
-        if looked_up is not None:
-            return str(looked_up)
-    except (ImportError, OSError):
-        pass
-    return ".rsm/index.sqlite"
+    return str(resolve_reader_db(db).path)
 
 
 def _format_scan_table(entities: Sequence[Entity]) -> str:
