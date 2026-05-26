@@ -1,0 +1,82 @@
+# Pilot manifest for opt-in public-repository retrieval benchmarks.
+#
+# This file describes external checkouts only. It does not vendor public
+# repositories, clone repositories, fetch network resources, or define verified
+# gold targets. Placeholder refs and empty gold lists must be replaced after
+# local source inspection against the intended pinned revision.
+
+repositories:
+  - name: typer
+    url: https://github.com/fastapi/typer
+    ref: "<pin-before-running>"
+    size_category: small
+    python_first: true
+    indexing_risk: low
+    checkout:
+      mode: external
+      path_env: RSM_BENCH_TYPER_PATH
+    tasks:
+      - id: typer_public_cli_api
+        category: public_api_lookup
+        prompt: "Find the public API for defining a CLI command."
+        curation_status: needs_local_source_inspection
+        gold:
+          files: []
+          symbols: []
+      - id: typer_cli_command_registration
+        category: implementation_location
+        prompt: "Find where CLI command registration is implemented."
+        curation_status: needs_local_source_inspection
+        gold:
+          files: []
+          symbols: []
+
+  - name: rich
+    url: https://github.com/Textualize/rich
+    ref: "<pin-before-running>"
+    size_category: medium
+    python_first: true
+    indexing_risk: low-medium
+    checkout:
+      mode: external
+      path_env: RSM_BENCH_RICH_PATH
+    tasks:
+      - id: rich_public_console_api
+        category: public_api_lookup
+        prompt: "Find the public API for console output."
+        curation_status: needs_local_source_inspection
+        gold:
+          files: []
+          symbols: []
+      - id: rich_console_error_handling
+        category: error_handling
+        prompt: "Find where console output errors are handled."
+        curation_status: needs_local_source_inspection
+        gold:
+          files: []
+          symbols: []
+
+  - name: httpx
+    url: https://github.com/encode/httpx
+    ref: "<pin-before-running>"
+    size_category: medium
+    python_first: true
+    indexing_risk: medium
+    checkout:
+      mode: external
+      path_env: RSM_BENCH_HTTPX_PATH
+    tasks:
+      - id: httpx_timeout_configuration
+        category: implementation_location
+        prompt: "Find where timeout behavior is configured."
+        curation_status: needs_local_source_inspection
+        gold:
+          files: []
+          symbols: []
+      - id: httpx_transport_architecture
+        category: cross_file_architecture
+        prompt: "Find the main modules involved in transport handling."
+        curation_status: needs_local_source_inspection
+        gold:
+          files: []
+          symbols: []
