@@ -8,6 +8,10 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from repo_semantic_memory.indexing.executor import IncrementalResult
 
 from repo_semantic_memory.config import DEFAULT_CONFIG
 from repo_semantic_memory.context import (
@@ -36,6 +40,7 @@ from repo_semantic_memory.extractors import (
     index_python_path,
 )
 from repo_semantic_memory.importers import import_jsonl_directory
+from repo_semantic_memory.indexing import IncrementalFallbackReason
 from repo_semantic_memory.memory import (
     attach_git_metadata_to_entities,
     export_invariants_yaml,
@@ -99,6 +104,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Records the repo/db mapping so --db can be omitted from rsm mcp serve."
         ),
     )
+    index_parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help=(
+            "Attempt an incremental index update using local Git signals. "
+            "Falls back to a full rebuild if incremental safety cannot be proven. "
+            "Full rebuild is the default."
+        ),
+    )
 
     git_parser = subparsers.add_parser(
         "git",
@@ -127,8 +141,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_entities_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     inspect_entities_parser.add_argument(
         "--json",
@@ -141,8 +158,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     inspect_relations_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     inspect_relations_parser.add_argument(
         "--json",
@@ -185,8 +205,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pack_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     pack_parser.add_argument(
         "--budget",
@@ -222,8 +245,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     components_infer_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     components_infer_parser.add_argument(
         "--json",
@@ -236,8 +262,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     components_list_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     components_list_parser.add_argument(
         "--json",
@@ -255,10 +284,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     invariants_export_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
+        default=None,
         help=(
             "SQLite database file path checked for index availability/schema compatibility only; "
-            "claim/invariant data currently lives in standalone YAML files."
+            "claim/invariant data currently lives in standalone YAML files. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
         ),
     )
     invariants_export_parser.add_argument(
@@ -272,10 +302,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     invariants_import_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
+        default=None,
         help=(
             "SQLite database file path checked for index availability/schema compatibility only; "
-            "claim/invariant data currently lives in standalone YAML files."
+            "claim/invariant data currently lives in standalone YAML files. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
         ),
     )
     invariants_import_parser.add_argument(
@@ -292,8 +323,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_retrieval_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     eval_retrieval_parser.add_argument(
         "--dataset",
@@ -315,8 +349,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_compare_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     eval_compare_parser.add_argument(
         "--dataset",
@@ -344,8 +381,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_ai_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     export_ai_parser.add_argument(
         "--out",
@@ -363,8 +403,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_jsonl_parser.add_argument(
         "--db",
-        default=".rsm/index.sqlite",
-        help="SQLite database file path.",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
     )
     export_jsonl_parser.add_argument(
         "--out",
@@ -537,7 +580,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             resolved_db = args.db
         return _run_index_command(
-            path=args.path, db=resolved_db, with_git=args.with_git, register=args.register
+            path=args.path,
+            db=resolved_db,
+            with_git=args.with_git,
+            register=args.register,
+            incremental=args.incremental,
         )
     if args.command == "git":
         if args.git_target == "summary":
@@ -546,9 +593,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     if args.command == "inspect":
         if args.inspect_target == "entities":
-            return _run_inspect_entities_command(db=args.db, emit_json=args.json)
+            return _run_inspect_entities_command(
+                db=_resolve_reader_db(args.db), emit_json=args.json
+            )
         if args.inspect_target == "relations":
-            return _run_inspect_relations_command(db=args.db, emit_json=args.json)
+            return _run_inspect_relations_command(
+                db=_resolve_reader_db(args.db), emit_json=args.json
+            )
         parser.print_help()
         return 2
     if args.command == "repo-map":
@@ -561,7 +612,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "pack":
         return _run_pack_command(
             task=args.task,
-            db=args.db,
+            db=_resolve_reader_db(args.db),
             budget=args.budget,
             output_format=args.format,
             explain_ranking=args.explain_ranking,
@@ -569,29 +620,31 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.command == "components":
         if args.components_target == "infer":
-            return _run_components_infer_command(db=args.db, emit_json=args.json)
+            return _run_components_infer_command(
+                db=_resolve_reader_db(args.db), emit_json=args.json
+            )
         if args.components_target == "list":
-            return _run_components_list_command(db=args.db, emit_json=args.json)
+            return _run_components_list_command(db=_resolve_reader_db(args.db), emit_json=args.json)
         parser.print_help()
         return 2
     if args.command == "invariants":
         if args.invariants_target == "export":
-            return _run_invariants_export_command(db=args.db, out=args.out)
+            return _run_invariants_export_command(db=_resolve_reader_db(args.db), out=args.out)
         if args.invariants_target == "import":
-            return _run_invariants_import_command(db=args.db, path=args.path)
+            return _run_invariants_import_command(db=_resolve_reader_db(args.db), path=args.path)
         parser.print_help()
         return 2
     if args.command == "eval":
         if args.eval_target == "retrieval":
             return _run_eval_retrieval_command(
-                db=args.db,
+                db=_resolve_reader_db(args.db),
                 dataset=args.dataset,
                 emit_json=args.json,
                 markdown_report=args.markdown_report,
             )
         if args.eval_target == "compare":
             return _run_eval_compare_command(
-                db=args.db,
+                db=_resolve_reader_db(args.db),
                 dataset=args.dataset,
                 budget=args.budget,
                 emit_json=args.json,
@@ -600,9 +653,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 2
     if args.command == "export-ai":
-        return _run_export_ai_command(db=args.db, out=args.out, force=args.force)
+        return _run_export_ai_command(
+            db=_resolve_reader_db(args.db), out=args.out, force=args.force
+        )
     if args.command == "export-jsonl":
-        return _run_export_jsonl_command(db=args.db, out=args.out)
+        return _run_export_jsonl_command(db=_resolve_reader_db(args.db), out=args.out)
     if args.command == "import-jsonl":
         return _run_import_jsonl_command(input_dir=args.input_dir, db=args.db)
     if args.command == "mcp":
@@ -636,6 +691,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _resolve_reader_db(db: str | None) -> str:
+    """Resolve the SQLite DB path for read-only commands.
+
+    Delegates to :func:`~repo_semantic_memory.store_home.resolve_reader_db`
+    and returns the result as a string for CLI compatibility.
+    """
+    from repo_semantic_memory.store_home import resolve_reader_db
+
+    return str(resolve_reader_db(db).path)
+
+
 def _format_scan_table(entities: Sequence[Entity]) -> str:
     rows = [("kind", "id", "path")]
     for entity in entities:
@@ -652,11 +718,38 @@ def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence
     return f"entities={len(entities)} relations={len(relations)}"
 
 
-def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = False) -> int:
+def _run_index_command(
+    *, path: str, db: str, with_git: bool, register: bool = False, incremental: bool = False
+) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if incremental:
+        if with_git:
+            print(
+                "info: incremental index fallback: --with-git is not supported"
+                " with incremental; running full rebuild",
+                file=sys.stderr,
+            )
+        elif db_path.exists():
+            result = _attempt_incremental_index(repository_root, db_path, with_git=with_git)
+            if result is not None:
+                if register:
+                    _do_register(repository_root, db_path)
+                mode_suffix = " mode=incremental"
+                print(
+                    f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}"
+                )
+                return 0
+            # result is None: planner or executor rejected incremental; fall through to full
+            # rebuild.
+        else:
+            _reason = IncrementalFallbackReason.INDEX_MISSING
+            print(
+                f"info: incremental index fallback: {_reason}; running full rebuild",
+                file=sys.stderr,
+            )
     filesystem_entities = extract_filesystem_entities(repository_root)
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     markdown_outline = extract_markdown_outline_path(repository_root)
@@ -719,6 +812,7 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
         "relation_count": str(len(all_relations)),
         "schema_version": SCHEMA_VERSION,
         "context_pack_version": CONTEXT_PACK_VERSION,
+        "last_index_mode": "full",
     }
     if git_summary.in_git_repo and git_summary.current_commit:
         extra_meta["git_head"] = git_summary.current_commit.strip()
@@ -747,6 +841,66 @@ def _run_index_command(*, path: str, db: str, with_git: bool, register: bool = F
         return 0
     print(f"entities={len(all_entities)} relations={len(all_relations)}")
     return 0
+
+
+def _do_register(repository_root: Path, db_path: Path) -> None:
+    """Register *repository_root* / *db_path* in the RSM Index Store."""
+    from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
+
+    IndexRegistry(resolve_store_home()).register(repository_root, db_path.resolve(), indexed=True)
+
+
+def _attempt_incremental_index(
+    repo_root: Path,
+    db_path: Path,
+    *,
+    with_git: bool,
+) -> IncrementalResult | None:
+    """Try an incremental index update.
+
+    Returns an :class:`~repo_semantic_memory.indexing.executor.IncrementalResult`
+    on success, or ``None`` when the planner rejects or the executor raises
+    (in both cases a fallback message is printed to stderr).
+    """
+    from repo_semantic_memory.indexing import plan_incremental_update
+    from repo_semantic_memory.indexing.executor import run_incremental_index
+
+    # Read existing metadata to feed the planner.
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        meta = store.get_metadata()
+    finally:
+        store.close()
+
+    indexed_head = meta.get("git_head") or None
+    plan = plan_incremental_update(
+        repo_root,
+        indexed_head,
+        indexed_git_dirty=meta.get("git_dirty"),
+        indexed_schema_version=meta.get("schema_version"),
+        indexed_context_pack_version=meta.get("context_pack_version"),
+    )
+
+    if not plan.can_incremental:
+        print(
+            f"info: incremental index fallback: {plan.fallback_reason}; running full rebuild",
+            file=sys.stderr,
+        )
+        return None
+
+    try:
+        return run_incremental_index(repo_root, db_path, plan, with_git=with_git)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+
+        print(
+            f"info: incremental index fallback:"
+            f" {IncrementalFallbackReason.INTERNAL_ERROR} ({exc}); running full rebuild",
+            file=sys.stderr,
+        )
+        traceback.print_exc(file=sys.stderr)
+        return None
 
 
 def _run_git_summary_command(*, path: str, emit_json: bool) -> int:
@@ -805,7 +959,7 @@ def _run_repo_map_command(*, path: str | None, db: str | None, budget: int, prof
         print(build_repo_map_markdown(entities, relations, budget_chars=budget, profile=profile))
         return 0
 
-    db_path = db if db is not None else ".rsm/index.sqlite"
+    db_path = _resolve_reader_db(db)
     store = SQLiteStore(db_path)
     try:
         store.initialize()

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -728,3 +730,104 @@ def test_import_jsonl_command_reconstructs_db(
     assert inspect_exit == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload
+
+
+# ---------------------------------------------------------------------------
+# Index Store resolution for reader commands (Prompt 50.5 dogfooding fix)
+# ---------------------------------------------------------------------------
+
+
+def test_pack_resolves_db_from_index_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """rsm pack without --db should use the registered Index Store DB."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    store_home = tmp_path / "rsm_home"
+    store_home.mkdir()
+    db_path = store_home / "indexes" / "test_pack" / "index.sqlite"
+    db_path.parent.mkdir(parents=True)
+
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    from repo_semantic_memory.store_home import IndexRegistry
+
+    IndexRegistry(store_home).register(fixture_root, db_path, indexed=True)
+
+    with mock.patch.dict(os.environ, {"RSM_HOME": str(store_home)}):
+        with mock.patch("pathlib.Path.cwd", return_value=fixture_root):
+            exit_code = main(["pack", "--task", "DerivedThing", "--budget", "4000"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "# Context pack" in output
+    assert "DerivedThing" in output
+
+
+def test_pack_explicit_db_overrides_index_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Explicit --db must take priority over Index Store lookup."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / "explicit.sqlite"
+
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(["pack", "--task", "DerivedThing", "--budget", "4000", "--db", str(db_path)])
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "# Context pack" in output
+
+
+def test_repo_map_resolves_db_from_index_store(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """rsm repo-map without --db or --path should use the Index Store DB."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    store_home = tmp_path / "rsm_home"
+    store_home.mkdir()
+    db_path = store_home / "indexes" / "test_map" / "index.sqlite"
+    db_path.parent.mkdir(parents=True)
+
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    from repo_semantic_memory.store_home import IndexRegistry
+
+    IndexRegistry(store_home).register(fixture_root, db_path, indexed=True)
+
+    with mock.patch.dict(os.environ, {"RSM_HOME": str(store_home)}):
+        with mock.patch("pathlib.Path.cwd", return_value=fixture_root):
+            exit_code = main(["repo-map", "--budget", "2000"])
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "# Repo map" in output
+
+
+def test_resolve_reader_db_fallback_when_no_store_entry(
+    tmp_path: Path,
+) -> None:
+    """_resolve_reader_db returns .rsm/index.sqlite when no Index Store entry exists."""
+    from repo_semantic_memory.cli import _resolve_reader_db
+
+    store_home = tmp_path / "empty_rsm_home"
+    store_home.mkdir()
+
+    with mock.patch.dict(os.environ, {"RSM_HOME": str(store_home)}):
+        with mock.patch("pathlib.Path.cwd", return_value=tmp_path / "repo"):
+            result = _resolve_reader_db(None)
+
+    assert result == ".rsm/index.sqlite"
+
+
+def test_resolve_reader_db_returns_explicit_db_unchanged(tmp_path: Path) -> None:
+    """_resolve_reader_db returns the explicit path unchanged."""
+    from repo_semantic_memory.cli import _resolve_reader_db
+
+    explicit = str(tmp_path / "my.sqlite")
+    assert _resolve_reader_db(explicit) == explicit

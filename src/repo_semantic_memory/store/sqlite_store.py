@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +113,160 @@ class SQLiteStore:
         """Return metadata rows ordered by key."""
         rows = self._conn.execute("SELECT key, value FROM metadata ORDER BY key ASC").fetchall()
         return {key: value for key, value in rows}
+
+    def apply_incremental_update(
+        self,
+        *,
+        purge_paths: frozenset[str],
+        new_entities: Sequence[Entity],
+        new_relations: Sequence[Relation],
+        global_recompute_kinds: frozenset[str],
+        compute_global_relations: Callable[[list[Entity], list[Relation]], list[Relation]],
+    ) -> tuple[int, int]:
+        """Apply a transactional incremental index update.
+
+        Within a single transaction:
+
+        1. Delete all relations of *global_recompute_kinds* (will be rebuilt).
+        2. Identify entity IDs whose ``source_range.path`` is in *purge_paths*.
+        3. Delete their outgoing relations (where ``source_id`` matches).
+        4. Delete incoming relations pointing at those same entity IDs
+           (cross-file relations from unchanged files targeting deleted entities).
+        5. Delete entities whose ``source_range.path`` is in *purge_paths*.
+        6. Upsert *new_entities* and *new_relations*.
+        7. If *global_recompute_kinds* is non-empty: load the current
+           entity/relation snapshot, call *compute_global_relations*, and
+           upsert the results.  Skipped when the set is empty to avoid an
+           unnecessary full snapshot load.
+        8. Return ``(entity_count, relation_count)`` after the update.
+
+        Rolls back on any exception, leaving the previous index intact.
+
+        Args:
+            purge_paths: Repo-relative paths whose entities and source-side
+                relations should be removed before upserting.
+            new_entities: Freshly extracted entities to upsert.
+            new_relations: Freshly extracted non-global relations to upsert.
+            global_recompute_kinds: Relation kinds purged before upsert and
+                fully recomputed via *compute_global_relations* afterward.
+            compute_global_relations: Callable invoked with the post-upsert
+                entity and relation snapshot; its return value is upserted.
+
+        Returns:
+            ``(entity_count, relation_count)`` — total counts after commit.
+        """
+        with self._transaction():
+            # 1. Purge global-recompute relation kinds.
+            self._delete_relation_kinds(global_recompute_kinds)
+
+            # 2. Find entity IDs for purge_paths.
+            entity_ids = self._entity_ids_for_source_paths(purge_paths)
+
+            # 3. Delete outgoing relations (source_id in purge set).
+            self._delete_relations_for_sources(entity_ids)
+
+            # 4. Delete incoming relations (target_id in purge set) so that
+            #    cross-file relations pointing at deleted entities are removed.
+            self._delete_relations_for_targets(entity_ids)
+
+            # 5. Delete entities for purge_paths.
+            self._delete_entities_for_paths(purge_paths)
+
+            # 6. Upsert freshly extracted content.
+            self._upsert_entities(list(new_entities))
+            self._upsert_relations(list(new_relations))
+
+            # 7. Global recompute only when at least one global relation kind
+            #    was invalidated. File-local extraction/upsert already handled
+            #    changed paths; skipping this when the set is empty avoids an
+            #    unnecessary full entity/relation snapshot load.
+            if global_recompute_kinds:
+                current_entities = self.list_entities()
+                current_relations = self.list_relations()
+                global_relations = compute_global_relations(current_entities, current_relations)
+                self._upsert_relations(global_relations)
+
+            # 8. Return final counts.
+            entity_count: int = self._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]
+            relation_count: int = self._conn.execute("SELECT COUNT(*) FROM relations").fetchone()[0]
+            return entity_count, relation_count
+
+    # ---------------------------------------------------------------------------
+    # Private helpers for incremental updates
+    # ---------------------------------------------------------------------------
+
+    def _delete_relation_kinds(self, kinds: frozenset[str]) -> int:
+        """Delete all relations whose ``kind`` is in *kinds*.
+
+        Returns the number of rows deleted.
+        """
+        deleted = 0
+        for kind in sorted(kinds):
+            cursor = self._conn.execute("DELETE FROM relations WHERE kind = ?", (kind,))
+            deleted += cursor.rowcount
+        return deleted
+
+    def _delete_relations_for_sources(self, entity_ids: frozenset[str]) -> int:
+        """Delete relations whose ``source_id`` is in *entity_ids*.
+
+        Returns the number of rows deleted.
+        """
+        if not entity_ids:
+            return 0
+        sorted_ids = sorted(entity_ids)
+        placeholders = ",".join("?" * len(sorted_ids))
+        cursor = self._conn.execute(
+            f"DELETE FROM relations WHERE source_id IN ({placeholders})",
+            sorted_ids,
+        )
+        return cursor.rowcount
+
+    def _delete_relations_for_targets(self, entity_ids: frozenset[str]) -> int:
+        """Delete relations whose ``target_id`` is in *entity_ids*.
+
+        This removes incoming cross-file relations that point at entities
+        about to be (or already) deleted, preventing dangling references.
+
+        Returns the number of rows deleted.
+        """
+        if not entity_ids:
+            return 0
+        sorted_ids = sorted(entity_ids)
+        placeholders = ",".join("?" * len(sorted_ids))
+        cursor = self._conn.execute(
+            f"DELETE FROM relations WHERE target_id IN ({placeholders})",
+            sorted_ids,
+        )
+        return cursor.rowcount
+
+    def _delete_entities_for_paths(self, paths: frozenset[str]) -> int:
+        """Delete entities whose ``source_range.path`` is in *paths*.
+
+        Returns the number of rows deleted.
+        """
+        if not paths:
+            return 0
+        sorted_paths = sorted(paths)
+        placeholders = ",".join("?" * len(sorted_paths))
+        cursor = self._conn.execute(
+            "DELETE FROM entities WHERE"
+            f" json_extract(source_range_json, '$.path') IN ({placeholders})",
+            sorted_paths,
+        )
+        return cursor.rowcount
+
+    def _entity_ids_for_source_paths(self, paths: frozenset[str]) -> frozenset[str]:
+        """Return entity IDs whose ``source_range.path`` is in *paths*."""
+        if not paths:
+            return frozenset()
+        sorted_paths = sorted(paths)
+        placeholders = ",".join("?" * len(sorted_paths))
+        rows = self._conn.execute(
+            "SELECT id FROM entities WHERE"
+            f" json_extract(source_range_json, '$.path') IN ({placeholders})",
+            sorted_paths,
+        ).fetchall()
+        return frozenset(str(row[0]) for row in rows)
 
     def write_extra_metadata(self, extra: dict[str, str]) -> None:
         """Upsert additional key/value rows into the metadata table.
