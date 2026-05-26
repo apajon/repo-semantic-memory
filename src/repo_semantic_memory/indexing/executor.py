@@ -42,6 +42,7 @@ from repo_semantic_memory.extractors.filesystem import (
     _build_entity,
     _classify_kind,
     _is_binary_looking,
+    should_index_repo_path,
 )
 from repo_semantic_memory.indexing.incremental import IncrementalPlan
 from repo_semantic_memory.model import Entity, Relation
@@ -199,6 +200,8 @@ def _extract_paths(
     relations: list[Relation] = []
 
     for rel_path in sorted(rel_paths):
+        if not should_index_repo_path(repo_root, rel_path):
+            continue
         abs_path = repo_root / rel_path
         if not abs_path.exists():
             continue

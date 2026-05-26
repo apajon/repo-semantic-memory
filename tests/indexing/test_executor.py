@@ -407,6 +407,32 @@ def test_executor_changed_markdown_file_updates_entities(tmp_path: Path) -> None
     assert any("section-two" in q.lower() or "section two" in q.lower() for q in qnames)
 
 
+def test_executor_skips_changed_paths_excluded_by_full_index_filters(tmp_path: Path) -> None:
+    """Incremental extraction skips ignored/generated paths that full rebuild excludes."""
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "dist").mkdir(parents=True)
+    (repo / "src" / "keep.py").write_text("def keep() -> None:\n    pass\n", encoding="utf-8")
+    (repo / "dist" / "generated.py").write_text(
+        "def generated() -> None:\n    pass\n", encoding="utf-8"
+    )
+
+    db_path = tmp_path / "idx.sqlite"
+    _bootstrap_full_index(repo, db_path)
+
+    plan = _make_plan(repo_root=repo, changed_paths=("dist/generated.py",))
+    result = run_incremental_index(repo, db_path, plan)
+    assert result.used_incremental is True
+
+    store = SQLiteStore(db_path)
+    store.initialize()
+    paths = {e.source_range.path for e in store.list_entities()}
+    store.close()
+
+    assert "src/keep.py" in paths
+    assert "dist/generated.py" not in paths
+
+
 def test_executor_changed_non_py_non_md_file(tmp_path: Path) -> None:
     """Changed .yaml file: filesystem entity is refreshed."""
     repo = tmp_path / "repo"

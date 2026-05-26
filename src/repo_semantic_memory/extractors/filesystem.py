@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from repo_semantic_memory.context.path_roles import is_generated_artifact_path
 from repo_semantic_memory.model import Entity, EntityKind, SourceRange, StableId
 
 IGNORED_DIRECTORIES: frozenset[str] = frozenset(
@@ -61,15 +62,15 @@ def extract_filesystem_entities(repo_root: Path | str) -> list[Entity]:
             and not _should_ignore_directory_path(current_dir / name, root)
         )
         for filename in sorted(filenames):
-            if filename.lower() in IGNORED_FILES:
-                continue
             path = Path(dirpath) / filename
+            relative_path = path.relative_to(root).as_posix()
+            if not should_index_repo_path(root, relative_path):
+                continue
             if _is_binary_looking(path):
                 continue
             kind = _classify_kind(path)
             if kind is None:
                 continue
-            relative_path = path.relative_to(root).as_posix()
             discovered.append((relative_path, path, kind))
 
     discovered.sort(key=lambda item: item[0])
@@ -121,6 +122,28 @@ def _is_binary_looking(path: Path) -> bool:
     except UnicodeDecodeError:
         return True
     return False
+
+
+def should_index_repo_path(repo_root: Path | str, rel_path: str) -> bool:
+    """Return whether a repo-relative file path is eligible for indexing."""
+    root = Path(repo_root).resolve()
+    normalized = rel_path.replace("\\", "/").strip("/")
+    if not normalized:
+        return False
+    path = Path(normalized)
+    if path.name.lower() in IGNORED_FILES:
+        return False
+    if is_generated_artifact_path(normalized):
+        return False
+
+    current = root
+    for segment in path.parts[:-1]:
+        if _should_ignore_directory_name(segment):
+            return False
+        current = current / segment
+        if _should_ignore_directory_path(current, root):
+            return False
+    return True
 
 
 def _should_ignore_directory_name(name: str) -> bool:

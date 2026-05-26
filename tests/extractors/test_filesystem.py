@@ -5,7 +5,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from repo_semantic_memory.extractors.filesystem import extract_filesystem_entities
+from repo_semantic_memory.extractors.filesystem import (
+    extract_filesystem_entities,
+    should_index_repo_path,
+)
 from repo_semantic_memory.model import StableId
 
 
@@ -162,3 +165,13 @@ def test_filesystem_extractor_ignores_common_lockfiles(tmp_path: Path) -> None:
     paths = [entity.source_range.path for entity in entities]
 
     assert paths == ["docs.md"]
+
+
+def test_should_index_repo_path_respects_ignore_and_generated_rules(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    assert should_index_repo_path(repo_root, "src/module.py")
+    assert not should_index_repo_path(repo_root, ".venv/lib/site.py")
+    assert not should_index_repo_path(repo_root, "dist/app.json")
+    assert not should_index_repo_path(repo_root, "package-lock.json")
