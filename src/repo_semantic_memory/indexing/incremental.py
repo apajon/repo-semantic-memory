@@ -30,7 +30,7 @@ from repo_semantic_memory.version import CONTEXT_PACK_VERSION, SCHEMA_VERSION
 class IncrementalFallbackReason:
     """Stable string constants for :attr:`IncrementalPlan.fallback_reason`.
 
-    These strings are emitted in ``warning:`` lines on stderr and in any future
+    These strings are emitted in fallback diagnostics on stderr and in any future
     JSON status output that wraps incremental runs.  They are distinct from
     :class:`~repo_semantic_memory.index_status.IndexStatusReason` constants
     (which describe staleness, not incremental planning) and **must not be
