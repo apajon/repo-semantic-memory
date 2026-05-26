@@ -117,14 +117,10 @@ def run_incremental_index(
     """
     repo_root = repo_root.resolve()
 
-    # Compute purge and re-extract sets from the plan.
-    rename_old = frozenset(old for old, _ in plan.renamed_paths)
-    rename_new = frozenset(new for _, new in plan.renamed_paths)
-
-    # Everything that had index entries must be purged (changed + deleted + old rename).
-    purge_paths = frozenset(plan.changed_paths) | frozenset(plan.deleted_paths) | rename_old
-    # Everything that exists on disk must be re-extracted (changed + new rename targets).
-    re_extract_paths = frozenset(plan.changed_paths) | rename_new
+    # IncrementalPlan guarantees rename old-paths ⊆ deleted_paths and
+    # rename new-paths ⊆ changed_paths, so no extra union is needed.
+    purge_paths = frozenset(plan.changed_paths) | frozenset(plan.deleted_paths)
+    re_extract_paths = frozenset(plan.changed_paths)
 
     # Extract per-file content outside the transaction so failures are clean.
     new_entities, new_relations = _extract_paths(repo_root, re_extract_paths)

@@ -651,7 +651,7 @@ def test_cli_incremental_mode_suffix_in_output(
 # ---------------------------------------------------------------------------
 
 
-def test_delete_dangling_relations_removes_orphaned_target(tmp_path: Path) -> None:
+def test_apply_incremental_update_sweeps_incoming_cross_file_relations(tmp_path: Path) -> None:
     """After deleting an entity, any relation pointing at it must be swept."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -695,33 +695,6 @@ def test_delete_dangling_relations_removes_orphaned_target(tmp_path: Path) -> No
     # The incoming "uses" relation targeting the deleted B entity must be swept.
     for rel in remaining_relations:
         assert rel.kind != "uses", "dangling 'uses' relation must have been removed"
-
-
-def test_delete_dangling_relations_helper_returns_count(tmp_path: Path) -> None:
-    """_delete_dangling_relations returns the number of deleted rows."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
-
-    db_path = tmp_path / "idx.sqlite"
-    _bootstrap_full_index(repo, db_path)
-
-    store = SQLiteStore(db_path)
-    store.initialize()
-    # Inject a dangling relation with nonexistent endpoints.
-    conn = store._conn
-    conn.execute("BEGIN")
-    conn.execute(
-        "INSERT INTO relations(source_id, target_id, kind, evidence_json, metadata_json) "
-        "VALUES('ghost_src', 'ghost_tgt', 'imports', NULL, '{}')"
-    )
-    conn.execute("COMMIT")
-
-    with store._transaction():
-        deleted = store._delete_dangling_relations()
-    store.close()
-
-    assert deleted >= 1, "at least the ghost relation must have been deleted"
 
 
 # ---------------------------------------------------------------------------

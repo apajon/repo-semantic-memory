@@ -249,38 +249,6 @@ class SQLiteStore:
         )
         return cursor.rowcount
 
-    def _delete_dangling_relations(self) -> int:
-        """Remove relations whose ``source_id`` or ``target_id`` no longer exists
-        as a real entity in the index.
-
-        .. warning::
-            Some relation kinds (e.g. ``exports``, ``imports``) intentionally
-            use placeholder / unresolved target IDs (such as
-            ``unresolved:export:…`` or ``python:imports:…``) that are **never**
-            inserted into the entities table.  Calling this method will also
-            delete those relations.
-
-            **Safe to call** only when you are certain every valid relation
-            endpoint in the index is represented as an entity row — for example,
-            right after a fresh full rebuild where all targets are resolved.
-
-            For incremental updates (where unresolved IDs coexist with real
-            entity IDs), use :meth:`_delete_relations_for_targets` with the
-            specific set of deleted entity IDs instead.
-
-        Must be called inside an open transaction.
-
-        Returns the number of rows deleted.
-        """
-        cursor = self._conn.execute(
-            """
-            DELETE FROM relations
-            WHERE source_id NOT IN (SELECT id FROM entities)
-               OR target_id NOT IN (SELECT id FROM entities)
-            """
-        )
-        return cursor.rowcount
-
     def _entity_ids_for_source_paths(self, paths: frozenset[str]) -> frozenset[str]:
         """Return entity IDs whose ``source_range.path`` is in *paths*."""
         if not paths:

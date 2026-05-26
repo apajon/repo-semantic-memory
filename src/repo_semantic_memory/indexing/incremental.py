@@ -3,7 +3,8 @@
 Pure read-only analysis layer: does not modify the SQLite index, does not
 change CLI or MCP behavior, and has no side-effects beyond bounded local Git
 subprocess calls.  The :class:`IncrementalPlan` it produces will be consumed by
-the executor (Prompt 50.3), which is not yet implemented.
+The executor lives in :mod:`repo_semantic_memory.indexing.executor` and
+applies safe plans transactionally.
 
 All Git calls delegate to the existing :func:`~repo_semantic_memory.extractors
 .git_history._run_git` helper (local-only, bounded, no network).
