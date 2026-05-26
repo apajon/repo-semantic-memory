@@ -317,18 +317,18 @@ invariants:
 
 If any of these invariants cannot be enforced (e.g. an extractor cannot
 attribute a relation to a producer path), the executor refuses to run
-incrementally and falls back to a full rebuild with a clear `warning:`.
+incrementally and falls back to a full rebuild with a clear `info:` message.
 
 ## 4. Safety fallbacks
 
 ### 4.1 When `--incremental` falls back to full rebuild
 
-The executor falls back, prints a single-line `warning:` to stderr, and
+The executor falls back, prints a single-line `info:` message to stderr, and
 performs a full rebuild whenever any of the following holds:
 
 | Condition                                                                              | Reason string                       |
 | -------------------------------------------------------------------------------------- | ----------------------------------- |
-| Target DB does not exist.                                                              | `incremental_db_missing`            |
+| Target DB does not exist.                                                              | `incremental_index_missing`         |
 | `metadata.git_head` is missing or empty.                                               | `incremental_no_indexed_head`       |
 | Repo is not a Git working tree, or `git` is unavailable.                               | `incremental_git_unavailable`       |
 | `metadata.schema_version` ≠ runtime `SCHEMA_VERSION`.                                  | `incremental_schema_mismatch`       |
@@ -336,10 +336,16 @@ performs a full rebuild whenever any of the following holds:
 | Indexed HEAD is not reachable from current HEAD (`merge-base --is-ancestor` failure).  | `incremental_history_unreachable`   |
 | Previous index was built dirty (`metadata.git_dirty == "true"`).                       | `incremental_previous_dirty`        |
 | Change set exceeds the safety threshold (default 50% of indexed files).                | `incremental_changeset_too_large`   |
-| Any extractor in the active pipeline cannot attribute a relation to a producer path.   | `incremental_unattributable_relation` |
 | Any uncaught exception during the per-file pass.                                       | `incremental_internal_error`        |
 
-These reason strings are stable; they appear in stderr `warning:` lines
+These reason strings are stable and match the `IncrementalFallbackReason`
+constants in `src/repo_semantic_memory/indexing/incremental.py`.  They appear
+in stderr `info:` lines with the format:
+
+```
+info: incremental index fallback: <reason>; running full rebuild
+```
+
 and in any future JSON status output that wraps incremental runs. They
 **do not** overlap with the `IndexStatusReason` constants from
 Prompt 49.1 — they are diagnostic strings emitted by `rsm index
@@ -360,8 +366,8 @@ correct. The cost is wall-clock time, not correctness.
 
 ## 5. Metadata model (reuse, not extend)
 
-Incremental indexing writes the same staleness rows Prompt 49.1 established,
-plus one additional diagnostic row:
+Every successful `rsm index` run writes the same staleness rows Prompt 49.1
+established, plus `last_index_mode` to record how the index was produced:
 
 ```jsonc
 {
@@ -372,14 +378,14 @@ plus one additional diagnostic row:
   "relation_count": "<decimal>",
   "context_pack_version": "<runtime>",
   "schema_version": "<runtime>",
-  "last_index_mode": "incremental"   // written by incremental runs only
+  "last_index_mode": "incremental" | "full"
 }
 ```
 
-`last_index_mode = "incremental"` is written after every successful incremental
-update. Full rebuilds do not write `last_index_mode`; the key is absent from
-those metadata rows. Full-rebuild writes remain unchanged from Prompt 49.1,
-with only the incremental path adding the new key.
+`last_index_mode` is written after every successful run:
+
+- `"incremental"` — incremental update completed successfully.
+- `"full"` — full rebuild ran (either directly or as an incremental fallback).
 
 The Index Store's `registry.json` is likewise untouched; its `last_indexed_at`
 continues to mean "last successful `rsm index` for this repo", regardless of
@@ -393,8 +399,8 @@ mode.
 - All existing flags compose unchanged.
 - Output: identical summary line on success
   (`Indexed N entities, M relations ...`). When a fallback occurred,
-  one extra `warning: incremental fallback: <reason>` line is printed
-  to stderr **before** the summary.
+  one extra `info: incremental index fallback: <reason>; running full rebuild`
+  line is printed to stderr **before** the summary.
 - Exit codes unchanged. Success is `0`; any unrecoverable error
   (including a full-rebuild fallback that itself fails) returns the
   same non-zero exit the full path would have returned.
@@ -411,7 +417,7 @@ freshness via `indexed_at`, `indexed_git_head`, `current_git_head`,
 `working_tree_dirty`, and `index_status`. Incremental indexing simply
 keeps those fields up-to-date faster.
 
-`last_index_mode` is written by incremental runs (see §5); it is not
+`last_index_mode` is written by every successful run (see §5); it is not
 currently surfaced in the `rsm_status` JSON output.
 
 ## 7. Validation

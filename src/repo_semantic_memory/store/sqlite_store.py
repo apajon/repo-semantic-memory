@@ -134,8 +134,10 @@ class SQLiteStore:
            (cross-file relations from unchanged files targeting deleted entities).
         5. Delete entities whose ``source_range.path`` is in *purge_paths*.
         6. Upsert *new_entities* and *new_relations*.
-        7. Load the current entity/relation snapshot, call
-           *compute_global_relations*, and upsert the results.
+        7. If *global_recompute_kinds* is non-empty: load the current
+           entity/relation snapshot, call *compute_global_relations*, and
+           upsert the results.  Skipped when the set is empty to avoid an
+           unnecessary full snapshot load.
         8. Return ``(entity_count, relation_count)`` after the update.
 
         Rolls back on any exception, leaving the previous index intact.
@@ -174,11 +176,15 @@ class SQLiteStore:
             self._upsert_entities(list(new_entities))
             self._upsert_relations(list(new_relations))
 
-            # 7. Global recompute (reads see uncommitted writes on same conn).
-            current_entities = self.list_entities()
-            current_relations = self.list_relations()
-            global_relations = compute_global_relations(current_entities, current_relations)
-            self._upsert_relations(global_relations)
+            # 7. Global recompute only when at least one global relation kind
+            #    was invalidated. File-local extraction/upsert already handled
+            #    changed paths; skipping this when the set is empty avoids an
+            #    unnecessary full entity/relation snapshot load.
+            if global_recompute_kinds:
+                current_entities = self.list_entities()
+                current_relations = self.list_relations()
+                global_relations = compute_global_relations(current_entities, current_relations)
+                self._upsert_relations(global_relations)
 
             # 8. Return final counts.
             entity_count: int = self._conn.execute("SELECT COUNT(*) FROM entities").fetchone()[0]

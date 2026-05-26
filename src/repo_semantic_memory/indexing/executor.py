@@ -100,13 +100,12 @@ def run_incremental_index(
             .incremental.plan_incremental_update`.  Must have
             ``can_incremental=True``; callers should run a full rebuild
             when it is ``False``.
-        with_git: Whether git temporal metadata was requested for this index
-            run.  The flag is forwarded to :func:`~repo_semantic_memory
-            .extractors.get_git_repository_summary` to populate ``git_head``
-            and ``git_dirty`` in the post-update metadata.  When ``True`` the
-            git summary is used only for the metadata write; per-entity
-            git-temporal metadata is **not** re-attached in this MVP executor
-            (Prompt 50.3 scope).
+        with_git: Currently reserved for parity with the full index command.
+            The incremental executor always records lightweight git staleness
+            metadata (``git_head`` / ``git_dirty``) when available, but does
+            **not** attach per-entity git temporal metadata in this MVP.
+            This is a deferred parity enhancement, not a bug in the current
+            scope.
 
     Returns:
         :class:`IncrementalResult` with ``used_incremental=True``.
@@ -116,6 +115,8 @@ def run_incremental_index(
         ``ValueError``, ``UnicodeDecodeError``) or by the SQLite transaction.
         Callers should catch and fall back to a full rebuild.
     """
+    # Reserved for CLI parity; incremental MVP does not attach per-entity git metadata.
+    _ = with_git
     repo_root = repo_root.resolve()
 
     # IncrementalPlan guarantees rename old-paths ⊆ deleted_paths and

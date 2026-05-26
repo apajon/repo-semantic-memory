@@ -173,7 +173,7 @@ def test_store_apply_incremental_update_rolls_back_on_error(tmp_path: Path) -> N
             purge_paths=frozenset({"a.py"}),
             new_entities=[],
             new_relations=[],
-            global_recompute_kinds=frozenset(),
+            global_recompute_kinds=frozenset({"tests"}),
             compute_global_relations=_bad_callback,
         )
 
@@ -181,6 +181,74 @@ def test_store_apply_incremental_update_rolls_back_on_error(tmp_path: Path) -> N
     store.close()
     # Transaction should have been rolled back; index is unchanged.
     assert {e.id.value for e in before} == {e.id.value for e in after}
+
+
+def test_store_apply_incremental_update_empty_global_recompute_skips_callback(
+    tmp_path: Path,
+) -> None:
+    """compute_global_relations is NOT called when global_recompute_kinds is empty."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+
+    db_path = tmp_path / "idx.sqlite"
+    _bootstrap_full_index(repo, db_path)
+
+    call_count = 0
+
+    def _unreachable_callback(_entities: list, _relations: list) -> list:
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    store = SQLiteStore(db_path)
+    store.initialize()
+    entity_count, relation_count = store.apply_incremental_update(
+        purge_paths=frozenset(),
+        new_entities=[],
+        new_relations=[],
+        global_recompute_kinds=frozenset(),
+        compute_global_relations=_unreachable_callback,
+    )
+    store.close()
+
+    assert call_count == 0
+    assert entity_count >= 1
+
+
+def test_store_apply_incremental_update_nonempty_global_recompute_calls_callback(
+    tmp_path: Path,
+) -> None:
+    """compute_global_relations IS called when global_recompute_kinds is non-empty."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "a.py").write_text("def foo(): pass\n", encoding="utf-8")
+
+    db_path = tmp_path / "idx.sqlite"
+    _bootstrap_full_index(repo, db_path)
+
+    call_count = 0
+
+    def _counting_callback(_entities: list, _relations: list) -> list:
+        nonlocal call_count
+        call_count += 1
+        return []
+
+    store = SQLiteStore(db_path)
+    store.initialize()
+    entity_count, relation_count = store.apply_incremental_update(
+        purge_paths=frozenset(),
+        new_entities=[],
+        new_relations=[],
+        global_recompute_kinds=frozenset({"tests"}),
+        compute_global_relations=_counting_callback,
+    )
+    store.close()
+
+    assert call_count == 1, (
+        "callback must be called exactly once when global_recompute_kinds is non-empty"
+    )
+    assert entity_count >= 1, "entity count should reflect existing index"
 
 
 # ---------------------------------------------------------------------------
