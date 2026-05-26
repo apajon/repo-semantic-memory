@@ -24,7 +24,8 @@ suite deterministic, source-cited, opt-in, and separate from normal unit tests.
 - Do not vendor public repositories into this repository.
 - Do not add network-dependent CI.
 - Do not benchmark private repositories.
-- Do not use an LLM judge by default.
+- Do not use an LLM judge by default; deterministic, reproducible gold-target
+  scoring should remain the baseline.
 - Do not make public-repository benchmark execution mandatory in normal unit
   tests.
 - Do not turn benchmark results into marketing claims or broad superiority
