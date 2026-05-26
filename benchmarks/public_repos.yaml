@@ -8,7 +8,7 @@
 repositories:
   - name: typer
     url: https://github.com/fastapi/typer
-    ref: "<pin-before-running>"
+    ref: 8c70d4987284a37ca6c418297af0210dc01ed5ac
     size_category: small
     python_first: true
     indexing_risk: low
@@ -19,23 +19,45 @@ repositories:
       - id: typer_public_cli_api
         category: public_api_lookup
         prompt: "Find the public API for defining a CLI command."
-        curation_status: needs_local_source_inspection
+        curation_status: verified
         gold:
-          files: []
-          symbols: []
+          files:
+            - typer/main.py
+            - typer/__init__.py
+          symbols:
+            - typer.main.Typer
+          verification_status: verified
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. `Typer` is the main public app object; `__init__.py` exposes public imports."
       - id: typer_cli_command_registration
         category: implementation_location
         prompt: "Find where CLI command registration is implemented."
-        curation_status: needs_local_source_inspection
+        curation_status: verified
         gold:
-          files: []
+          files:
+            - typer/main.py
+          symbols:
+            - typer.main.Typer.command
+            - typer.main.Typer.callback
+          verification_status: verified
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. Command/callback registration methods live on `Typer` in `typer/main.py`."
+      - id: typer_cli_behavior_tests
+        category: test_regression_location
+        prompt: "Find tests covering Typer CLI command behavior."
+        curation_status: verified
+        gold:
+          files:
+            - tests/test_core.py
+            - tests/test_cli/test_help.py
+            - tests/test_cli/test_parser.py
           symbols: []
+          verification_status: verified
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. `tests/test_core.py` covers core command invocation patterns with `@app.command()` and `runner.invoke`; `tests/test_cli/test_help.py` and `tests/test_cli/test_parser.py` cover CLI help/parser behavior."
 
   - name: rich
     url: https://github.com/Textualize/rich
-    ref: "<pin-before-running>"
+    ref: 46cebbb032f920eb096efbaf23cdc6fe9dd541f7
     size_category: medium
-    python_first: true
+    python_ first: true
     indexing_risk: low-medium
     checkout:
       mode: external
@@ -58,7 +80,7 @@ repositories:
 
   - name: httpx
     url: https://github.com/encode/httpx
-    ref: "<pin-before-running>"
+    ref: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
     size_category: medium
     python_first: true
     indexing_risk: medium
