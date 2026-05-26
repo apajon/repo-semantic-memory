@@ -737,24 +737,26 @@ def _run_index_command(
     db_path = Path(db)
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if incremental and db_path.exists():
-        result = _attempt_incremental_index(repository_root, db_path, with_git=with_git)
-        if result is not None:
-            if register:
-                _do_register(repository_root, db_path)
-            mode_suffix = " mode=incremental"
-            if with_git:
-                print(
-                    f"entities={result.entity_count} relations={result.relation_count}"
-                    f" git_metadata=attached{mode_suffix}"
-                )
-            else:
-                print(
-                    f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}"
-                )
-            return 0
-        # result is None: planner or executor rejected incremental; fall through to full rebuild.
-
+    if incremental:
+        if with_git:
+            print(
+                "info: incremental index fallback: --with-git is not supported with incremental; running full rebuild",
+                file=sys.stderr,
+            )
+        elif db_path.exists():
+            result = _attempt_incremental_index(repository_root, db_path, with_git=with_git)
+            if result is not None:
+                if register:
+                    _do_register(repository_root, db_path)
+                mode_suffix = " mode=incremental"
+                print(f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}")
+                return 0
+            # result is None: planner or executor rejected incremental; fall through to full rebuild.
+        else:
+            print(
+                "info: incremental index fallback: database does not exist; running full rebuild",
+                file=sys.stderr,
+            )
     filesystem_entities = extract_filesystem_entities(repository_root)
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
     markdown_outline = extract_markdown_outline_path(repository_root)
