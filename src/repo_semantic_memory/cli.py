@@ -40,6 +40,7 @@ from repo_semantic_memory.extractors import (
     index_python_path,
 )
 from repo_semantic_memory.importers import import_jsonl_directory
+from repo_semantic_memory.indexing import IncrementalFallbackReason
 from repo_semantic_memory.memory import (
     attach_git_metadata_to_entities,
     export_invariants_yaml,
@@ -47,7 +48,6 @@ from repo_semantic_memory.memory import (
     infer_semantic_components,
 )
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
-from repo_semantic_memory.indexing import IncrementalFallbackReason
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import CONTEXT_PACK_VERSION, SCHEMA_VERSION, get_version_info
 
@@ -728,7 +728,8 @@ def _run_index_command(
     if incremental:
         if with_git:
             print(
-                "info: incremental index fallback: --with-git is not supported with incremental; running full rebuild",
+                "info: incremental index fallback: --with-git is not supported"
+                " with incremental; running full rebuild",
                 file=sys.stderr,
             )
         elif db_path.exists():
@@ -741,7 +742,8 @@ def _run_index_command(
                     f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}"
                 )
                 return 0
-            # result is None: planner or executor rejected incremental; fall through to full rebuild.
+            # result is None: planner or executor rejected incremental; fall through to full
+            # rebuild.
         else:
             _reason = IncrementalFallbackReason.INDEX_MISSING
             print(
