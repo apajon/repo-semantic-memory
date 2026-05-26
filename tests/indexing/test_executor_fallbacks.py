@@ -43,7 +43,7 @@ def test_cli_incremental_flag_falls_back_when_no_git(
 def test_cli_incremental_flag_without_existing_db(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """--incremental with no prior DB falls through to a full rebuild."""
+    """--incremental with no prior DB falls through to a full rebuild with a stable reason."""
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "mod.py").write_text(_PY_SRC, encoding="utf-8")
@@ -54,6 +54,7 @@ def test_cli_incremental_flag_without_existing_db(
     assert db_path.exists()
     out = capsys.readouterr()
     assert "entities=" in out.out
+    assert "info: incremental index fallback: incremental_index_missing" in out.err
 
 
 def test_cli_incremental_mode_suffix_in_output(

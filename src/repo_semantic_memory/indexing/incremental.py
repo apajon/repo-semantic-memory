@@ -32,6 +32,7 @@ class IncrementalFallbackReason:
     renamed after release**.
     """
 
+    INDEX_MISSING: str = "incremental_index_missing"
     NO_INDEXED_HEAD: str = "incremental_no_indexed_head"
     GIT_UNAVAILABLE: str = "incremental_git_unavailable"
     SCHEMA_MISMATCH: str = "incremental_schema_mismatch"

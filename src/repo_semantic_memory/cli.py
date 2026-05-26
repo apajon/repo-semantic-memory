@@ -47,6 +47,7 @@ from repo_semantic_memory.memory import (
     infer_semantic_components,
 )
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
+from repo_semantic_memory.indexing import IncrementalFallbackReason
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import CONTEXT_PACK_VERSION, SCHEMA_VERSION, get_version_info
 
@@ -749,12 +750,15 @@ def _run_index_command(
                 if register:
                     _do_register(repository_root, db_path)
                 mode_suffix = " mode=incremental"
-                print(f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}")
+                print(
+                    f"entities={result.entity_count} relations={result.relation_count}{mode_suffix}"
+                )
                 return 0
             # result is None: planner or executor rejected incremental; fall through to full rebuild.
         else:
+            _reason = IncrementalFallbackReason.INDEX_MISSING
             print(
-                "info: incremental index fallback: database does not exist; running full rebuild",
+                f"info: incremental index fallback: {_reason}; running full rebuild",
                 file=sys.stderr,
             )
     filesystem_entities = extract_filesystem_entities(repository_root)
@@ -869,7 +873,7 @@ def _attempt_incremental_index(
     on success, or ``None`` when the planner rejects or the executor raises
     (in both cases a fallback message is printed to stderr).
     """
-    from repo_semantic_memory.indexing import IncrementalFallbackReason, plan_incremental_update
+    from repo_semantic_memory.indexing import plan_incremental_update
     from repo_semantic_memory.indexing.executor import run_incremental_index
 
     # Read existing metadata to feed the planner.
