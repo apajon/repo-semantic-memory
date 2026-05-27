@@ -119,17 +119,70 @@ repositories:
       mode: external
       path_env: RSM_BENCH_HTTPX_PATH
     tasks:
+      - id: httpx_client_public_api
+        category: public_api_lookup
+        prompt: "Find the public API for making HTTP requests with a client."
+        curation_status: verified
+        gold:
+          files:
+            - httpx/_client.py
+            - httpx/__init__.py
+          symbols:
+            - httpx.Client
+            - httpx.AsyncClient
+            - httpx._client.Client
+            - httpx._client.Client.request
+            - httpx._client.Client.stream
+            - httpx._client.Client.send
+            - httpx._client.AsyncClient
+            - httpx._client.AsyncClient.request
+            - httpx._client.AsyncClient.stream
+            - httpx._client.AsyncClient.send
+          verification_status: verified
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/__init__.py` exports `Client` and `AsyncClient`; `httpx/_client.py` defines the sync and async client classes plus their primary request APIs (`request`, `stream`, and `send`) and HTTP method helpers."
       - id: httpx_timeout_configuration
         category: implementation_location
         prompt: "Find where timeout behavior is configured."
-        curation_status: needs_local_source_inspection
+        curation_status: verified
         gold:
-          files: []
-          symbols: []
+          files:
+            - httpx/_config.py
+            - httpx/_client.py
+            - httpx/_api.py
+          symbols:
+            - httpx._config.Timeout
+            - httpx._config.DEFAULT_TIMEOUT_CONFIG
+            - httpx._client.BaseClient.__init__
+            - httpx._client.BaseClient.timeout
+            - httpx._api.request
+          verification_status: verified
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `Timeout` and `DEFAULT_TIMEOUT_CONFIG` are defined in `httpx/_config.py`; `BaseClient` normalizes timeout values with `Timeout(timeout)` and exposes the timeout property; top-level request helpers in `httpx/_api.py` accept timeout configuration and pass it into `Client`."
       - id: httpx_transport_architecture
         category: cross_file_architecture
         prompt: "Find the main modules involved in transport handling."
-        curation_status: needs_local_source_inspection
+        curation_status: verified
         gold:
-          files: []
-          symbols: []
+          files:
+            - httpx/_client.py
+            - httpx/_transports/__init__.py
+            - httpx/_transports/base.py
+            - httpx/_transports/default.py
+            - httpx/_transports/mock.py
+            - httpx/_transports/asgi.py
+            - httpx/_transports/wsgi.py
+          symbols:
+            - httpx._transports.base.BaseTransport
+            - httpx._transports.base.AsyncBaseTransport
+            - httpx._transports.default.HTTPTransport
+            - httpx._transports.default.AsyncHTTPTransport
+            - httpx._transports.mock.MockTransport
+            - httpx._transports.asgi.ASGITransport
+            - httpx._transports.wsgi.WSGITransport
+            - httpx._client.Client._init_transport
+            - httpx._client.Client._init_proxy_transport
+            - httpx._client.Client._transport_for_url
+            - httpx._client.AsyncClient._init_transport
+            - httpx._client.AsyncClient._init_proxy_transport
+            - httpx._client.AsyncClient._transport_for_url
+          verification_status: verified
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/_transports/base.py` defines sync and async transport interfaces; `default.py` implements HTTP/httpcore-backed transports; `mock.py`, `asgi.py`, and `wsgi.py` implement alternate transports; `_client.py` wires custom, proxy, mounted, and default transports for `Client` and `AsyncClient`; `_transports/__init__.py` exports the transport surface."
