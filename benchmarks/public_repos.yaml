@@ -58,7 +58,7 @@ repositories:
     url: https://github.com/Textualize/rich
     ref: 46cebbb032f920eb096efbaf23cdc6fe9dd541f7
     size_category: medium
-    python_ first: true
+    python_first: true
     indexing_risk: low-medium
     checkout:
       mode: external
@@ -67,17 +67,47 @@ repositories:
       - id: rich_public_console_api
         category: public_api_lookup
         prompt: "Find the public API for console output."
-        curation_status: needs_local_source_inspection
+        curation_status: verified
         gold:
-          files: []
-          symbols: []
+          files:
+            - rich/console.py
+            - rich/__init__.py
+          symbols:
+            - rich.console.Console
+            - rich.console.Console.print
+            - rich.console.Console.print_json
+            - rich.console.Console.log
+            - rich.print
+          verification_status: verified
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console` is the main public console output object; `Console.print`, `Console.print_json`, and `Console.log` implement primary output APIs, while `rich.__init__.py` exposes the top-level `rich.print` helper."
       - id: rich_console_error_handling
         category: error_handling
         prompt: "Find where console output errors are handled."
-        curation_status: needs_local_source_inspection
+        curation_status: verified
         gold:
-          files: []
+          files:
+            - rich/console.py
+            - rich/errors.py
+          symbols:
+            - rich.console.Console.render
+            - rich.console.Console._check_buffer
+            - rich.console.Console._write_buffer
+            - rich.console.Console.on_broken_pipe
+            - rich.errors.ConsoleError
+            - rich.errors.NotRenderableError
+            - rich.errors.NoAltScreen
+          verification_status: verified
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console.render` raises not-renderable errors, `_check_buffer` handles broken pipes via `on_broken_pipe`, `_write_buffer` handles output writes and annotates Unicode encoding failures, and `rich/errors.py` defines the console error types."
+      - id: rich_console_tests
+        category: test_regression_location
+        prompt: "Find tests covering Rich console output behavior."
+        curation_status: verified
+        gold:
+          files:
+            - tests/test_console.py
           symbols: []
+          verification_status: verified
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `tests/test_console.py` covers console initialization, printing, markup/highlighting, JSON output, capture, terminal controls, screen updates, exports, Unicode output errors, broken pipes, null stdout/stderr handling, and environment-driven terminal behavior."
 
   - name: httpx
     url: https://github.com/encode/httpx
