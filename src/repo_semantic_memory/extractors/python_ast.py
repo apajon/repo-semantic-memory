@@ -156,10 +156,12 @@ def index_python_path(
     total = len(python_files)
     entities: list[Entity] = []
     relations: list[Relation] = []
-    for python_file in _iter_python_files(root):
+    for done, python_file in enumerate(python_files, start=1):
         try:
             file_entities, file_relations = extract_python_file(root, python_file)
         except SyntaxError:
+            if progress is not None:
+                progress(done, total)
             continue
         entities.extend(file_entities)
         relations.extend(file_relations)
