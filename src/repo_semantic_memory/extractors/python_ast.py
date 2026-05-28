@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, cast
 
@@ -124,8 +125,19 @@ def extract_python_file(
     return _sort_entities(entities), _sort_relations(relations)
 
 
-def index_python_path(path: Path | str) -> tuple[list[Entity], list[Relation]]:
-    """Index Python files from a file or directory path."""
+def index_python_path(
+    path: Path | str,
+    *,
+    progress: Callable[[int, int], None] | None = None,
+) -> tuple[list[Entity], list[Relation]]:
+    """Index Python files from a file or directory path.
+
+    Args:
+        path: A Python file or directory to index.
+        progress: Optional callback invoked after each file is processed.
+            Called as ``progress(done, total)`` where *done* is the number of
+            files processed so far and *total* is the total file count.
+    """
     target = Path(path).resolve()
     if not target.exists():
         raise ValueError(f"Path does not exist: {target}")
@@ -135,15 +147,26 @@ def index_python_path(path: Path | str) -> tuple[list[Entity], list[Relation]]:
             return [], []
         root = _infer_repo_root_for_file(target)
         file_entities, file_relations = extract_python_file(root, target)
+        if progress is not None:
+            progress(1, 1)
         return file_entities, file_relations
 
     root = target
+    python_files = _iter_python_files(root)
+    total = len(python_files)
     entities: list[Entity] = []
     relations: list[Relation] = []
-    for python_file in _iter_python_files(root):
-        file_entities, file_relations = extract_python_file(root, python_file)
+    for done, python_file in enumerate(python_files, start=1):
+        try:
+            file_entities, file_relations = extract_python_file(root, python_file)
+        except SyntaxError:
+            if progress is not None:
+                progress(done, total)
+            continue
         entities.extend(file_entities)
         relations.extend(file_relations)
+        if progress is not None:
+            progress(done, total)
     return _sort_entities(entities), _sort_relations(relations)
 
 

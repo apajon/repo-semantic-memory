@@ -84,6 +84,61 @@ designed `rsm store status` command, the status state machine
 (`fresh` / `missing` / `stale` / `maybe_stale` / `schema_mismatch` / `unknown`),
 and the suggested-action rules for explicit-`--db` vs Index Store modes.
 
+## Indexing progress output
+
+`rsm index` and `rsm store register --index` print phase-by-phase progress to
+**stderr** so large repositories do not appear hung.  All stdout output remains
+machine-readable.
+
+### Scan summary
+
+Immediately after file discovery, a single line summarises what was found:
+
+```text
+indexing: discovered files: python=3912 markdown=428 other=154 total=4494
+```
+
+### Per-phase progress
+
+For repositories with ≥ 100 files per phase, intermediate progress lines are
+emitted on the first file and every 100 files:
+
+```text
+indexing: Markdown 1/428 files...
+indexing: Markdown 100/428 files...
+indexing: Python 1/3912 files...
+indexing: Python 100/3912 files...
+indexing: exports 1/142 files...
+```
+
+### Completion lines
+
+Each phase prints a completion line with its count and elapsed time:
+
+```text
+indexing: Markdown complete: 428/428 files, elapsed=2.1s
+indexing: Python complete: 3912/3912 files, elapsed=28.4s
+indexing: exports complete: 142/142 files, elapsed=1.3s
+indexing: test relationships complete: added=512 total_relations=8034, elapsed=4.2s
+indexing: writing index complete: entities=12345 relations=8034, elapsed=3.1s
+indexing: complete: entities=12345 relations=8034, elapsed=42.3s
+```
+
+The relation-computation banner also shows the entity and relation counts
+available at that point:
+
+```text
+indexing: computing test relationships from entities=12345 relations=7522...
+```
+
+### Stdout remains clean
+
+The final summary line on stdout (`entities=… relations=…`) is unaffected:
+
+```text
+entities=12345 relations=8034
+```
+
 ## Database resolution for reader commands
 
 Reader commands can use an explicit `--db`, an entry in the RSM Index Store, or the legacy

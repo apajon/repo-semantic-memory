@@ -5,7 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -767,21 +768,84 @@ def _run_index_command(
                 f"info: incremental index fallback: {_reason}; running full rebuild",
                 file=sys.stderr,
             )
+    _index_start = time.monotonic()
+    print("indexing: scanning files...", file=sys.stderr)
     filesystem_entities = extract_filesystem_entities(repository_root)
+
+    # Compute per-type counts for the scan summary and progress callbacks.
+    python_count = sum(1 for e in filesystem_entities if e.kind == "module")
+    md_count = sum(
+        1
+        for e in filesystem_entities
+        if e.kind == "doc" and e.qualified_name.endswith((".md", ".markdown"))
+    )
+    init_count = sum(
+        1 for e in filesystem_entities if e.kind == "module" and e.name == "__init__.py"
+    )
+    other_count = len(filesystem_entities) - python_count - md_count
+    print(
+        f"indexing: discovered files: python={python_count} markdown={md_count}"
+        f" other={other_count} total={len(filesystem_entities)}",
+        file=sys.stderr,
+    )
+
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
-    markdown_outline = extract_markdown_outline_path(repository_root)
-    python_entities, python_relations = index_python_path(repository_root)
-    export_relations = index_python_exports(repository_root)
+
+    print("indexing: extracting Markdown...", file=sys.stderr)
+    _t = time.monotonic()
+    markdown_outline = extract_markdown_outline_path(
+        repository_root, progress=_make_progress_callback("Markdown")
+    )
+    print(
+        f"indexing: Markdown complete: {md_count}/{md_count} files,"
+        f" elapsed={time.monotonic() - _t:.1f}s",
+        file=sys.stderr,
+    )
+
+    print("indexing: parsing Python...", file=sys.stderr)
+    _t = time.monotonic()
+    python_entities, python_relations = index_python_path(
+        repository_root, progress=_make_progress_callback("Python")
+    )
+    print(
+        f"indexing: Python complete: {python_count}/{python_count} files,"
+        f" elapsed={time.monotonic() - _t:.1f}s",
+        file=sys.stderr,
+    )
+
+    print("indexing: extracting exports...", file=sys.stderr)
+    _t = time.monotonic()
+    export_relations = index_python_exports(
+        repository_root, progress=_make_progress_callback("exports")
+    )
+    print(
+        f"indexing: exports complete: {init_count}/{init_count} files,"
+        f" elapsed={time.monotonic() - _t:.1f}s",
+        file=sys.stderr,
+    )
+
     all_entities = _merge_entities(
         filesystem_entities, [*markdown_outline.entities, *python_entities]
     )
     all_relations = [*markdown_outline.relations, *python_relations, *export_relations]
+    print(
+        f"indexing: computing test relationships"
+        f" from entities={len(all_entities)} relations={len(all_relations)}...",
+        file=sys.stderr,
+    )
+    _t = time.monotonic()
     test_relations = extract_test_relationships(
         repository_root,
         all_entities,
         all_relations,
     )
     all_relations = [*all_relations, *test_relations]
+    print(
+        f"indexing: test relationships complete:"
+        f" added={len(test_relations)} total_relations={len(all_relations)},"
+        f" elapsed={time.monotonic() - _t:.1f}s",
+        file=sys.stderr,
+    )
 
     # Always fetch a lightweight git summary for staleness metadata.
     # This is a bounded local call; it does not attach per-file history.
@@ -839,18 +903,32 @@ def _run_index_command(
         extra_meta["git_dirty"] = ""
 
     store = SQLiteStore(db_path)
+    print("indexing: writing index...", file=sys.stderr)
+    _t = time.monotonic()
     try:
         store.initialize()
         store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
         store.write_extra_metadata(extra_meta)
     finally:
         store.close()
+    print(
+        f"indexing: writing index complete:"
+        f" entities={len(all_entities)} relations={len(all_relations)},"
+        f" elapsed={time.monotonic() - _t:.1f}s",
+        file=sys.stderr,
+    )
     if register:
         from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
 
         IndexRegistry(resolve_store_home()).register(
             repository_root, db_path.resolve(), indexed=True
         )
+    print(
+        f"indexing: complete:"
+        f" entities={len(all_entities)} relations={len(all_relations)},"
+        f" elapsed={time.monotonic() - _index_start:.1f}s",
+        file=sys.stderr,
+    )
     if with_git:
         print(
             f"entities={len(all_entities)} relations={len(all_relations)} git_metadata={git_status}"
@@ -865,6 +943,60 @@ def _do_register(repository_root: Path, db_path: Path) -> None:
     from repo_semantic_memory.store_home import IndexRegistry, resolve_store_home
 
     IndexRegistry(resolve_store_home()).register(repository_root, db_path.resolve(), indexed=True)
+
+
+# ---------------------------------------------------------------------------
+# Indexing progress helpers
+# ---------------------------------------------------------------------------
+
+# Default interval and minimum total for per-file progress emission.
+_PROGRESS_INTERVAL = 100
+_PROGRESS_MIN_TOTAL = 100
+
+# Backward-compatible alias used by tests that import the old name.
+_PYTHON_PROGRESS_INTERVAL = _PROGRESS_INTERVAL
+
+
+def should_emit_progress(
+    done: int,
+    total: int,
+    *,
+    interval: int = _PROGRESS_INTERVAL,
+    min_total: int = _PROGRESS_MIN_TOTAL,
+) -> bool:
+    """Return whether a per-file progress line should be emitted.
+
+    Returns ``False`` when *total* is below *min_total* so that small
+    repositories stay quiet.  Otherwise returns ``True`` on the first file,
+    every *interval*-th file, and on the last file.
+    """
+    if total < min_total:
+        return False
+    return done == 1 or done % interval == 0 or done == total
+
+
+def _make_progress_callback(phase: str) -> Callable[[int, int], None]:
+    """Return a progress callback for an extraction phase.
+
+    Emits ``indexing: <phase> N/M files...`` on the first file and every
+    :data:`_PROGRESS_INTERVAL` files.  The completion line is printed by the
+    caller so this callback suppresses the ``done == total`` case to avoid
+    duplication.  Entirely silent when total < :data:`_PROGRESS_MIN_TOTAL`.
+    """
+
+    def _callback(done: int, total: int) -> None:
+        if should_emit_progress(done, total) and done != total:
+            print(f"indexing: {phase} {done}/{total} files...", file=sys.stderr)
+
+    return _callback
+
+
+def _make_python_progress_callback() -> Callable[[int, int], None]:
+    """Backward-compatible wrapper around :func:`_make_progress_callback`.
+
+    Kept for callers that import this name directly.
+    """
+    return _make_progress_callback("Python")
 
 
 def _attempt_incremental_index(
