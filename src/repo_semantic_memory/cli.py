@@ -750,22 +750,22 @@ def _run_index_command(
                 f"info: incremental index fallback: {_reason}; running full rebuild",
                 file=sys.stderr,
             )
-    print("indexing: scanning files…", file=sys.stderr)
+    print("indexing: scanning files...", file=sys.stderr)
     filesystem_entities = extract_filesystem_entities(repository_root)
     filesystem_entities = _drop_python_module_file_entities(filesystem_entities)
-    print("indexing: extracting Markdown…", file=sys.stderr)
+    print("indexing: extracting Markdown...", file=sys.stderr)
     markdown_outline = extract_markdown_outline_path(repository_root)
-    print("indexing: parsing Python…", file=sys.stderr)
+    print("indexing: parsing Python...", file=sys.stderr)
     python_entities, python_relations = index_python_path(
         repository_root, progress=_make_python_progress_callback()
     )
-    print("indexing: extracting exports…", file=sys.stderr)
+    print("indexing: extracting exports...", file=sys.stderr)
     export_relations = index_python_exports(repository_root)
     all_entities = _merge_entities(
         filesystem_entities, [*markdown_outline.entities, *python_entities]
     )
     all_relations = [*markdown_outline.relations, *python_relations, *export_relations]
-    print("indexing: computing test relationships…", file=sys.stderr)
+    print("indexing: computing test relationships...", file=sys.stderr)
     test_relations = extract_test_relationships(
         repository_root,
         all_entities,
@@ -829,7 +829,7 @@ def _run_index_command(
         extra_meta["git_dirty"] = ""
 
     store = SQLiteStore(db_path)
-    print("indexing: writing index…", file=sys.stderr)
+    print("indexing: writing index...", file=sys.stderr)
     try:
         store.initialize()
         store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
@@ -865,7 +865,7 @@ _PYTHON_PROGRESS_INTERVAL = 100
 def _make_python_progress_callback() -> Callable[[int, int], None]:
     """Return a progress callback for :func:`index_python_path`.
 
-    Prints ``indexing: Python done/total files…`` to stderr on the first file,
+    Prints ``indexing: Python done/total files...`` to stderr on the first file,
     every :data:`_PYTHON_PROGRESS_INTERVAL` files, and on the last file.
     Suppressed entirely when the total is below the interval so that small
     repositories do not emit noisy single-line output.
@@ -875,7 +875,7 @@ def _make_python_progress_callback() -> Callable[[int, int], None]:
         if total < _PYTHON_PROGRESS_INTERVAL:
             return
         if done == 1 or done % _PYTHON_PROGRESS_INTERVAL == 0 or done == total:
-            print(f"indexing: Python {done}/{total} files…", file=sys.stderr)
+            print(f"indexing: Python {done}/{total} files...", file=sys.stderr)
 
     return _callback
 
