@@ -141,7 +141,10 @@ def index_python_path(path: Path | str) -> tuple[list[Entity], list[Relation]]:
     entities: list[Entity] = []
     relations: list[Relation] = []
     for python_file in _iter_python_files(root):
-        file_entities, file_relations = extract_python_file(root, python_file)
+        try:
+            file_entities, file_relations = extract_python_file(root, python_file)
+        except SyntaxError:
+            continue
         entities.extend(file_entities)
         relations.extend(file_relations)
     return _sort_entities(entities), _sort_relations(relations)
