@@ -831,3 +831,72 @@ def test_resolve_reader_db_returns_explicit_db_unchanged(tmp_path: Path) -> None
 
     explicit = str(tmp_path / "my.sqlite")
     assert _resolve_reader_db(explicit) == explicit
+
+
+# ---------------------------------------------------------------------------
+# Indexing progress feedback
+# ---------------------------------------------------------------------------
+
+
+def test_index_command_emits_stage_progress_to_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """rsm index prints per-stage progress messages to stderr so large repos don't appear hung."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing: scanning files" in err
+    assert "indexing: extracting Markdown" in err
+    assert "indexing: parsing Python" in err
+    assert "indexing: extracting exports" in err
+    assert "indexing: computing test relationships" in err
+    assert "indexing: writing index" in err
+
+
+def test_index_command_progress_does_not_pollute_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Progress messages must not appear on stdout; the summary line stays clean."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "indexing:" not in captured.out
+    assert "entities=" in captured.out
+    assert "relations=" in captured.out
+
+
+def test_python_progress_callback_fires_for_large_file_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Per-file progress lines are emitted when total >= _PYTHON_PROGRESS_INTERVAL."""
+    from repo_semantic_memory.cli import _PYTHON_PROGRESS_INTERVAL, _make_python_progress_callback
+
+    total = _PYTHON_PROGRESS_INTERVAL * 2
+    cb = _make_python_progress_callback()
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    err = capsys.readouterr().err
+    assert f"indexing: Python 1/{total}" in err
+    assert f"indexing: Python {_PYTHON_PROGRESS_INTERVAL}/{total}" in err
+    assert f"indexing: Python {total}/{total}" in err
+
+
+def test_python_progress_callback_silent_for_small_file_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No per-file lines are emitted when total < _PYTHON_PROGRESS_INTERVAL."""
+    from repo_semantic_memory.cli import _PYTHON_PROGRESS_INTERVAL, _make_python_progress_callback
+
+    total = _PYTHON_PROGRESS_INTERVAL - 1
+    cb = _make_python_progress_callback()
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    assert capsys.readouterr().err == ""
