@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
 from repo_semantic_memory.context.path_roles import is_generated_artifact_path
@@ -20,6 +21,8 @@ _MARKDOWN_EXTENSIONS = frozenset({".md", ".markdown"})
 _ATX_HEADING_RE = re.compile(r"^(?P<indent> {0,3})(?P<marks>#{1,6})(?:[ \t]+|$)(?P<text>.*)$")
 _PUNCTUATION_RE = re.compile(r"[^\w\s-]")
 _WHITESPACE_RE = re.compile(r"\s+")
+_STABLE_ID_PART_RE = re.compile(r"[^a-z0-9._/-]+")
+_STABLE_ID_DASH_RE = re.compile(r"-+")
 
 
 @dataclass(frozen=True)
@@ -174,11 +177,12 @@ def _section_entities(
     entities: list[Entity] = []
     for index, heading in enumerate(headings):
         end_line = _section_end_line(index, headings, len(lines))
+        section_id_part = _section_id_part(relative_path, heading)
         qualified_name = f"{relative_path}#{heading.anchor}"
         entities.append(
             Entity(
                 id=StableId.from_parts(
-                    ["markdown", relative_path, "section", heading.anchor, str(heading.line)]
+                    ["markdown", relative_path, "section", section_id_part, str(heading.line)]
                 ),
                 kind="doc",
                 name=heading.text,
@@ -193,6 +197,17 @@ def _section_entities(
             )
         )
     return entities
+
+
+def _section_id_part(relative_path: str, heading: _Heading) -> str:
+    normalized = heading.anchor.strip().lower().replace("\\", "/")
+    normalized = _STABLE_ID_PART_RE.sub("-", normalized)
+    normalized = _STABLE_ID_DASH_RE.sub("-", normalized).strip("-")
+    if normalized:
+        return normalized
+
+    digest = sha256(f"{relative_path}\0{heading.text}\0{heading.line}".encode()).hexdigest()
+    return f"section_{digest[:10]}"
 
 
 def _section_end_line(index: int, headings: list[_Heading], line_count: int) -> int:

@@ -1,0 +1,188 @@
+# Pilot manifest for opt-in public-repository retrieval benchmarks.
+#
+# This file describes external checkouts only. It does not vendor public
+# repositories, clone repositories, fetch network resources, or define verified
+# gold targets. Placeholder refs and empty gold lists must be replaced after
+# local source inspection against the intended pinned revision.
+
+repositories:
+  - name: typer
+    url: https://github.com/fastapi/typer
+    ref: 8c70d4987284a37ca6c418297af0210dc01ed5ac
+    size_category: small
+    python_first: true
+    indexing_risk: low
+    checkout:
+      mode: external
+      path_env: RSM_BENCH_TYPER_PATH
+    tasks:
+      - id: typer_public_cli_api
+        category: public_api_lookup
+        prompt: "Find the public API for defining a CLI command."
+        curation_status: verified
+        gold:
+          files:
+            - typer/main.py
+            - typer/__init__.py
+          symbols:
+            - typer.main.Typer
+          verification_status: verified
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. `Typer` is the main public app object; `__init__.py` exposes public imports."
+      - id: typer_cli_command_registration
+        category: implementation_location
+        prompt: "Find where CLI command registration is implemented."
+        curation_status: verified
+        gold:
+          files:
+            - typer/main.py
+          symbols:
+            - typer.main.Typer.command
+            - typer.main.Typer.callback
+          verification_status: verified
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. Command/callback registration methods live on `Typer` in `typer/main.py`."
+      - id: typer_core_command_behavior_tests
+        category: test_regression_location
+        prompt: "Find tests using CliRunner, runner.invoke, and app.command for core Typer command behavior."
+        curation_status: verified
+        gold:
+          files:
+            - tests/test_core.py
+            - tests/test_cli/test_extending_app.py
+            - tests/test_cli/test_multi_app_cli.py
+            - tests/test_cli/test_multi_app.py
+          symbols: []
+          verification_status: verified
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. The pack surfaces `tests/test_core.py` and CLI multi-app/extending-app tests for command behavior; `tests/test_core.py` covers core command/context invocation, while `tests/test_cli/test_extending_app.py`, `tests/test_cli/test_multi_app_cli.py`, and `tests/test_cli/test_multi_app.py` cover multi-app and extended CLI behavior."
+
+  - name: rich
+    url: https://github.com/Textualize/rich
+    ref: 46cebbb032f920eb096efbaf23cdc6fe9dd541f7
+    size_category: medium
+    python_first: true
+    indexing_risk: low-medium
+    checkout:
+      mode: external
+      path_env: RSM_BENCH_RICH_PATH
+    tasks:
+      - id: rich_public_console_api
+        category: public_api_lookup
+        prompt: "Find the public API for console output."
+        curation_status: verified
+        gold:
+          files:
+            - rich/console.py
+            - rich/__init__.py
+          symbols:
+            - rich.console.Console
+            - rich.console.Console.print
+            - rich.console.Console.print_json
+            - rich.console.Console.log
+            - rich.print
+          verification_status: verified
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console` is the main public console output object; `Console.print`, `Console.print_json`, and `Console.log` implement primary output APIs, while `rich.__init__.py` exposes the top-level `rich.print` helper."
+      - id: rich_console_error_handling
+        category: error_handling
+        prompt: "Find where console output errors are handled."
+        curation_status: verified
+        gold:
+          files:
+            - rich/console.py
+            - rich/errors.py
+          symbols:
+            - rich.console.Console.render
+            - rich.console.Console._check_buffer
+            - rich.console.Console._write_buffer
+            - rich.console.Console.on_broken_pipe
+            - rich.errors.ConsoleError
+            - rich.errors.NotRenderableError
+            - rich.errors.NoAltScreen
+          verification_status: verified
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console.render` raises not-renderable errors, `_check_buffer` handles broken pipes via `on_broken_pipe`, `_write_buffer` handles output writes and annotates Unicode encoding failures, and `rich/errors.py` defines the console error types."
+      - id: rich_console_tests
+        category: test_regression_location
+        prompt: "Find tests covering Rich console output behavior."
+        curation_status: verified
+        gold:
+          files:
+            - tests/test_console.py
+          symbols: []
+          verification_status: verified
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `tests/test_console.py` covers console initialization, printing, markup/highlighting, JSON output, capture, terminal controls, screen updates, exports, Unicode output errors, broken pipes, null stdout/stderr handling, and environment-driven terminal behavior."
+
+  - name: httpx
+    url: https://github.com/encode/httpx
+    ref: b5addb64f0161ff6bfe94c124ef76f6a1fba5254
+    size_category: medium
+    python_first: true
+    indexing_risk: medium
+    checkout:
+      mode: external
+      path_env: RSM_BENCH_HTTPX_PATH
+    tasks:
+      - id: httpx_client_public_api
+        category: public_api_lookup
+        prompt: "Find the public API for making HTTP requests with a client."
+        curation_status: verified
+        gold:
+          files:
+            - httpx/_client.py
+            - httpx/__init__.py
+          symbols:
+            - httpx.Client
+            - httpx.AsyncClient
+            - httpx._client.Client
+            - httpx._client.Client.request
+            - httpx._client.Client.stream
+            - httpx._client.Client.send
+            - httpx._client.AsyncClient
+            - httpx._client.AsyncClient.request
+            - httpx._client.AsyncClient.stream
+            - httpx._client.AsyncClient.send
+          verification_status: verified
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/__init__.py` exports `Client` and `AsyncClient`; `httpx/_client.py` defines the sync and async client classes plus their primary request APIs (`request`, `stream`, and `send`) and HTTP method helpers."
+      - id: httpx_timeout_configuration
+        category: implementation_location
+        prompt: "Find where timeout behavior is configured."
+        curation_status: verified
+        gold:
+          files:
+            - httpx/_config.py
+            - httpx/_client.py
+            - httpx/_api.py
+          symbols:
+            - httpx._config.Timeout
+            - httpx._config.DEFAULT_TIMEOUT_CONFIG
+            - httpx._client.BaseClient.__init__
+            - httpx._client.BaseClient.timeout
+            - httpx._api.request
+          verification_status: verified
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `Timeout` and `DEFAULT_TIMEOUT_CONFIG` are defined in `httpx/_config.py`; `BaseClient` normalizes timeout values with `Timeout(timeout)` and exposes the timeout property; top-level request helpers in `httpx/_api.py` accept timeout configuration and pass it into `Client`."
+      - id: httpx_transport_architecture
+        category: cross_file_architecture
+        prompt: "Find the main modules involved in transport handling."
+        curation_status: verified
+        gold:
+          files:
+            - httpx/_client.py
+            - httpx/_transports/__init__.py
+            - httpx/_transports/base.py
+            - httpx/_transports/default.py
+            - httpx/_transports/mock.py
+            - httpx/_transports/asgi.py
+            - httpx/_transports/wsgi.py
+          symbols:
+            - httpx._transports.base.BaseTransport
+            - httpx._transports.base.AsyncBaseTransport
+            - httpx._transports.default.HTTPTransport
+            - httpx._transports.default.AsyncHTTPTransport
+            - httpx._transports.mock.MockTransport
+            - httpx._transports.asgi.ASGITransport
+            - httpx._transports.wsgi.WSGITransport
+            - httpx._client.Client._init_transport
+            - httpx._client.Client._init_proxy_transport
+            - httpx._client.Client._transport_for_url
+            - httpx._client.AsyncClient._init_transport
+            - httpx._client.AsyncClient._init_proxy_transport
+            - httpx._client.AsyncClient._transport_for_url
+          verification_status: verified
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/_transports/base.py` defines sync and async transport interfaces; `default.py` implements HTTP/httpcore-backed transports; `mock.py`, `asgi.py`, and `wsgi.py` implement alternate transports; `_client.py` wires custom, proxy, mounted, and default transports for `Client` and `AsyncClient`; `_transports/__init__.py` exports the transport surface."
