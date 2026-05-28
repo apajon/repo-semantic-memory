@@ -681,12 +681,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return run_serve_store()
             from repo_semantic_memory.mcp.server import run_serve
 
-            if not args.repo:
-                print("error: --repo is required when --store is not set", file=sys.stderr)
-                return 2
-            if args.db and not args.repo:
-                print("error: --db requires --repo", file=sys.stderr)
-                return 2
             return run_serve(repo=args.repo, db=args.db)
         parser.print_help()
         return 2
