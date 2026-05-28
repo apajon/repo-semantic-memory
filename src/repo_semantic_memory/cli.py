@@ -438,22 +438,35 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_serve_parser = mcp_subparsers.add_parser(
         "serve",
         help=(
-            "Run the read-only local stdio MCP-compatible JSON-RPC prototype for "
-            "an explicit repo and existing SQLite index. Does not auto-index or "
-            "mutate state; external MCP client conformance not yet validated."
+            "Run the read-only local stdio MCP-compatible JSON-RPC prototype. "
+            "Use --repo for a single repository or --store for all registered repositories. "
+            "Does not auto-index or mutate state; external MCP client conformance not yet "
+            "validated."
         ),
     )
-    mcp_serve_parser.add_argument(
+    mcp_serve_mode = mcp_serve_parser.add_mutually_exclusive_group(required=True)
+    mcp_serve_mode.add_argument(
         "--repo",
-        required=True,
-        help="Absolute path to the target repository root.",
+        default=None,
+        help=("Absolute path to the target repository root. Mutually exclusive with --store."),
+    )
+    mcp_serve_mode.add_argument(
+        "--store",
+        action="store_true",
+        default=False,
+        help=(
+            "Serve all repositories registered in the RSM Index Store. "
+            "No repository is pre-selected; the agent calls rsm_list_indexes then "
+            "rsm_select_index before using repository-specific tools. "
+            "Mutually exclusive with --repo."
+        ),
     )
     mcp_serve_parser.add_argument(
         "--db",
         default=None,
         help=(
-            "Path to an existing SQLite index database. "
-            "When omitted, the RSM Index Store registry is consulted for a registered index. "
+            "Path to an existing SQLite index database (only valid with --repo). "
+            "When omitted with --repo, the RSM Index Store registry is consulted. "
             "Build an index first with: rsm index <repo> [--register] or "
             "rsm store register <repo> --index"
         ),
@@ -662,8 +675,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_import_jsonl_command(input_dir=args.input_dir, db=args.db)
     if args.command == "mcp":
         if args.mcp_target == "serve":
+            if getattr(args, "store", False):
+                from repo_semantic_memory.mcp.server import run_serve_store
+
+                return run_serve_store()
             from repo_semantic_memory.mcp.server import run_serve
 
+            if not args.repo:
+                print("error: --repo is required when --store is not set", file=sys.stderr)
+                return 2
+            if args.db and not args.repo:
+                print("error: --db requires --repo", file=sys.stderr)
+                return 2
             return run_serve(repo=args.repo, db=args.db)
         parser.print_help()
         return 2

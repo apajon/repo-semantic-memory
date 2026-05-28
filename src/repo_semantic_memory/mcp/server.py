@@ -29,8 +29,11 @@ from typing import IO, Any
 
 from repo_semantic_memory.mcp.runtime import (
     PHASE1_TOOL_NAMES,
+    STORE_TOOL_NAMES,
     SessionConfig,
+    StoreSessionState,
     ToolInvocationError,
+    build_store_tool_registry,
     build_tool_registry,
     invoke_tool,
     validate_session,
@@ -67,8 +70,20 @@ def _result(request_id: Any, result: Any) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def _initialize_result() -> dict[str, Any]:
+def _initialize_result(session: SessionConfig | StoreSessionState) -> dict[str, Any]:
     info = get_version_info()
+    if isinstance(session, StoreSessionState):
+        instructions = (
+            "Store-scoped RSM MCP server. No repository is pre-selected. "
+            "Call rsm_list_indexes to see registered repositories, then "
+            "rsm_select_index to activate one before using repository-specific tools. "
+            "Active selection is session-scoped and not persisted across restarts."
+        )
+    else:
+        instructions = (
+            "Read-only local RSM tools. The configured --repo and --db are fixed for "
+            "this session. Call rsm_status to inspect them."
+        )
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": {"tools": {"listChanged": False}},
@@ -76,15 +91,15 @@ def _initialize_result() -> dict[str, Any]:
             "name": SERVER_NAME,
             "version": info.package_version,
         },
-        "instructions": (
-            "Read-only local RSM tools. The configured --repo and --db are fixed for "
-            "this session. Call rsm_status to inspect them."
-        ),
+        "instructions": instructions,
     }
 
 
-def _tools_list_result() -> dict[str, Any]:
-    registry = build_tool_registry()
+def _tools_list_result(session: SessionConfig | StoreSessionState) -> dict[str, Any]:
+    if isinstance(session, StoreSessionState):
+        registry = build_store_tool_registry()
+    else:
+        registry = build_tool_registry()
     tools = [
         {
             "name": descriptor.name,
@@ -99,7 +114,7 @@ def _tools_list_result() -> dict[str, Any]:
 def _tool_call_result(
     name: str,
     arguments: Mapping[str, Any],
-    session: SessionConfig,
+    session: SessionConfig | StoreSessionState,
     result_store: ResultStore,
 ) -> dict[str, Any]:
     payload = invoke_tool(name, arguments, session, result_store=result_store)
@@ -113,7 +128,7 @@ def _tool_error_result(message: str) -> dict[str, Any]:
 
 def _dispatch(
     message: Mapping[str, Any],
-    session: SessionConfig,
+    session: SessionConfig | StoreSessionState,
     result_store: ResultStore,
 ) -> dict[str, Any] | None:
     """Dispatch a single JSON-RPC message and return an outbound payload.
@@ -136,7 +151,7 @@ def _dispatch(
     params: Mapping[str, Any] = params_raw if isinstance(params_raw, Mapping) else {}
 
     if method == "initialize":
-        return _result(request_id, _initialize_result())
+        return _result(request_id, _initialize_result(session))
     if method in ("notifications/initialized", "initialized", "notifications/cancelled"):
         return None
     if method == "ping":
@@ -144,7 +159,7 @@ def _dispatch(
     if method == "shutdown":
         return _result(request_id, None)
     if method == "tools/list":
-        return _result(request_id, _tools_list_result())
+        return _result(request_id, _tools_list_result(session))
     if method == "tools/call":
         name = params.get("name")
         if not isinstance(name, str) or not name:
@@ -152,7 +167,9 @@ def _dispatch(
         arguments_raw = params.get("arguments", {})
         if not isinstance(arguments_raw, Mapping):
             return _error(request_id, _INVALID_PARAMS, "tools/call 'arguments' must be an object")
-        if name not in PHASE1_TOOL_NAMES:
+        # In store mode the allowed set is larger; in repo mode only PHASE1_TOOL_NAMES.
+        allowed = STORE_TOOL_NAMES if isinstance(session, StoreSessionState) else PHASE1_TOOL_NAMES
+        if name not in allowed:
             return _result(request_id, _tool_error_result(f"unknown tool: {name}"))
         try:
             return _result(
@@ -173,7 +190,7 @@ def _dispatch(
 
 
 def serve_stdio(
-    session: SessionConfig,
+    session: SessionConfig | StoreSessionState,
     *,
     stdin: IO[str] | None = None,
     stdout: IO[str] | None = None,
@@ -266,3 +283,25 @@ def run_serve(repo: str, db: str | None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     return serve_stdio(session)
+
+
+def run_serve_store(store_home_path: str | None = None) -> int:
+    """CLI entry point for ``rsm mcp serve --store``.
+
+    Opens the RSM Index Store and starts the store-scoped stdio loop.
+    No repository is pre-selected; the agent must call ``rsm_list_indexes``
+    and ``rsm_select_index`` before using repository-specific tools.
+
+    ``store_home_path`` overrides the default RSM_HOME resolution when provided.
+    Pass ``None`` to use the standard :func:`resolve_store_home` resolution.
+    """
+    from repo_semantic_memory.store_home import resolve_store_home  # noqa: PLC0415
+
+    try:
+        home = Path(store_home_path).expanduser() if store_home_path else resolve_store_home()
+    except Exception as exc:  # noqa: BLE001
+        print(f"error: could not resolve RSM store home: {exc}", file=sys.stderr)
+        return 2
+
+    state = StoreSessionState(store_home=home)
+    return serve_stdio(state)
