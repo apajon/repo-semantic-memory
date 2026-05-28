@@ -831,3 +831,217 @@ def test_resolve_reader_db_returns_explicit_db_unchanged(tmp_path: Path) -> None
 
     explicit = str(tmp_path / "my.sqlite")
     assert _resolve_reader_db(explicit) == explicit
+
+
+# ---------------------------------------------------------------------------
+# Indexing progress feedback
+# ---------------------------------------------------------------------------
+
+
+def test_index_command_emits_stage_progress_to_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """rsm index prints per-stage progress messages to stderr so large repos don't appear hung."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing: scanning files" in err
+    assert "indexing: discovered files:" in err
+    assert "indexing: extracting Markdown" in err
+    assert "indexing: Markdown complete:" in err
+    assert "indexing: parsing Python" in err
+    assert "indexing: Python complete:" in err
+    assert "indexing: extracting exports" in err
+    assert "indexing: exports complete:" in err
+    assert "indexing: computing test relationships" in err
+    assert "indexing: test relationships complete:" in err
+    assert "indexing: writing index" in err
+    assert "indexing: writing index complete:" in err
+    assert "indexing: complete:" in err
+
+
+def test_index_command_scan_summary_contains_counts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The scan summary line reports python=, markdown=, other=, total= counts."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing: discovered files: python=" in err
+    assert "markdown=" in err
+    assert "other=" in err
+    assert "total=" in err
+
+
+def test_index_command_completion_lines_contain_counts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Completion lines include file/entity/relation counts and an elapsed= field."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    # Markdown completion includes N/N files and elapsed.
+    assert "indexing: Markdown complete:" in err
+    assert "elapsed=" in err
+    # Python completion includes N/N files.
+    assert "indexing: Python complete:" in err
+    # exports completion includes N/N files.
+    assert "indexing: exports complete:" in err
+    # test relationships completion includes added= and total_relations=.
+    assert "added=" in err
+    assert "total_relations=" in err
+    # Final summary includes entities= and relations=.
+    assert "indexing: complete: entities=" in err
+
+
+def test_index_command_relation_context_includes_entity_count(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Test-relationship banner includes entity and relation counts."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing: computing test relationships from entities=" in err
+    assert "relations=" in err
+
+
+def test_index_command_progress_does_not_pollute_stdout(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Progress messages must not appear on stdout; the summary line stays clean."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(fixture_root), "--db", str(db_path)])
+    assert exit_code == 0
+
+    captured = capsys.readouterr()
+    assert "indexing:" not in captured.out
+    assert "entities=" in captured.out
+    assert "relations=" in captured.out
+
+
+def test_should_emit_progress_helper() -> None:
+    """should_emit_progress returns False below min_total, True at milestones."""
+    from repo_semantic_memory.cli import should_emit_progress
+
+    # Silent below threshold.
+    assert not should_emit_progress(1, 50, min_total=100)
+    assert not should_emit_progress(50, 50, min_total=100)
+
+    # First file.
+    assert should_emit_progress(1, 200)
+    # Every interval-th file.
+    assert should_emit_progress(100, 200)
+    assert should_emit_progress(200, 200)
+    # Non-milestone files.
+    assert not should_emit_progress(2, 200)
+    assert not should_emit_progress(99, 200)
+    assert not should_emit_progress(101, 200)
+
+
+def test_progress_callback_fires_at_milestones(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_make_progress_callback emits lines at first, interval, but not at done==total."""
+    from repo_semantic_memory.cli import _PROGRESS_INTERVAL, _make_progress_callback
+
+    total = _PROGRESS_INTERVAL * 2
+    cb = _make_progress_callback("TestPhase")
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    err = capsys.readouterr().err
+    assert f"indexing: TestPhase 1/{total}" in err
+    assert f"indexing: TestPhase {_PROGRESS_INTERVAL}/{total}" in err
+    # Completion line is NOT emitted by the callback (caller does it).
+    assert f"indexing: TestPhase {total}/{total}" not in err
+
+
+def test_progress_callback_silent_below_threshold(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """_make_progress_callback emits nothing when total < min_total."""
+    from repo_semantic_memory.cli import _PROGRESS_MIN_TOTAL, _make_progress_callback
+
+    total = _PROGRESS_MIN_TOTAL - 1
+    cb = _make_progress_callback("TestPhase")
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    assert capsys.readouterr().err == ""
+
+
+def test_python_progress_callback_fires_for_large_file_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Per-file progress lines are emitted when total >= _PYTHON_PROGRESS_INTERVAL."""
+    from repo_semantic_memory.cli import _PYTHON_PROGRESS_INTERVAL, _make_python_progress_callback
+
+    total = _PYTHON_PROGRESS_INTERVAL * 2
+    cb = _make_python_progress_callback()
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    err = capsys.readouterr().err
+    assert f"indexing: Python 1/{total}" in err
+    assert f"indexing: Python {_PYTHON_PROGRESS_INTERVAL}/{total}" in err
+    # done==total is suppressed in callback; completion line is printed by caller.
+    assert f"indexing: Python {total}/{total} files..." not in err
+
+
+def test_python_progress_callback_silent_for_small_file_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """No per-file lines are emitted when total < _PYTHON_PROGRESS_INTERVAL."""
+    from repo_semantic_memory.cli import _PYTHON_PROGRESS_INTERVAL, _make_python_progress_callback
+
+    total = _PYTHON_PROGRESS_INTERVAL - 1
+    cb = _make_python_progress_callback()
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    assert capsys.readouterr().err == ""
+
+
+def test_markdown_progress_callback_fires_for_large_file_count(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Markdown progress callback emits milestone lines for large totals."""
+    from repo_semantic_memory.cli import _PROGRESS_INTERVAL, _make_progress_callback
+
+    total = _PROGRESS_INTERVAL * 3
+    cb = _make_progress_callback("Markdown")
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    err = capsys.readouterr().err
+    assert f"indexing: Markdown 1/{total}" in err
+    assert f"indexing: Markdown {_PROGRESS_INTERVAL}/{total}" in err
+    assert f"indexing: Markdown {_PROGRESS_INTERVAL * 2}/{total}" in err
+    assert f"indexing: Markdown {total}/{total}" not in err  # suppressed; caller prints completion
+
+
+def test_markdown_progress_callback_silent_below_threshold(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Markdown progress callback is silent when total < threshold."""
+    from repo_semantic_memory.cli import _PROGRESS_MIN_TOTAL, _make_progress_callback
+
+    total = _PROGRESS_MIN_TOTAL - 1
+    cb = _make_progress_callback("Markdown")
+    for i in range(1, total + 1):
+        cb(i, total)
+
+    assert capsys.readouterr().err == ""

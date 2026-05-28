@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -42,7 +43,11 @@ class _Heading:
     column: int
 
 
-def extract_markdown_outline_path(repo_root: Path | str) -> MarkdownOutline:
+def extract_markdown_outline_path(
+    repo_root: Path | str,
+    *,
+    progress: Callable[[int, int], None] | None = None,
+) -> MarkdownOutline:
     """Extract Markdown file and heading section entities from a file or directory."""
     target = Path(repo_root).resolve()
     if not target.exists():
@@ -53,15 +58,21 @@ def extract_markdown_outline_path(repo_root: Path | str) -> MarkdownOutline:
             return MarkdownOutline(entities=(), relations=())
         root = target.parent
         file_entities, file_relations = extract_markdown_file(root, target)
+        if progress is not None:
+            progress(1, 1)
         return MarkdownOutline(entities=tuple(file_entities), relations=tuple(file_relations))
 
     root = target
+    markdown_files = _iter_markdown_files(root)
+    total = len(markdown_files)
     entities: list[Entity] = []
     relations: list[Relation] = []
-    for markdown_file in _iter_markdown_files(root):
+    for done, markdown_file in enumerate(markdown_files, start=1):
         file_entities, file_relations = extract_markdown_file(root, markdown_file)
         entities.extend(file_entities)
         relations.extend(file_relations)
+        if progress is not None:
+            progress(done, total)
     return MarkdownOutline(
         entities=tuple(_sort_entities(entities)),
         relations=tuple(_sort_relations(relations)),

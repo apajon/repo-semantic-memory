@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import ast
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from repo_semantic_memory.extractors.filesystem import (
@@ -129,11 +130,18 @@ def extract_python_exports(
     return _sort_relations(relations)
 
 
-def index_python_exports(path: Path | str) -> list[Relation]:
+def index_python_exports(
+    path: Path | str,
+    *,
+    progress: Callable[[int, int], None] | None = None,
+) -> list[Relation]:
     """Index exports from all ``__init__.py`` files under a path.
 
     Args:
         path: Repository root directory to index recursively.
+        progress: Optional callback invoked after each file is processed.
+            Called as ``progress(done, total)`` where *done* is the number of
+            files processed so far and *total* is the total file count.
 
     Returns:
         Sorted list of all ``exports`` Relation objects found.
@@ -144,13 +152,20 @@ def index_python_exports(path: Path | str) -> list[Relation]:
     if not target.is_dir():
         # Single file case: delegate to extract_python_exports.
         root = _infer_repo_root_for_file(target)
-        return extract_python_exports(root, target)
+        file_relations = extract_python_exports(root, target)
+        if progress is not None:
+            progress(1, 1)
+        return file_relations
 
     root = target
+    init_files = _iter_init_files(root)
+    total = len(init_files)
     relations: list[Relation] = []
-    for init_file in _iter_init_files(root):
+    for done, init_file in enumerate(init_files, start=1):
         file_relations = extract_python_exports(root, init_file)
         relations.extend(file_relations)
+        if progress is not None:
+            progress(done, total)
     return _sort_relations(relations)
 
 
