@@ -466,10 +466,16 @@ auto-rebuilds a stale or missing index.
   cross-repo confusion in agent transcripts.
 - **Only registered repos are served.** Unregistered paths are rejected by
   `rsm_select_index`.
+- **Index Store DBs may live outside the repository root.** This is expected
+  and safe: the DB path comes from the registry and is trusted.  The
+  `--repo` validation that rejects out-of-repo DBs does not apply in store
+  mode.
 - **Read-only.** Store mode adds no write tools. The `rsm_list_indexes`,
   `rsm_select_index`, and `rsm_current_index` tools do not modify the index.
 - **`--repo` mode is unchanged.** Existing single-repo configs continue to
-  work as before.
+  work as before.  For `--repo` sessions with an explicit `--db`, the DB must
+  still resolve within the repository root unless the DB was resolved through
+  the Index Store registry.
 
 ### Additional store-mode tools
 

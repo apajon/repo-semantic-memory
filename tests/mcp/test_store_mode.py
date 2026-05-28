@@ -624,3 +624,179 @@ def test_stdio_smoke_store_workflow(tmp_path: Path) -> None:
     status_payload = json.loads(by_id[5]["result"]["content"][0]["text"])
     assert status_payload["active_repo"]["repo_id"] == repo_id
     assert status_payload["repo_root"] == str(repo_a)
+
+
+# ---------------------------------------------------------------------------
+# Store-mode repo tools: DB outside repo root (Index Store layout)
+# ---------------------------------------------------------------------------
+
+
+def test_store_mode_context_pack_db_outside_repo_root(tmp_path: Path) -> None:
+    """rsm_build_context_pack must succeed in store mode even when the DB lives
+    outside the repo root (the normal Index Store layout).
+
+    Regression test for: ValueError: db_path must stay within repo_root
+    """
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    # _make_indexed_repo places the DB under store_home, outside the repo root.
+    repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "myapp", store_home)
+    # Sanity: confirm the DB is genuinely outside the repo root.
+    assert not db_a.is_relative_to(repo_a), (
+        "Test precondition: DB should live outside repo root in store mode"
+    )
+
+    state = StoreSessionState(store_home=store_home)
+    invoke_tool("rsm_select_index", {"name": "myapp"}, state)
+
+    result = invoke_tool("rsm_build_context_pack", {"task": "module loading"}, state)
+
+    assert "active_repo" in result
+    assert result["active_repo"]["repo_id"] == IndexRegistry.repo_id(repo_a)
+    assert result["active_repo"]["db_path"] == str(db_a)
+    # No db_path containment error: the call must have produced a pack response,
+    # not a ValueError forwarded as isError by the transport layer.
+    assert "uncertainties" in result
+    assert "counts" in result  # present in every successful rsm_build_context_pack response
+
+
+def test_store_mode_search_symbols_db_outside_repo_root(tmp_path: Path) -> None:
+    """rsm_search_symbols must not raise db_path containment error in store mode."""
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "searchrepo", store_home)
+    assert not db_a.is_relative_to(repo_a)
+
+    state = StoreSessionState(store_home=store_home)
+    invoke_tool("rsm_select_index", {"name": "searchrepo"}, state)
+
+    result = invoke_tool("rsm_search_symbols", {"query": "run"}, state)
+
+    assert "active_repo" in result
+    assert result["active_repo"]["name"] == "searchrepo"
+    assert "results" in result
+    assert "uncertainties" in result
+
+
+def test_store_mode_query_graph_db_outside_repo_root(tmp_path: Path) -> None:
+    """rsm_query_graph must not raise db_path containment error in store mode."""
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "graphrepo", store_home)
+    assert not db_a.is_relative_to(repo_a)
+
+    state = StoreSessionState(store_home=store_home)
+    invoke_tool("rsm_select_index", {"name": "graphrepo"}, state)
+
+    entity_id = "python:module:src.main_graphrepo"
+    result = invoke_tool(
+        "rsm_query_graph",
+        {"entity_ids": [entity_id], "direction": "outgoing"},
+        state,
+    )
+
+    assert "active_repo" in result
+    assert result["active_repo"]["name"] == "graphrepo"
+    # Present in every successful rsm_query_graph response.
+    assert "entity_ids" in result
+    assert "uncertainties" in result
+
+
+def test_store_mode_explain_entity_db_outside_repo_root(tmp_path: Path) -> None:
+    """rsm_explain_entity must not raise db_path containment error in store mode."""
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "explainrepo", store_home)
+    assert not db_a.is_relative_to(repo_a)
+
+    state = StoreSessionState(store_home=store_home)
+    invoke_tool("rsm_select_index", {"name": "explainrepo"}, state)
+
+    entity_id = "python:function:src.main_explainrepo.run_explainrepo"
+    result = invoke_tool("rsm_explain_entity", {"entity_id": entity_id}, state)
+
+    assert "active_repo" in result
+    assert result["active_repo"]["name"] == "explainrepo"
+    assert result["entity_id"] == entity_id
+    # Present in every successful rsm_explain_entity response.
+    assert "uncertainties" in result
+
+
+def test_store_mode_validate_patch_context_db_outside_repo_root(tmp_path: Path) -> None:
+    """rsm_validate_patch_context must not raise db_path containment error in store mode."""
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "patchrepo", store_home)
+    assert not db_a.is_relative_to(repo_a)
+
+    state = StoreSessionState(store_home=store_home)
+    invoke_tool("rsm_select_index", {"name": "patchrepo"}, state)
+
+    result = invoke_tool(
+        "rsm_validate_patch_context",
+        {"task": "fix run", "changed_paths": ["src/main.py"]},
+        state,
+    )
+
+    assert "active_repo" in result
+    assert result["active_repo"]["name"] == "patchrepo"
+    assert "covered_paths" in result
+    assert "uncertainties" in result
+
+
+def test_store_mode_cross_repo_context_pack(tmp_path: Path) -> None:
+    """Select repo A → build context pack → select repo B → build context pack.
+
+    active_repo must change between calls and no stale DB path must leak.
+    """
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "proja", store_home)
+    repo_b, db_b = _make_indexed_repo(tmp_path / "repos", "projb", store_home)
+
+    state = StoreSessionState(store_home=store_home)
+
+    # First repo
+    invoke_tool("rsm_select_index", {"name": "proja"}, state)
+    pack_a = invoke_tool("rsm_build_context_pack", {"task": "task for proja"}, state)
+    assert pack_a["active_repo"]["name"] == "proja"
+    assert pack_a["active_repo"]["db_path"] == str(db_a)
+
+    # Switch to second repo
+    invoke_tool("rsm_select_index", {"name": "projb"}, state)
+    pack_b = invoke_tool("rsm_build_context_pack", {"task": "task for projb"}, state)
+    assert pack_b["active_repo"]["name"] == "projb"
+    assert pack_b["active_repo"]["db_path"] == str(db_b)
+
+    # No cross-repo stale paths
+    assert pack_a["active_repo"]["db_path"] != pack_b["active_repo"]["db_path"]
+
+
+def test_repo_mode_still_rejects_db_outside_repo_root(tmp_path: Path) -> None:
+    """--repo mode must still raise ValueError when DB is outside repo root.
+
+    The store-mode fix must not weaken the validation for --repo sessions.
+    """
+    from repo_semantic_memory.mcp import SessionConfig
+    from repo_semantic_memory.mcp.runtime import ToolInvocationError
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    # Put the DB outside the repo root.
+    outside_db = tmp_path / "outside.sqlite"
+    from repo_semantic_memory.store import SQLiteStore
+
+    store = SQLiteStore(outside_db)
+    try:
+        store.initialize()
+    finally:
+        store.close()
+
+    session = SessionConfig(
+        repo_root=repo_root.resolve(),
+        db_path=outside_db.resolve(),
+        index_mode="explicit_db",
+    )
+    # In --repo/explicit_db mode the DB-inside-repo check must still fire.
+    with pytest.raises((ValueError, ToolInvocationError)):
+        invoke_tool("rsm_search_symbols", {"query": "run"}, session)

@@ -333,7 +333,11 @@ def _tool_search_symbols(
         path_roles=_str_tuple(args, "path_roles"),
         include_relations=_optional_bool(args, "include_relations", False),
     )
-    response = _handlers.handle_search_symbols(request, repo_root=session.repo_root)
+    response = _handlers.handle_search_symbols(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -349,7 +353,11 @@ def _tool_explain_entity(
         include_components=_optional_bool(args, "include_components", True),
         include_claims=_optional_bool(args, "include_claims", True),
     )
-    response = _handlers.handle_explain_entity(request, repo_root=session.repo_root)
+    response = _handlers.handle_explain_entity(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -430,7 +438,11 @@ def _tool_build_context_pack(
         max_relations=_PACK_STORE_CAP,
         max_citations=_PACK_STORE_CAP,
     )
-    response = _handlers.handle_build_context_pack(request, repo_root=session.repo_root)
+    response = _handlers.handle_build_context_pack(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     payload = _serialize_response(response)
 
     # Snapshot the full streams (as returned by the handler) before applying
@@ -639,7 +651,11 @@ def _tool_query_graph(
         max_hops=_optional_int(args, "max_hops", 1),
         limit=_optional_int(args, "limit", 25),
     )
-    response = _handlers.handle_query_graph(request, repo_root=session.repo_root)
+    response = _handlers.handle_query_graph(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -662,7 +678,11 @@ def _tool_validate_patch_context(
         referenced_entity_ids=_str_tuple(args, "referenced_entity_ids"),
         budget_chars=budget_value,
     )
-    response = _handlers.handle_validate_patch_context(request, repo_root=session.repo_root)
+    response = _handlers.handle_validate_patch_context(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 

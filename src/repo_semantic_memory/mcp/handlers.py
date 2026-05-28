@@ -115,8 +115,11 @@ def handle_search_symbols(
     request: SearchSymbolsRequest,
     *,
     repo_root: Path | str | None = None,
+    require_db_inside_repo: bool = True,
 ) -> SearchSymbolsResponse:
-    entities, relations = _load_index(request.db_path, repo_root=repo_root)
+    entities, relations = _load_index(
+        request.db_path, repo_root=repo_root, require_db_inside_repo=require_db_inside_repo
+    )
     source_roots = infer_source_roots(entities)
 
     kind_filter = set(request.entity_kinds)
@@ -263,8 +266,11 @@ def handle_explain_entity(
     request: ExplainEntityRequest,
     *,
     repo_root: Path | str | None = None,
+    require_db_inside_repo: bool = True,
 ) -> ExplainEntityResponse:
-    entities, relations = _load_index(request.db_path, repo_root=repo_root)
+    entities, relations = _load_index(
+        request.db_path, repo_root=repo_root, require_db_inside_repo=require_db_inside_repo
+    )
     entity_by_id = {entity.id.value: entity for entity in entities}
     target = entity_by_id.get(request.entity_id)
     if target is None:
@@ -368,8 +374,11 @@ def handle_build_context_pack(
     request: BuildContextPackRequest,
     *,
     repo_root: Path | str | None = None,
+    require_db_inside_repo: bool = True,
 ) -> BuildContextPackResponse:
-    entities, relations = _load_index(request.db_path, repo_root=repo_root)
+    entities, relations = _load_index(
+        request.db_path, repo_root=repo_root, require_db_inside_repo=require_db_inside_repo
+    )
     bounded_budget = min(request.budget_chars, _MAX_CONTEXT_BUDGET)
     uncertainties: list[Uncertainty] = []
     if request.budget_chars > _MAX_CONTEXT_BUDGET:
@@ -514,8 +523,11 @@ def handle_query_graph(
     request: QueryGraphRequest,
     *,
     repo_root: Path | str | None = None,
+    require_db_inside_repo: bool = True,
 ) -> QueryGraphResponse:
-    entities, relations = _load_index(request.db_path, repo_root=repo_root)
+    entities, relations = _load_index(
+        request.db_path, repo_root=repo_root, require_db_inside_repo=require_db_inside_repo
+    )
     entity_by_id = {entity.id.value: entity for entity in entities}
     known_ids = frozenset(entity_by_id.keys())
 
@@ -684,8 +696,11 @@ def handle_validate_patch_context(
     request: ValidatePatchContextRequest,
     *,
     repo_root: Path | str | None = None,
+    require_db_inside_repo: bool = True,
 ) -> ValidatePatchContextResponse:
-    entities, _relations = _load_index(request.db_path, repo_root=repo_root)
+    entities, _relations = _load_index(
+        request.db_path, repo_root=repo_root, require_db_inside_repo=require_db_inside_repo
+    )
 
     changed_paths = tuple(_normalize_changed_path(path) for path in request.changed_paths)
     referenced_ids = tuple(sorted(set(request.referenced_entity_ids)))
@@ -802,10 +817,18 @@ def handle_get_git_summary(
 
 
 def _load_index(
-    db_path: str, *, repo_root: Path | str | None
+    db_path: str,
+    *,
+    repo_root: Path | str | None,
+    require_db_inside_repo: bool = True,
 ) -> tuple[list[Entity], list[Relation]]:
+    # When `require_db_inside_repo=False` the DB lives outside the repo root
+    # (e.g. Index Store mode where DBs are stored under RSM_HOME).  Pass
+    # `repo_root=None` so `_resolve_bounded_path` skips the containment
+    # check while still resolving and existence-checking the path.
+    bounds_root = repo_root if require_db_inside_repo else None
     resolved_db = _resolve_bounded_path(
-        db_path, repo_root=repo_root, must_exist=True, label="db_path"
+        db_path, repo_root=bounds_root, must_exist=True, label="db_path"
     )
     store = SQLiteStore(resolved_db)
     try:
