@@ -21,18 +21,22 @@ repositories:
         prompt: "Find the public API for defining a CLI command."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - typer/main.py
             - typer/__init__.py
           symbols:
             - typer.main.Typer
+          alternate_symbols:
+            - typer.Typer
           verification_status: verified
-          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. `Typer` is the main public app object; `__init__.py` exposes public imports."
+          notes: "Verified manually against pinned commit 8c70d4987284a37ca6c418297af0210dc01ed5ac. `Typer` is the main public app object; `__init__.py` exposes public imports. `typer.Typer` is the public re-export alias for `typer.main.Typer`."
       - id: typer_cli_command_registration
         category: implementation_location
         prompt: "Find where CLI command registration is implemented."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - typer/main.py
           symbols:
@@ -45,6 +49,7 @@ repositories:
         prompt: "Find tests using CliRunner, runner.invoke, and app.command for core Typer command behavior."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - tests/test_core.py
             - tests/test_cli/test_extending_app.py
@@ -69,6 +74,7 @@ repositories:
         prompt: "Find the public API for console output."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - rich/console.py
             - rich/__init__.py
@@ -78,31 +84,32 @@ repositories:
             - rich.console.Console.print_json
             - rich.console.Console.log
             - rich.print
+          alternate_symbols:
+            - rich.Console
           verification_status: verified
-          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console` is the main public console output object; `Console.print`, `Console.print_json`, and `Console.log` implement primary output APIs, while `rich.__init__.py` exposes the top-level `rich.print` helper."
-      - id: rich_console_error_handling
-        category: error_handling
-        prompt: "Find where console output errors are handled."
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console` is the main public console output object; `Console.print`, `Console.print_json`, and `Console.log` implement primary output APIs, while `rich.__init__.py` exposes the top-level `rich.print` helper. `rich.Console` is the public re-export alias for `rich.console.Console`."
+      - id: rich_console_rendering
+        category: implementation_location
+        prompt: "Find where Rich console rendering is implemented."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - rich/console.py
-            - rich/errors.py
+            - rich/segment.py
+            - rich/text.py
           symbols:
-            - rich.console.Console.render
-            - rich.console.Console._check_buffer
-            - rich.console.Console._write_buffer
-            - rich.console.Console.on_broken_pipe
-            - rich.errors.ConsoleError
-            - rich.errors.NotRenderableError
-            - rich.errors.NoAltScreen
+            - rich.console.Console
+            - rich.segment.Segment
+            - rich.text.Text
           verification_status: verified
-          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console.render` raises not-renderable errors, `_check_buffer` handles broken pipes via `on_broken_pipe`, `_write_buffer` handles output writes and annotates Unicode encoding failures, and `rich/errors.py` defines the console error types."
+          notes: "Verified manually against pinned commit 46cebbb032f920eb096efbaf23cdc6fe9dd541f7. `Console` drives console rendering; `Segment` is the rendered output unit; `Text` is a primary renderable text model used by console output."
       - id: rich_console_tests
         category: test_regression_location
         prompt: "Find tests covering Rich console output behavior."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - tests/test_console.py
           symbols: []
@@ -124,12 +131,11 @@ repositories:
         prompt: "Find the public API for making HTTP requests with a client."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - httpx/_client.py
             - httpx/__init__.py
           symbols:
-            - httpx.Client
-            - httpx.AsyncClient
             - httpx._client.Client
             - httpx._client.Client.request
             - httpx._client.Client.stream
@@ -138,51 +144,41 @@ repositories:
             - httpx._client.AsyncClient.request
             - httpx._client.AsyncClient.stream
             - httpx._client.AsyncClient.send
+          alternate_symbols:
+            - httpx.Client
+            - httpx.AsyncClient
           verification_status: verified
-          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/__init__.py` exports `Client` and `AsyncClient`; `httpx/_client.py` defines the sync and async client classes plus their primary request APIs (`request`, `stream`, and `send`) and HTTP method helpers."
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/__init__.py` exports `Client` and `AsyncClient`; `httpx/_client.py` defines the sync and async client classes plus their primary request APIs (`request`, `stream`, and `send`) and HTTP method helpers. `httpx.Client` and `httpx.AsyncClient` are the public re-export aliases listed under `alternate_symbols`."
       - id: httpx_timeout_configuration
         category: implementation_location
-        prompt: "Find where timeout behavior is configured."
+        prompt: "Find where HTTPX defines the Timeout configuration object and default timeout configuration, and how BaseClient applies it."
         curation_status: verified
         gold:
+          mode: all_of
           files:
             - httpx/_config.py
             - httpx/_client.py
-            - httpx/_api.py
           symbols:
             - httpx._config.Timeout
             - httpx._config.DEFAULT_TIMEOUT_CONFIG
             - httpx._client.BaseClient.__init__
             - httpx._client.BaseClient.timeout
-            - httpx._api.request
           verification_status: verified
-          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `Timeout` and `DEFAULT_TIMEOUT_CONFIG` are defined in `httpx/_config.py`; `BaseClient` normalizes timeout values with `Timeout(timeout)` and exposes the timeout property; top-level request helpers in `httpx/_api.py` accept timeout configuration and pass it into `Client`."
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `Timeout` and `DEFAULT_TIMEOUT_CONFIG` are defined in `httpx/_config.py`; `BaseClient` normalizes timeout values with `Timeout(timeout)` and exposes the timeout property. Prompt refined (52.6) to name target types explicitly and reduce noise from unrelated test files and docs. `httpx/_api.py` removed from gold: it passes timeout through to `Client` but is not an implementation site for timeout configuration."
       - id: httpx_transport_architecture
         category: cross_file_architecture
-        prompt: "Find the main modules involved in transport handling."
+        prompt: "Find the HTTPX transport implementation modules under _transports, including the base transport interfaces and default HTTP transport implementations."
         curation_status: verified
         gold:
+          mode: all_of
           files:
-            - httpx/_client.py
             - httpx/_transports/__init__.py
             - httpx/_transports/base.py
             - httpx/_transports/default.py
-            - httpx/_transports/mock.py
-            - httpx/_transports/asgi.py
-            - httpx/_transports/wsgi.py
           symbols:
             - httpx._transports.base.BaseTransport
             - httpx._transports.base.AsyncBaseTransport
             - httpx._transports.default.HTTPTransport
             - httpx._transports.default.AsyncHTTPTransport
-            - httpx._transports.mock.MockTransport
-            - httpx._transports.asgi.ASGITransport
-            - httpx._transports.wsgi.WSGITransport
-            - httpx._client.Client._init_transport
-            - httpx._client.Client._init_proxy_transport
-            - httpx._client.Client._transport_for_url
-            - httpx._client.AsyncClient._init_transport
-            - httpx._client.AsyncClient._init_proxy_transport
-            - httpx._client.AsyncClient._transport_for_url
           verification_status: verified
-          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/_transports/base.py` defines sync and async transport interfaces; `default.py` implements HTTP/httpcore-backed transports; `mock.py`, `asgi.py`, and `wsgi.py` implement alternate transports; `_client.py` wires custom, proxy, mounted, and default transports for `Client` and `AsyncClient`; `_transports/__init__.py` exports the transport surface."
+          notes: "Verified manually against pinned commit b5addb64f0161ff6bfe94c124ef76f6a1fba5254. `httpx/_transports/base.py` defines sync and async transport interfaces; `default.py` implements HTTP/httpcore-backed transports; `_transports/__init__.py` exports the transport surface. Prompt refined (52.6): removed ambiguous 'main modules' phrase that lexically matched `httpx/_main.py`; focused on `_transports/` subpackage. Client integration (`_init_transport`, `_transport_for_url`) split into a future task. `mock.py`, `asgi.py`, `wsgi.py` moved to notes: they are alternate transport implementations and are secondary to the base/default task focus."
