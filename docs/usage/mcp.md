@@ -331,3 +331,165 @@ Key properties:
 - **Unknown or expired `result_set_id`** is a *recoverable tool-level outcome*: the response includes a `result_set_unknown` entry under `uncertainties` with `recoverable: true`. The suggested action is to call `rsm_build_context_pack` again to mint a fresh result set. This is **not** surfaced as a JSON-RPC protocol error.
 - **Malformed arguments** (missing `result_set_id`/`stream`, unknown `stream` value, out-of-range `offset`/`limit`) are normal MCP tool-call errors: the response carries `isError: true` and a short message, leaving the JSON-RPC envelope intact.
 
+
+## Store-scoped MCP mode
+
+Use this when a workspace contains multiple registered repositories and you do
+not want one MCP server config per repo.
+
+**--repo mode** (single-repo, existing): best for single-repo usage. One MCP
+config, fixed repo. The agent does not need to select a repo before calling
+tools.
+
+**--store mode** (multi-repo, new): best for multi-repo workspaces. One MCP
+config serves all registered repositories. The agent selects a repo at the
+start of each task. Active selection is session-scoped: it resets when the MCP
+server process restarts and is not persisted to disk.
+
+### Prerequisites for store mode
+
+Index and register each repository into the RSM Index Store:
+
+```bash
+uv run rsm index /path/to/repo-a --register
+uv run rsm index /path/to/repo-b --register
+# ... repeat for every repository
+```
+
+Or register an already-indexed repository without re-indexing:
+
+```bash
+uv run rsm store register /path/to/repo-a
+```
+
+### Starting the store-scoped server
+
+```bash
+uv run rsm mcp serve --store
+```
+
+No `--repo` or `--db` required. The server reads the RSM Index Store registry
+(controlled by `RSM_HOME` or OS default) and exposes all registered
+repositories.
+
+`--repo` and `--store` are mutually exclusive. Providing both is a CLI error.
+
+### VS Code / Copilot configuration (store mode)
+
+```json
+{
+  "mcpServers": {
+    "repo-semantic-memory": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/absolute/path/to/repo-semantic-memory",
+        "rsm",
+        "mcp",
+        "serve",
+        "--store"
+      ]
+    }
+  }
+}
+```
+
+### Store-mode workflow
+
+1. **`rsm_list_indexes`** — discover registered repositories.
+2. **`rsm_select_index`** — activate one repository for this session.
+3. **`rsm_status`** — confirm the active repo and index freshness.
+4. **`rsm_build_context_pack`** — build a context pack for your task.
+5. **`rsm_get_context_page`** — page over additional results without recomputing.
+
+Every repository-specific tool response includes an `active_repo` field so the
+agent can confirm which repository was queried:
+
+```jsonc
+{
+  "active_repo": {
+    "repo_id": "25ffc0d3decb93c6",
+    "name": "typer",
+    "repo_root": "/workspaces/typer",
+    "db_path": "/home/user/.local/share/repo-semantic-memory/indexes/25ffc0d3decb93c6/index.sqlite"
+  },
+  ...
+}
+```
+
+### Selecting a repository
+
+`rsm_select_index` accepts one of:
+
+| Selector     | Example                                   | Notes                                      |
+|--------------|-------------------------------------------|--------------------------------------------|
+| `repo_id`    | `{"repo_id": "25ffc0d3decb93c6"}`        | Preferred; stable across renames.          |
+| `repo_root`  | `{"repo_root": "/workspaces/typer"}`     | Resolves symlinks before matching.         |
+| `name`       | `{"name": "typer"}`                       | Basename of `repo_root`; fails if ambiguous.|
+
+If the name matches more than one registered repo, `rsm_select_index` returns an
+error. Use `repo_id` or `repo_root` to disambiguate.
+
+### Store-mode behavior for repository tools
+
+Before `rsm_select_index` is called (or if no match is found), any
+repository-specific tool returns a recoverable `no_active_index` uncertainty:
+
+```jsonc
+{
+  "active_repo": null,
+  "uncertainties": [
+    {
+      "code": "no_active_index",
+      "message": "Call rsm_list_indexes then rsm_select_index before repository tools.",
+      "recoverable": true
+    }
+  ],
+  "agent_instructions": [
+    "Use rsm_list_indexes to see registered repositories.",
+    "Call rsm_select_index before repository-specific tools.",
+    "Check active_repo in each response before using paths.",
+    "Do not assume paths from one repository apply to another."
+  ]
+}
+```
+
+The server never guesses silently, never auto-selects a repo, and never
+auto-rebuilds a stale or missing index.
+
+### Store-mode guarantees
+
+- **Active selection is session-scoped.** Lost on MCP server restart; no disk
+  write.
+- **`active_repo` is in every repository-specific response.** Prevents
+  cross-repo confusion in agent transcripts.
+- **Only registered repos are served.** Unregistered paths are rejected by
+  `rsm_select_index`.
+- **Index Store DBs may live outside the repository root.** This is expected
+  and safe: the DB path comes from the registry and is trusted.  The
+  `--repo` validation that rejects out-of-repo DBs does not apply in store
+  mode.
+- **Read-only.** Store mode adds no write tools. The `rsm_list_indexes`,
+  `rsm_select_index`, and `rsm_current_index` tools do not modify the index.
+- **`--repo` mode is unchanged.** Existing single-repo configs continue to
+  work as before.  For `--repo` sessions with an explicit `--db`, the DB must
+  still resolve within the repository root unless the DB was resolved through
+  the Index Store registry.
+
+### Additional store-mode tools
+
+In addition to all phase-1 tools, store mode exposes three management tools:
+
+| Tool                  | Description                                                                 |
+|-----------------------|-----------------------------------------------------------------------------|
+| `rsm_list_indexes`    | List all registered indexes with status, repo_id, repo_root, db_path.      |
+| `rsm_select_index`    | Activate a repository index for this session by repo_id, repo_root, or name.|
+| `rsm_current_index`   | Return the currently active index, or a recoverable no_active_index error.  |
+
+### Per-call repo override (future work)
+
+Adding an optional `repo_ref` / `repo_id` argument to every repository tool so
+the caller can temporarily override the session-active index per call was
+considered for this release but deferred to keep the change focused. The
+`rsm_select_index` + session state pattern is the supported workflow for now.

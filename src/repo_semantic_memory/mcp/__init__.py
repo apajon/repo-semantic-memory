@@ -16,14 +16,19 @@ from repo_semantic_memory.mcp.handlers import (
 from repo_semantic_memory.mcp.runtime import (
     DEFERRED_TOOL_NAMES,
     PHASE1_TOOL_NAMES,
+    STORE_ONLY_TOOL_NAMES,
+    STORE_TOOL_NAMES,
+    ActiveIndex,
     SessionConfig,
+    StoreSessionState,
     ToolDescriptor,
     ToolInvocationError,
+    build_store_tool_registry,
     build_tool_registry,
     invoke_tool,
     validate_session,
 )
-from repo_semantic_memory.mcp.server import run_serve, serve_stdio
+from repo_semantic_memory.mcp.server import run_serve, run_serve_store, serve_stdio
 from repo_semantic_memory.mcp.tools import (
     BudgetEnvelope,
     BuildContextPackRequest,
@@ -48,6 +53,7 @@ from repo_semantic_memory.mcp.tools import (
 )
 
 __all__ = [
+    "ActiveIndex",
     "BudgetEnvelope",
     "BuildContextPackRequest",
     "BuildContextPackResponse",
@@ -61,17 +67,21 @@ __all__ = [
     "GetGitSummaryResponse",
     "McpToolName",
     "PHASE1_TOOL_NAMES",
+    "STORE_ONLY_TOOL_NAMES",
+    "STORE_TOOL_NAMES",
     "QueryGraphRequest",
     "QueryGraphResponse",
     "SearchSymbolsRequest",
     "SearchSymbolsResponse",
     "SessionConfig",
+    "StoreSessionState",
     "ToolContract",
     "ToolDescriptor",
     "ToolInvocationError",
     "Uncertainty",
     "ValidatePatchContextRequest",
     "ValidatePatchContextResponse",
+    "build_store_tool_registry",
     "build_tool_registry",
     "handle_build_context_pack",
     "handle_explain_entity",
@@ -83,6 +93,7 @@ __all__ = [
     "get_mcp_tool_contracts",
     "invoke_tool",
     "run_serve",
+    "run_serve_store",
     "serve_stdio",
     "validate_session",
 ]

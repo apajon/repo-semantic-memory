@@ -12,7 +12,7 @@ tools are not registered. See ``docs/usage/mcp.md`` and ``docs/design/mcp_runtim
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -48,6 +48,16 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_get_git_summary",
 )
 
+# Store-mode-only tool names exposed exclusively in ``--store`` sessions.
+STORE_ONLY_TOOL_NAMES: tuple[str, ...] = (
+    "rsm_list_indexes",
+    "rsm_select_index",
+    "rsm_current_index",
+)
+
+# All tool names available in ``--store`` mode: store tools first, then repo tools.
+STORE_TOOL_NAMES: tuple[str, ...] = STORE_ONLY_TOOL_NAMES + PHASE1_TOOL_NAMES
+
 # Tools explicitly deferred in phase 1. Listed only so safety tests can assert
 # they are NOT registered.
 DEFERRED_TOOL_NAMES: tuple[str, ...] = (
@@ -61,6 +71,50 @@ DEFERRED_TOOL_NAMES: tuple[str, ...] = (
     "rsm_run_tests",
     "rsm_apply_patch",
 )
+
+
+@dataclass(frozen=True)
+class ActiveIndex:
+    """The currently selected index in a store-mode MCP session.
+
+    Holds the resolved, validated state for the active repository.  Frozen so
+    that the object returned by :func:`rsm_current_index` can be compared by
+    value without copies.
+    """
+
+    repo_id: str
+    """Stable 16-hex-char ID derived from the resolved repo root path."""
+
+    name: str
+    """Human-readable name: the final path component of ``repo_root``."""
+
+    repo_root: Path
+    """Resolved absolute path to the repository root."""
+
+    db_path: Path
+    """Resolved absolute path to the SQLite index database."""
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable dict with string path values."""
+        return {
+            "repo_id": self.repo_id,
+            "name": self.name,
+            "repo_root": self.repo_root.as_posix(),
+            "db_path": self.db_path.as_posix(),
+        }
+
+
+@dataclass
+class StoreSessionState:
+    """Mutable per-session state for ``--store`` mode.
+
+    One instance lives for the lifetime of a single ``serve_stdio`` call.
+    ``active_index`` starts as ``None`` and is updated by ``rsm_select_index``.
+    No disk writes; no persistence across MCP restarts.
+    """
+
+    store_home: Path
+    active_index: ActiveIndex | None = field(default=None)
 
 
 @dataclass(frozen=True)
@@ -79,12 +133,16 @@ class ToolDescriptor:
     Tool handlers receive the parsed arguments, the session configuration, and
     a per-session :class:`ResultStore`. Handlers that do not use the store
     simply ignore the third argument.
+
+    Repo-tool handlers always receive a :class:`SessionConfig`.
+    Store-only tool handlers always receive a :class:`StoreSessionState`.
+    The union type annotation reflects that both appear in the combined registry.
     """
 
     name: str
     description: str
     input_schema: dict[str, Any]
-    handler: Callable[[Mapping[str, Any], SessionConfig, ResultStore], dict[str, Any]]
+    handler: Callable[[Mapping[str, Any], Any, ResultStore], dict[str, Any]]
 
 
 class ToolInvocationError(ValueError):
@@ -275,7 +333,11 @@ def _tool_search_symbols(
         path_roles=_str_tuple(args, "path_roles"),
         include_relations=_optional_bool(args, "include_relations", False),
     )
-    response = _handlers.handle_search_symbols(request, repo_root=session.repo_root)
+    response = _handlers.handle_search_symbols(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -291,7 +353,11 @@ def _tool_explain_entity(
         include_components=_optional_bool(args, "include_components", True),
         include_claims=_optional_bool(args, "include_claims", True),
     )
-    response = _handlers.handle_explain_entity(request, repo_root=session.repo_root)
+    response = _handlers.handle_explain_entity(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -372,7 +438,11 @@ def _tool_build_context_pack(
         max_relations=_PACK_STORE_CAP,
         max_citations=_PACK_STORE_CAP,
     )
-    response = _handlers.handle_build_context_pack(request, repo_root=session.repo_root)
+    response = _handlers.handle_build_context_pack(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     payload = _serialize_response(response)
 
     # Snapshot the full streams (as returned by the handler) before applying
@@ -581,7 +651,11 @@ def _tool_query_graph(
         max_hops=_optional_int(args, "max_hops", 1),
         limit=_optional_int(args, "limit", 25),
     )
-    response = _handlers.handle_query_graph(request, repo_root=session.repo_root)
+    response = _handlers.handle_query_graph(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -604,7 +678,11 @@ def _tool_validate_patch_context(
         referenced_entity_ids=_str_tuple(args, "referenced_entity_ids"),
         budget_chars=budget_value,
     )
-    response = _handlers.handle_validate_patch_context(request, repo_root=session.repo_root)
+    response = _handlers.handle_validate_patch_context(
+        request,
+        repo_root=session.repo_root,
+        require_db_inside_repo=(session.index_mode != "store"),
+    )
     return _serialize_response(response)
 
 
@@ -802,14 +880,288 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
     return registry
 
 
+# ---------------------------------------------------------------------------
+# Store-mode tools
+# ---------------------------------------------------------------------------
+
+
+def _no_active_index_response() -> dict[str, Any]:
+    """Return the standard recoverable no_active_index uncertainty payload."""
+    return {
+        "active_repo": None,
+        "uncertainties": [
+            {
+                "code": "no_active_index",
+                "message": ("Call rsm_list_indexes then rsm_select_index before repository tools."),
+                "recoverable": True,
+            }
+        ],
+        "agent_instructions": [
+            "Use rsm_list_indexes to see registered repositories.",
+            "Call rsm_select_index before repository-specific tools.",
+            "Check active_repo in each response before using paths.",
+            "Do not assume paths from one repository apply to another.",
+        ],
+    }
+
+
+def _tool_list_indexes(
+    args: Mapping[str, Any], session: StoreSessionState, store: ResultStore
+) -> dict[str, Any]:
+    """List all registered indexes from the RSM Index Store."""
+
+    del args, store
+    from repo_semantic_memory.store_home import IndexRegistry  # noqa: PLC0415
+
+    registry = IndexRegistry(session.store_home)
+    entries = registry.list_entries()
+
+    indexes: list[dict[str, Any]] = []
+    for repo_root_str, entry in entries.items():
+        repo_root = Path(repo_root_str)
+        repo_id_val = IndexRegistry.repo_id(repo_root)
+        name = repo_root.name
+        db_path = registry._resolve_db(entry.db_relative)
+
+        index_entry: dict[str, Any] = {
+            "repo_id": repo_id_val,
+            "name": name,
+            "repo_root": repo_root_str,
+            "db_path": db_path.as_posix(),
+            "registered_at": entry.registered_at,
+            "last_indexed_at": entry.last_indexed_at,
+        }
+
+        # Best-effort status detection: failure for one repo must not abort all.
+        try:
+            from repo_semantic_memory.index_status import detect_index_status  # noqa: PLC0415
+
+            report = detect_index_status(
+                repo_root=repo_root,
+                db_path=db_path if db_path.exists() else None,
+                index_mode="store",
+            )
+            index_entry["status"] = report.index_status.value
+            index_entry["status_reason"] = report.index_status_reason
+            index_entry["indexed_at"] = report.indexed_at
+            index_entry["git_head"] = report.indexed_git_head
+            index_entry["working_tree_dirty"] = report.working_tree_dirty
+        except Exception:  # noqa: BLE001
+            index_entry["status"] = "unknown"
+            index_entry["status_reason"] = "detection_error"
+            index_entry["indexed_at"] = None
+            index_entry["git_head"] = None
+            index_entry["working_tree_dirty"] = None
+
+        indexes.append(index_entry)
+
+    # Stable ordering: name then repo_root.
+    indexes.sort(key=lambda x: (x["name"], x["repo_root"]))
+
+    return {
+        "indexes": indexes,
+        "count": len(indexes),
+        "agent_instructions": [
+            "Use rsm_list_indexes to see registered repositories.",
+            "Call rsm_select_index before repository-specific tools.",
+            "Check active_repo in each response before using paths.",
+            "Do not assume paths from one repository apply to another.",
+        ],
+    }
+
+
+def _tool_select_index(
+    args: Mapping[str, Any], session: StoreSessionState, store: ResultStore
+) -> dict[str, Any]:
+    """Select the active index for this MCP session by repo_id, repo_root, or name."""
+
+    del store
+    from repo_semantic_memory.store_home import IndexRegistry  # noqa: PLC0415
+
+    registry = IndexRegistry(session.store_home)
+    entries = registry.list_entries()
+
+    # Build candidate tuples: (repo_root_str, repo_id, db_path, name)
+    candidates: list[tuple[str, str, Path, str]] = []
+    for repo_root_str, entry in entries.items():
+        repo_root = Path(repo_root_str)
+        repo_id_val = IndexRegistry.repo_id(repo_root)
+        db_path = registry._resolve_db(entry.db_relative)
+        name = repo_root.name
+        candidates.append((repo_root_str, repo_id_val, db_path, name))
+
+    selector_repo_id = args.get("repo_id")
+    selector_repo_root = args.get("repo_root")
+    selector_name = args.get("name")
+
+    if not any(
+        isinstance(v, str) and v.strip()
+        for v in (selector_repo_id, selector_repo_root, selector_name)
+    ):
+        raise ToolInvocationError("provide at least one of: repo_id, repo_root, or name")
+
+    matched: list[tuple[str, str, Path, str]]
+
+    if isinstance(selector_repo_id, str) and selector_repo_id.strip():
+        matched = [c for c in candidates if c[1] == selector_repo_id.strip()]
+        if not matched:
+            raise ToolInvocationError(f"no registered index with repo_id={selector_repo_id!r}")
+    elif isinstance(selector_repo_root, str) and selector_repo_root.strip():
+        try:
+            selector_path = Path(selector_repo_root).expanduser().resolve()
+        except (OSError, ValueError) as exc:
+            raise ToolInvocationError(f"invalid repo_root path: {exc}") from exc
+        matched = [c for c in candidates if Path(c[0]) == selector_path]
+        if not matched:
+            raise ToolInvocationError(f"no registered index for repo_root={selector_repo_root!r}")
+    else:
+        name_val = selector_name.strip() if isinstance(selector_name, str) else ""
+        matched = [c for c in candidates if c[3] == name_val]
+        if len(matched) > 1:
+            roots = [c[0] for c in matched]
+            raise ToolInvocationError(
+                f"ambiguous name {name_val!r}: matches multiple repos {roots}; "
+                f"use repo_id or repo_root to disambiguate"
+            )
+        if not matched:
+            raise ToolInvocationError(f"no registered index with name={name_val!r}")
+
+    repo_root_str, repo_id_val, db_path, name_val = matched[0]
+
+    if not db_path.exists():
+        raise ToolInvocationError(
+            f"index DB does not exist: {db_path}. "
+            f"Rebuild with: rsm index {repo_root_str} --register"
+        )
+
+    active = ActiveIndex(
+        repo_id=repo_id_val,
+        name=name_val,
+        repo_root=Path(repo_root_str),
+        db_path=db_path,
+    )
+    session.active_index = active
+
+    return {
+        "selected": active.as_dict(),
+        "active_repo": active.as_dict(),
+    }
+
+
+def _tool_current_index(
+    args: Mapping[str, Any], session: StoreSessionState, store: ResultStore
+) -> dict[str, Any]:
+    """Return the active index for this MCP session, or a recoverable uncertainty."""
+
+    del args, store
+
+    if session.active_index is None:
+        return {
+            "active_repo": None,
+            "uncertainties": [
+                {
+                    "code": "no_active_index",
+                    "message": (
+                        "No active index selected. Call rsm_list_indexes then "
+                        "rsm_select_index before repository tools."
+                    ),
+                    "recoverable": True,
+                }
+            ],
+            "agent_instructions": [
+                "Use rsm_list_indexes to see registered repositories.",
+                "Call rsm_select_index before repository-specific tools.",
+            ],
+        }
+
+    return {
+        "active_repo": session.active_index.as_dict(),
+        "uncertainties": [],
+    }
+
+
+def build_store_tool_registry() -> dict[str, ToolDescriptor]:
+    """Return the full tool registry for ``--store`` mode.
+
+    Includes the three store-management tools (``rsm_list_indexes``,
+    ``rsm_select_index``, ``rsm_current_index``) followed by all
+    :func:`build_tool_registry` phase-1 tools.
+    """
+
+    store_descriptors: list[ToolDescriptor] = [
+        ToolDescriptor(
+            name="rsm_list_indexes",
+            description=(
+                "List all repositories registered in the RSM Index Store. "
+                "Returns repo_id, name, repo_root, db_path, and best-effort status "
+                "for each registered index. Use this first to discover available "
+                "repositories, then call rsm_select_index to activate one. Read-only."
+            ),
+            input_schema=_input_schema({}, []),
+            handler=_tool_list_indexes,
+        ),
+        ToolDescriptor(
+            name="rsm_select_index",
+            description=(
+                "Select the active repository index for this MCP session. "
+                "Accepts repo_id (preferred), repo_root (absolute path), or name "
+                "(basename of repo_root; rejected if ambiguous). Validates that the "
+                "selected DB exists. Active selection is session-scoped: it is lost "
+                "when the MCP server process restarts. Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "repo_id": {"type": "string"},
+                    "repo_root": {"type": "string"},
+                    "name": {"type": "string"},
+                },
+                [],
+            ),
+            handler=_tool_select_index,
+        ),
+        ToolDescriptor(
+            name="rsm_current_index",
+            description=(
+                "Return the currently active repository index for this MCP session. "
+                "If no index has been selected, returns active_repo: null and a "
+                "recoverable no_active_index uncertainty. Read-only."
+            ),
+            input_schema=_input_schema({}, []),
+            handler=_tool_current_index,
+        ),
+    ]
+
+    repo_registry = build_tool_registry()
+    combined = {d.name: d for d in store_descriptors}
+    combined.update(repo_registry)
+
+    if tuple(combined.keys()) != STORE_TOOL_NAMES:
+        raise RuntimeError(
+            "Store tool registry order does not match STORE_TOOL_NAMES; "
+            "this is an internal invariant violation."
+        )
+    return combined
+
+
 def invoke_tool(
     name: str,
     arguments: Mapping[str, Any],
-    session: SessionConfig,
+    session: SessionConfig | StoreSessionState,
     *,
     result_store: ResultStore | None = None,
 ) -> dict[str, Any]:
     """Dispatch a tool call by name with already-validated session config.
+
+    In ``--repo`` mode (``session`` is :class:`SessionConfig`): routes directly
+    to the phase-1 tool registry.  Only ``PHASE1_TOOL_NAMES`` are valid.
+
+    In ``--store`` mode (``session`` is :class:`StoreSessionState`): routes
+    store-management tools (``STORE_ONLY_TOOL_NAMES``) directly to their
+    handlers.  Repository-specific tools (``PHASE1_TOOL_NAMES``) require an
+    active index; if none is selected the response contains a recoverable
+    ``no_active_index`` uncertainty instead of raising an error.  Every
+    repository-specific response in store mode includes an ``active_repo`` field
+    so agents can confirm which repository was queried.
 
     Raises :class:`ToolInvocationError` for unknown tool names or invalid args.
     Other exceptions bubble up and are surfaced as MCP tool errors by the
@@ -823,6 +1175,37 @@ def invoke_tool(
     """
 
     store = result_store if result_store is not None else ResultStore()
+
+    if isinstance(session, StoreSessionState):
+        # --store mode: store-only tools go directly to their handlers.
+        if name in STORE_ONLY_TOOL_NAMES:
+            registry = build_store_tool_registry()
+            descriptor = registry.get(name)
+            if descriptor is None:
+                raise ToolInvocationError(f"unknown tool: {name}")
+            return descriptor.handler(arguments, session, store)
+
+        # Repository tools: require an active index.
+        if name not in PHASE1_TOOL_NAMES:
+            raise ToolInvocationError(f"unknown tool: {name}")
+        if session.active_index is None:
+            return _no_active_index_response()
+
+        # Build a temporary SessionConfig from the active index and dispatch.
+        repo_session = SessionConfig(
+            repo_root=session.active_index.repo_root,
+            db_path=session.active_index.db_path,
+            index_mode="store",
+        )
+        repo_registry = build_tool_registry()
+        descriptor = repo_registry.get(name)
+        if descriptor is None:
+            raise ToolInvocationError(f"unknown tool: {name}")
+        result = descriptor.handler(arguments, repo_session, store)
+        result["active_repo"] = session.active_index.as_dict()
+        return result
+
+    # --repo mode: route directly to the phase-1 registry.
     registry = build_tool_registry()
     descriptor = registry.get(name)
     if descriptor is None:
