@@ -172,8 +172,6 @@ Pass `--profile-report PATH` to write a machine-readable JSON report.
 `--profile-report` implies `--profile`; the stderr table is also emitted.
 
 ```bash
-rsm index . --db .rsm/index.sqlite --profile --profile-report /tmp/rsm-profile.json
-# or equivalently (--profile-report implies --profile):
 rsm index . --db .rsm/index.sqlite --profile-report /tmp/rsm-profile.json
 ```
 

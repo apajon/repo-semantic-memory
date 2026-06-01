@@ -148,9 +148,9 @@ class IndexProfiler:
             entry: dict[str, Any] = {
                 "name": rec.phase_name,
                 "elapsed_seconds": rec.elapsed_seconds,
-                "files": rec.files_processed if rec.files_processed else None,
-                "entities": rec.entities_created if rec.entities_created else None,
-                "relations": rec.relations_created if rec.relations_created else None,
+                "files": rec.files_processed or None,
+                "entities": rec.entities_created or None,
+                "relations": rec.relations_created or None,
             }
             if rec.files_processed and rec.elapsed_seconds > 0.0:
                 entry["files_per_second"] = rec.files_processed / rec.elapsed_seconds
