@@ -1045,3 +1045,89 @@ def test_markdown_progress_callback_silent_below_threshold(
         cb(i, total)
 
     assert capsys.readouterr().err == ""
+
+
+# ---------------------------------------------------------------------------
+# --profile flag (Prompt 57.1)
+# ---------------------------------------------------------------------------
+
+_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+
+
+def test_index_profile_writes_to_stderr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """rsm index --profile must write the profiling summary to stderr."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile"])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing profile:" in err
+
+
+def test_index_profile_contains_phase_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The profiling summary must include all expected phase rows."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile"])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    for phase in (
+        "file_discovery",
+        "markdown_extraction",
+        "python_ast",
+        "exports_extraction",
+        "test_relationships",
+        "git_summary",
+        "sqlite_persist",
+        "metadata_write",
+    ):
+        assert phase in err, f"Expected phase '{phase}' in profiling output"
+
+
+def test_index_profile_stdout_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """--profile must not add or remove anything from stdout."""
+    db_path_no_profile = tmp_path / "no_profile" / "index.sqlite"
+    db_path_profile = tmp_path / "profile" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path_no_profile)])
+    out_no_profile = capsys.readouterr().out
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path_profile), "--profile"])
+    out_profile = capsys.readouterr().out
+
+    assert out_profile == out_no_profile
+
+
+def test_index_no_profile_flag_omits_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without --profile, the profiling summary must not appear on stderr."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(_FIXTURE_ROOT), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing profile:" not in err
+
+
+def test_index_profile_db_output_identical_with_and_without(
+    tmp_path: Path,
+) -> None:
+    """The DB entity/relation counts must be the same with or without --profile."""
+    import sqlite3
+
+    db_no_profile = tmp_path / "no_profile" / "index.sqlite"
+    db_profile = tmp_path / "profile" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_no_profile)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_profile), "--profile"])
+
+    def _counts(db: Path) -> tuple[int, int]:
+        with sqlite3.connect(db) as conn:
+            (entities,) = conn.execute("SELECT COUNT(*) FROM entities").fetchone()
+            (relations,) = conn.execute("SELECT COUNT(*) FROM relations").fetchone()
+        return int(entities), int(relations)
+
+    assert _counts(db_no_profile) == _counts(db_profile)

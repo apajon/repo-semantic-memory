@@ -42,6 +42,7 @@ from repo_semantic_memory.extractors import (
 )
 from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.indexing import IncrementalFallbackReason
+from repo_semantic_memory.indexing.profiler import IndexProfiler
 from repo_semantic_memory.memory import (
     attach_git_metadata_to_entities,
     export_invariants_yaml,
@@ -112,6 +113,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Attempt an incremental index update using local Git signals. "
             "Falls back to a full rebuild if incremental safety cannot be proven. "
             "Full rebuild is the default."
+        ),
+    )
+    index_parser.add_argument(
+        "--profile",
+        action="store_true",
+        help=(
+            "Emit a per-phase timing summary to stderr after indexing completes. "
+            "Observational only: does not change indexing behavior or output."
         ),
     )
 
@@ -599,6 +608,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             with_git=args.with_git,
             register=args.register,
             incremental=args.incremental,
+            profile=args.profile,
         )
     if args.command == "git":
         if args.git_target == "summary":
@@ -737,7 +747,13 @@ def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence
 
 
 def _run_index_command(
-    *, path: str, db: str, with_git: bool, register: bool = False, incremental: bool = False
+    *,
+    path: str,
+    db: str,
+    with_git: bool,
+    register: bool = False,
+    incremental: bool = False,
+    profile: bool = False,
 ) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
@@ -768,9 +784,12 @@ def _run_index_command(
                 f"info: incremental index fallback: {_reason}; running full rebuild",
                 file=sys.stderr,
             )
+    profiler = IndexProfiler()
+
     _index_start = time.monotonic()
     print("indexing: scanning files...", file=sys.stderr)
-    filesystem_entities = extract_filesystem_entities(repository_root)
+    with profiler.phase("file_discovery") as _ph_discovery:
+        filesystem_entities = extract_filesystem_entities(repository_root)
 
     # Compute per-type counts for the scan summary and progress callbacks.
     python_count = sum(1 for e in filesystem_entities if e.kind == "module")
@@ -783,6 +802,8 @@ def _run_index_command(
         1 for e in filesystem_entities if e.kind == "module" and e.name == "__init__.py"
     )
     other_count = len(filesystem_entities) - python_count - md_count
+    _ph_discovery.files_processed = len(filesystem_entities)
+    _ph_discovery.entities_created = len(filesystem_entities)
     print(
         f"indexing: discovered files: python={python_count} markdown={md_count}"
         f" other={other_count} total={len(filesystem_entities)}",
@@ -793,9 +814,13 @@ def _run_index_command(
 
     print("indexing: extracting Markdown...", file=sys.stderr)
     _t = time.monotonic()
-    markdown_outline = extract_markdown_outline_path(
-        repository_root, progress=_make_progress_callback("Markdown")
-    )
+    with profiler.phase("markdown_extraction") as _ph_md:
+        markdown_outline = extract_markdown_outline_path(
+            repository_root, progress=_make_progress_callback("Markdown")
+        )
+    _ph_md.files_processed = md_count
+    _ph_md.entities_created = len(markdown_outline.entities)
+    _ph_md.relations_created = len(markdown_outline.relations)
     print(
         f"indexing: Markdown complete: {md_count}/{md_count} files,"
         f" elapsed={time.monotonic() - _t:.1f}s",
@@ -804,9 +829,13 @@ def _run_index_command(
 
     print("indexing: parsing Python...", file=sys.stderr)
     _t = time.monotonic()
-    python_entities, python_relations = index_python_path(
-        repository_root, progress=_make_progress_callback("Python")
-    )
+    with profiler.phase("python_ast") as _ph_py:
+        python_entities, python_relations = index_python_path(
+            repository_root, progress=_make_progress_callback("Python")
+        )
+    _ph_py.files_processed = python_count
+    _ph_py.entities_created = len(python_entities)
+    _ph_py.relations_created = len(python_relations)
     print(
         f"indexing: Python complete: {python_count}/{python_count} files,"
         f" elapsed={time.monotonic() - _t:.1f}s",
@@ -815,9 +844,12 @@ def _run_index_command(
 
     print("indexing: extracting exports...", file=sys.stderr)
     _t = time.monotonic()
-    export_relations = index_python_exports(
-        repository_root, progress=_make_progress_callback("exports")
-    )
+    with profiler.phase("exports_extraction") as _ph_exp:
+        export_relations = index_python_exports(
+            repository_root, progress=_make_progress_callback("exports")
+        )
+    _ph_exp.files_processed = init_count
+    _ph_exp.relations_created = len(export_relations)
     print(
         f"indexing: exports complete: {init_count}/{init_count} files,"
         f" elapsed={time.monotonic() - _t:.1f}s",
@@ -834,11 +866,13 @@ def _run_index_command(
         file=sys.stderr,
     )
     _t = time.monotonic()
-    test_relations = extract_test_relationships(
-        repository_root,
-        all_entities,
-        all_relations,
-    )
+    with profiler.phase("test_relationships") as _ph_test:
+        test_relations = extract_test_relationships(
+            repository_root,
+            all_entities,
+            all_relations,
+        )
+    _ph_test.relations_created = len(test_relations)
     all_relations = [*all_relations, *test_relations]
     print(
         f"indexing: test relationships complete:"
@@ -849,16 +883,19 @@ def _run_index_command(
 
     # Always fetch a lightweight git summary for staleness metadata.
     # This is a bounded local call; it does not attach per-file history.
-    git_summary = get_git_repository_summary(repository_root)
+    with profiler.phase("git_summary"):
+        git_summary = get_git_repository_summary(repository_root)
 
     git_status = "disabled"
     if with_git:
-        temporal_result = attach_git_metadata_to_entities(
-            all_entities,
-            repository_root=repository_root,
-            summary=git_summary,
-        )
+        with profiler.phase("git_per_entity") as _ph_git:
+            temporal_result = attach_git_metadata_to_entities(
+                all_entities,
+                repository_root=repository_root,
+                summary=git_summary,
+            )
         all_entities = temporal_result.entities
+        _ph_git.entities_created = len(all_entities)
         git_status = temporal_result.status
         if temporal_result.warning:
             print(f"git metadata: {temporal_result.warning}", file=sys.stderr)
@@ -907,8 +944,12 @@ def _run_index_command(
     _t = time.monotonic()
     try:
         store.initialize()
-        store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
-        store.write_extra_metadata(extra_meta)
+        with profiler.phase("sqlite_persist") as _ph_sqlite:
+            store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
+        _ph_sqlite.entities_created = len(all_entities)
+        _ph_sqlite.relations_created = len(all_relations)
+        with profiler.phase("metadata_write"):
+            store.write_extra_metadata(extra_meta)
     finally:
         store.close()
     print(
@@ -929,6 +970,8 @@ def _run_index_command(
         f" elapsed={time.monotonic() - _index_start:.1f}s",
         file=sys.stderr,
     )
+    if profile:
+        print(profiler.format_summary(), file=sys.stderr)
     if with_git:
         print(
             f"entities={len(all_entities)} relations={len(all_relations)} git_metadata={git_status}"
