@@ -194,6 +194,25 @@ class TestFormatSummary:
         summary = profiler.format_summary()
         assert "files/s" not in summary
 
+    def test_files_per_second_absent_when_elapsed_zero(self) -> None:
+        """No files/s annotation when elapsed is 0 — avoids divide-by-zero."""
+        profiler = IndexProfiler()
+        with profiler.phase("instant") as ph:
+            pass
+        ph.files_processed = 100
+        ph.elapsed_seconds = 0.0  # guard: must not compute 100 / 0
+        summary = profiler.format_summary()
+        assert "files/s" not in summary
+
+    def test_zero_elapsed_shown_as_zero_string(self) -> None:
+        """A phase that completed in zero measured time still renders a valid elapsed cell."""
+        profiler = IndexProfiler()
+        with profiler.phase("instant") as ph:
+            pass
+        ph.elapsed_seconds = 0.0
+        summary = profiler.format_summary()
+        assert "0.000s" in summary
+
     def test_summary_is_multiline(self) -> None:
         profiler = IndexProfiler()
         with profiler.phase("phase1"):

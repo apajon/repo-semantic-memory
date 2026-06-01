@@ -1079,7 +1079,6 @@ def test_index_profile_contains_phase_names(
         "python_ast",
         "exports_extraction",
         "test_relationships",
-        "git_summary",
         "sqlite_persist",
         "metadata_write",
     ):

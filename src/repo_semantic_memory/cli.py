@@ -42,7 +42,7 @@ from repo_semantic_memory.extractors import (
 )
 from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.indexing import IncrementalFallbackReason
-from repo_semantic_memory.indexing.profiler import IndexProfiler
+from repo_semantic_memory.indexing.profiler import IndexProfiler, _AnyProfiler, _NullProfiler
 from repo_semantic_memory.memory import (
     attach_git_metadata_to_entities,
     export_invariants_yaml,
@@ -784,7 +784,7 @@ def _run_index_command(
                 f"info: incremental index fallback: {_reason}; running full rebuild",
                 file=sys.stderr,
             )
-    profiler = IndexProfiler()
+    profiler: _AnyProfiler = IndexProfiler() if profile else _NullProfiler()
 
     _index_start = time.monotonic()
     print("indexing: scanning files...", file=sys.stderr)
@@ -883,8 +883,7 @@ def _run_index_command(
 
     # Always fetch a lightweight git summary for staleness metadata.
     # This is a bounded local call; it does not attach per-file history.
-    with profiler.phase("git_summary"):
-        git_summary = get_git_repository_summary(repository_root)
+    git_summary = get_git_repository_summary(repository_root)
 
     git_status = "disabled"
     if with_git:

@@ -159,3 +159,58 @@ class IndexProfiler:
         lines.append(f"  {'total':<{_NAME_W}}  {total_str:>{_ELAPSED_W}}")
 
         return "\n".join(lines)
+
+
+class _NullContext:
+    """No-op context manager returned by :class:`_NullProfiler`.
+
+    ``__enter__`` returns a shared :class:`PhaseRecord` whose fields may be
+    set by the caller but are simply discarded.
+    """
+
+    def __init__(self) -> None:
+        self._record = PhaseRecord(phase_name="")
+
+    def __enter__(self) -> PhaseRecord:
+        return self._record
+
+    def __exit__(self, *_: object) -> None:
+        pass
+
+
+class _NullProfiler:
+    """Drop-in for :class:`IndexProfiler` with zero overhead.
+
+    Use this when ``--profile`` is *not* passed so that phase-wrapping code in
+    the CLI is identical whether profiling is enabled or not, without paying
+    any timing cost.
+    """
+
+    def __init__(self) -> None:
+        self._ctx = _NullContext()
+
+    def phase(
+        self, name: str
+    ) -> (
+        _NullContext
+    ):  # name unused: maintains API compatibility with IndexProfiler  # noqa: ARG002
+        """Return a no-op context manager that discards all timing/counters."""
+        return self._ctx
+
+    @property
+    def records(self) -> tuple[PhaseRecord, ...]:
+        """Always empty — null profiler records nothing."""
+        return ()
+
+    def total_elapsed(self) -> float:
+        """Always 0.0."""
+        return 0.0
+
+    def format_summary(self) -> str:
+        """Always the no-phases message."""
+        return "indexing profile: no phases recorded"
+
+
+#: Union of the real and no-op profiler — used as the type for ``profiler``
+#: locals in the CLI so the variable can be reassigned from either variant.
+_AnyProfiler = IndexProfiler | _NullProfiler
