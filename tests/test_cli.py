@@ -1124,10 +1124,10 @@ def test_index_profile_db_output_identical_with_and_without(
     main(["index", str(_FIXTURE_ROOT), "--db", str(db_no_profile)])
     main(["index", str(_FIXTURE_ROOT), "--db", str(db_profile), "--profile"])
 
-    def _counts(db: Path) -> tuple[int, int]:
+    def _get_db_counts(db: Path) -> tuple[int, int]:
         with sqlite3.connect(db) as conn:
             (entities,) = conn.execute("SELECT COUNT(*) FROM entities").fetchone()
             (relations,) = conn.execute("SELECT COUNT(*) FROM relations").fetchone()
         return int(entities), int(relations)
 
-    assert _counts(db_no_profile) == _counts(db_profile)
+    assert _get_db_counts(db_no_profile) == _get_db_counts(db_profile)

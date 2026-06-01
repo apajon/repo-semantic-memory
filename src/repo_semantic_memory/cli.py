@@ -888,7 +888,7 @@ def _run_index_command(
 
     git_status = "disabled"
     if with_git:
-        with profiler.phase("git_per_entity") as _ph_git:
+        with profiler.phase("git_metadata") as _ph_git:
             temporal_result = attach_git_metadata_to_entities(
                 all_entities,
                 repository_root=repository_root,
