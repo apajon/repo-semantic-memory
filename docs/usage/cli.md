@@ -139,6 +139,87 @@ The final summary line on stdout (`entities=… relations=…`) is unaffected:
 entities=12345 relations=8034
 ```
 
+## Indexing profiler
+
+`rsm index --profile` prints a per-phase timing table to **stderr** after indexing
+completes.  Profiling is observational only: indexing behavior, ranking, and DB
+output are unchanged.
+
+```bash
+rsm index . --db .rsm/index.sqlite --profile
+```
+
+Sample stderr output:
+
+```
+indexing profile:
+  phase                       elapsed    files   entities   relations
+  ─────────────────────────────────────────────────────────────────────
+  file_discovery               0.002s        8          8           -  (4865.3 files/s)
+  markdown_extraction          0.001s        1          2           1  (1556.8 files/s)
+  python_ast                   0.001s        2         11          12  (1898.6 files/s)
+  exports_extraction           0.000s        -          -           -
+  test_relationships           0.000s        -          -           -
+  sqlite_persist               0.001s        -         18          13
+  metadata_write               0.001s        -          -           -
+  ─────────────────────────────────────────────────────────────────────
+  total                        0.015s
+```
+
+### JSON profiling report
+
+Pass `--profile-report PATH` to write a machine-readable JSON report.
+`--profile-report` implies `--profile`; the stderr table is also emitted.
+
+```bash
+rsm index . --db .rsm/index.sqlite --profile --profile-report /tmp/rsm-profile.json
+# or equivalently (--profile-report implies --profile):
+rsm index . --db .rsm/index.sqlite --profile-report /tmp/rsm-profile.json
+```
+
+Example JSON excerpt:
+
+```json
+{
+  "schema_version": "0.1",
+  "repo_root": "/abs/path/to/repo",
+  "started_at": "2026-01-01T00:00:00+00:00",
+  "completed_at": "2026-01-01T00:01:02+00:00",
+  "total_elapsed_seconds": 62.3,
+  "phases": [
+    {
+      "name": "python_ast",
+      "elapsed_seconds": 42.1,
+      "files": 3912,
+      "entities": 18400,
+      "relations": 7200,
+      "files_per_second": 92.9,
+      "entities_per_second": 436.8,
+      "relations_per_second": 171.0
+    }
+  ],
+  "summary": {
+    "total_files": 4494,
+    "total_entities": 21000,
+    "total_relations": 9100
+  },
+  "diagnostics": {
+    "phase_with_max_elapsed": "python_ast",
+    "phase_elapsed_percent": {
+      "file_discovery": 3.2,
+      "python_ast": 67.6,
+      "exports_extraction": 2.1,
+      "test_relationships": 6.3,
+      "sqlite_persist": 5.0,
+      "metadata_write": 0.2
+    }
+  }
+}
+```
+
+> **Note:** Profiling is observational. It does not optimize indexing, change
+> indexing semantics, or modify DB content.
+
 ## Database resolution for reader commands
 
 Reader commands can use an explicit `--db`, an entry in the RSM Index Store, or the legacy

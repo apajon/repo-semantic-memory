@@ -17,6 +17,16 @@ Usage::
     if profile_flag:
         print(profiler.format_summary(), file=sys.stderr)
 
+    # Write machine-readable JSON report when --profile-report is passed.
+    if profile_report:
+        import json
+        report = profiler.to_json_report(
+            repo_root="/abs/path",
+            started_at="2026-01-01T00:00:00+00:00",
+            completed_at="2026-01-01T00:01:00+00:00",
+        )
+        Path(profile_report).write_text(json.dumps(report, indent=2))
+
 Counters can be set inside or after the ``with`` block; the context manager
 only records ``elapsed_seconds`` on ``__exit__``.
 """
@@ -25,6 +35,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -109,6 +120,85 @@ class IndexProfiler:
     def total_elapsed(self) -> float:
         """Return the sum of all phase elapsed times in seconds."""
         return sum(r.elapsed_seconds for r in self._records)
+
+    def to_json_report(
+        self,
+        *,
+        repo_root: str,
+        started_at: str,
+        completed_at: str,
+    ) -> dict[str, Any]:
+        """Return a machine-readable profiling report as a plain dict.
+
+        The dict is JSON-serialisable with :func:`json.dumps`.  All elapsed
+        fields are included; exact values must not be asserted in tests.
+
+        Args:
+            repo_root: Absolute path to the indexed repository root.
+            started_at: ISO 8601 UTC timestamp for when indexing started.
+            completed_at: ISO 8601 UTC timestamp for when indexing completed.
+
+        Returns:
+            A dict conforming to schema version ``"0.1"``.
+        """
+        total = self.total_elapsed()
+
+        phase_list: list[dict[str, Any]] = []
+        for rec in self._records:
+            entry: dict[str, Any] = {
+                "name": rec.phase_name,
+                "elapsed_seconds": rec.elapsed_seconds,
+                "files": rec.files_processed if rec.files_processed else None,
+                "entities": rec.entities_created if rec.entities_created else None,
+                "relations": rec.relations_created if rec.relations_created else None,
+            }
+            if rec.files_processed and rec.elapsed_seconds > 0.0:
+                entry["files_per_second"] = rec.files_processed / rec.elapsed_seconds
+            else:
+                entry["files_per_second"] = None
+            if rec.entities_created and rec.elapsed_seconds > 0.0:
+                entry["entities_per_second"] = rec.entities_created / rec.elapsed_seconds
+            else:
+                entry["entities_per_second"] = None
+            if rec.relations_created and rec.elapsed_seconds > 0.0:
+                entry["relations_per_second"] = rec.relations_created / rec.elapsed_seconds
+            else:
+                entry["relations_per_second"] = None
+            phase_list.append(entry)
+
+        total_files = sum(r.files_processed for r in self._records)
+        total_entities = sum(r.entities_created for r in self._records)
+        total_relations = sum(r.relations_created for r in self._records)
+
+        # Diagnostics: phase with max elapsed and percentage breakdown.
+        max_phase: str | None = None
+        phase_elapsed_percent: dict[str, float] = {}
+        if self._records:
+            max_rec = max(self._records, key=lambda r: r.elapsed_seconds)
+            max_phase = max_rec.phase_name
+            if total > 0.0:
+                for rec in self._records:
+                    phase_elapsed_percent[rec.phase_name] = round(
+                        rec.elapsed_seconds / total * 100, 1
+                    )
+
+        return {
+            "schema_version": "0.1",
+            "repo_root": repo_root,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "total_elapsed_seconds": total,
+            "phases": phase_list,
+            "summary": {
+                "total_files": total_files,
+                "total_entities": total_entities,
+                "total_relations": total_relations,
+            },
+            "diagnostics": {
+                "phase_with_max_elapsed": max_phase,
+                "phase_elapsed_percent": phase_elapsed_percent,
+            },
+        }
 
     def format_summary(self) -> str:
         """Return a human-readable profiling summary suitable for stderr.
@@ -209,6 +299,25 @@ class _NullProfiler:
     def format_summary(self) -> str:
         """Always the no-phases message."""
         return "indexing profile: no phases recorded"
+
+    def to_json_report(
+        self,
+        *,
+        repo_root: str,
+        started_at: str,
+        completed_at: str,
+    ) -> dict[str, Any]:
+        """Return an empty-phases report — null profiler records nothing."""
+        return {
+            "schema_version": "0.1",
+            "repo_root": repo_root,
+            "started_at": started_at,
+            "completed_at": completed_at,
+            "total_elapsed_seconds": 0.0,
+            "phases": [],
+            "summary": {"total_files": 0, "total_entities": 0, "total_relations": 0},
+            "diagnostics": {"phase_with_max_elapsed": None, "phase_elapsed_percent": {}},
+        }
 
 
 #: Union of the real and no-op profiler — used as the type for ``profiler``

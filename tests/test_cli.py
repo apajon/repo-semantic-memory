@@ -1130,3 +1130,110 @@ def test_index_profile_db_output_identical_with_and_without(
         return int(entities), int(relations)
 
     assert _get_db_counts(db_no_profile) == _get_db_counts(db_profile)
+
+
+# ---------------------------------------------------------------------------
+# --profile-report flag (Prompt 57.2)
+# ---------------------------------------------------------------------------
+
+
+def test_index_profile_report_writes_json_file(tmp_path: Path) -> None:
+    """--profile-report must write a JSON file to the given path."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    exit_code = main(
+        ["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)]
+    )
+    assert exit_code == 0
+    assert report_path.exists(), "profile report file was not created"
+    report = json.loads(report_path.read_text())
+    assert isinstance(report, dict)
+
+
+def test_index_profile_report_top_level_keys(tmp_path: Path) -> None:
+    """JSON report must contain all required top-level keys."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)])
+    report = json.loads(report_path.read_text())
+    for key in (
+        "schema_version",
+        "repo_root",
+        "started_at",
+        "completed_at",
+        "total_elapsed_seconds",
+        "phases",
+        "summary",
+        "diagnostics",
+    ):
+        assert key in report, f"Missing key: {key!r}"
+
+
+def test_index_profile_report_phases_ordered(tmp_path: Path) -> None:
+    """Phases in the JSON report must be in insertion (pipeline) order."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)])
+    report = json.loads(report_path.read_text())
+    names = [p["name"] for p in report["phases"]]
+    # file_discovery must come before python_ast which comes before sqlite_persist
+    assert names.index("file_discovery") < names.index("python_ast")
+    assert names.index("python_ast") < names.index("sqlite_persist")
+
+
+def test_index_profile_report_no_stdout_pollution(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--profile-report must not write anything to stdout."""
+    db_path_no_report = tmp_path / "no_report" / "index.sqlite"
+    db_path_report = tmp_path / "report" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path_no_report)])
+    out_no_report = capsys.readouterr().out
+
+    main(
+        [
+            "index",
+            str(_FIXTURE_ROOT),
+            "--db",
+            str(db_path_report),
+            "--profile-report",
+            str(report_path),
+        ]
+    )
+    out_report = capsys.readouterr().out
+
+    assert out_report == out_no_report
+
+
+def test_index_profile_report_absent_without_flag(tmp_path: Path) -> None:
+    """JSON report file must not be created when --profile-report is absent."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path)])
+    assert not report_path.exists(), "report file should not exist without --profile-report"
+
+
+def test_index_profile_report_implies_profile_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--profile-report implies --profile: summary must appear on stderr."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    exit_code = main(
+        ["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)]
+    )
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    assert "indexing profile:" in err
+
+
+def test_index_profile_report_elapsed_fields_present(tmp_path: Path) -> None:
+    """Each phase entry in the JSON report must include elapsed_seconds."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)])
+    report = json.loads(report_path.read_text())
+    for phase in report["phases"]:
+        assert "elapsed_seconds" in phase, f"Phase {phase['name']!r} missing elapsed_seconds"

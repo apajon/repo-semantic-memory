@@ -220,3 +220,128 @@ class TestFormatSummary:
         with profiler.phase("phase2"):
             pass
         assert "\n" in profiler.format_summary()
+
+
+# ---------------------------------------------------------------------------
+# to_json_report
+# ---------------------------------------------------------------------------
+
+_STARTED = "2026-01-01T00:00:00+00:00"
+_COMPLETED = "2026-01-01T00:01:00+00:00"
+_REPO_ROOT = "/repo"
+
+
+class TestToJsonReport:
+    def _make_report(self, phases: list[str] | None = None) -> dict:  # type: ignore[type-arg]
+        profiler = IndexProfiler()
+        for name in phases or ["file_discovery", "python_ast", "sqlite_persist"]:
+            with profiler.phase(name) as ph:
+                pass
+            ph.files_processed = 10
+            ph.entities_created = 5
+            ph.relations_created = 2
+        return profiler.to_json_report(
+            repo_root=_REPO_ROOT, started_at=_STARTED, completed_at=_COMPLETED
+        )
+
+    def test_top_level_keys_present(self) -> None:
+        report = self._make_report()
+        for key in (
+            "schema_version",
+            "repo_root",
+            "started_at",
+            "completed_at",
+            "total_elapsed_seconds",
+            "phases",
+            "summary",
+            "diagnostics",
+        ):
+            assert key in report, f"Missing top-level key: {key!r}"
+
+    def test_schema_version(self) -> None:
+        assert self._make_report()["schema_version"] == "0.1"
+
+    def test_repo_root_preserved(self) -> None:
+        assert self._make_report()["repo_root"] == _REPO_ROOT
+
+    def test_timestamps_preserved(self) -> None:
+        report = self._make_report()
+        assert report["started_at"] == _STARTED
+        assert report["completed_at"] == _COMPLETED
+
+    def test_total_elapsed_seconds_is_float(self) -> None:
+        report = self._make_report()
+        assert isinstance(report["total_elapsed_seconds"], float)
+
+    def test_phases_ordered_deterministically(self) -> None:
+        names = ["file_discovery", "python_ast", "sqlite_persist"]
+        report = self._make_report(phases=names)
+        assert [p["name"] for p in report["phases"]] == names
+
+    def test_phase_has_required_keys(self) -> None:
+        report = self._make_report()
+        required = {
+            "name",
+            "elapsed_seconds",
+            "files",
+            "entities",
+            "relations",
+            "files_per_second",
+            "entities_per_second",
+            "relations_per_second",
+        }
+        for phase in report["phases"]:
+            assert required <= set(phase), (
+                f"Phase {phase['name']!r} missing keys: {required - set(phase)}"
+            )
+
+    def test_elapsed_seconds_exists_per_phase(self) -> None:
+        report = self._make_report()
+        for phase in report["phases"]:
+            assert "elapsed_seconds" in phase
+
+    def test_summary_keys(self) -> None:
+        summary = self._make_report()["summary"]
+        assert "total_files" in summary
+        assert "total_entities" in summary
+        assert "total_relations" in summary
+
+    def test_summary_totals_are_integers(self) -> None:
+        summary = self._make_report()["summary"]
+        assert isinstance(summary["total_files"], int)
+        assert isinstance(summary["total_entities"], int)
+        assert isinstance(summary["total_relations"], int)
+
+    def test_diagnostics_keys(self) -> None:
+        diag = self._make_report()["diagnostics"]
+        assert "phase_with_max_elapsed" in diag
+        assert "phase_elapsed_percent" in diag
+
+    def test_phase_elapsed_percent_covers_all_phases(self) -> None:
+        names = ["file_discovery", "python_ast", "sqlite_persist"]
+        report = self._make_report(phases=names)
+        pct = report["diagnostics"]["phase_elapsed_percent"]
+        # If total elapsed > 0, all phases should appear; otherwise dict may be empty.
+        if report["total_elapsed_seconds"] > 0.0:
+            for name in names:
+                assert name in pct
+
+    def test_files_per_second_none_when_elapsed_zero(self) -> None:
+        profiler = IndexProfiler()
+        with profiler.phase("instant") as ph:
+            pass
+        ph.files_processed = 100
+        ph.elapsed_seconds = 0.0
+        report = profiler.to_json_report(
+            repo_root=_REPO_ROOT, started_at=_STARTED, completed_at=_COMPLETED
+        )
+        assert report["phases"][0]["files_per_second"] is None
+
+    def test_empty_profiler_produces_valid_report(self) -> None:
+        profiler = IndexProfiler()
+        report = profiler.to_json_report(
+            repo_root=_REPO_ROOT, started_at=_STARTED, completed_at=_COMPLETED
+        )
+        assert report["phases"] == []
+        assert report["total_elapsed_seconds"] == 0.0
+        assert report["diagnostics"]["phase_with_max_elapsed"] is None

@@ -123,6 +123,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Observational only: does not change indexing behavior or output."
         ),
     )
+    index_parser.add_argument(
+        "--profile-report",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write a machine-readable JSON profiling report to PATH. "
+            "Implies --profile. Observational only: does not change indexing behavior or output."
+        ),
+    )
 
     git_parser = subparsers.add_parser(
         "git",
@@ -608,7 +617,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             with_git=args.with_git,
             register=args.register,
             incremental=args.incremental,
-            profile=args.profile,
+            profile=args.profile or bool(args.profile_report),
+            profile_report=args.profile_report,
         )
     if args.command == "git":
         if args.git_target == "summary":
@@ -754,6 +764,7 @@ def _run_index_command(
     register: bool = False,
     incremental: bool = False,
     profile: bool = False,
+    profile_report: str | None = None,
 ) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
@@ -787,6 +798,7 @@ def _run_index_command(
     profiler: _AnyProfiler = IndexProfiler() if profile else _NullProfiler()
 
     _index_start = time.monotonic()
+    _started_at = datetime.now(tz=UTC).isoformat()
     print("indexing: scanning files...", file=sys.stderr)
     with profiler.phase("file_discovery") as _ph_discovery:
         filesystem_entities = extract_filesystem_entities(repository_root)
@@ -971,6 +983,23 @@ def _run_index_command(
     )
     if profile:
         print(profiler.format_summary(), file=sys.stderr)
+    if profile_report:
+        _completed_at = datetime.now(tz=UTC).isoformat()
+        report_path = Path(profile_report)
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report = profiler.to_json_report(
+                repo_root=str(repository_root),
+                started_at=_started_at,
+                completed_at=_completed_at,
+            )
+            report_path.write_text(json.dumps(report, indent=2))
+        except OSError as exc:
+            print(
+                f"error: could not write profile report to {profile_report!r}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
     if with_git:
         print(
             f"entities={len(all_entities)} relations={len(all_relations)} git_metadata={git_status}"
