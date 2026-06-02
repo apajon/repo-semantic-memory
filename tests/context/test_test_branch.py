@@ -214,12 +214,10 @@ class TestRelationFirst:
 
         entity_ids = [eid for eid, _ in result]
         assert test_with_rel.id.value in entity_ids
-        # Relation entity should come first
-        assert (
-            entity_ids.index(test_with_rel.id.value) < entity_ids.index(test_proximity.id.value)
-            if test_proximity.id.value in entity_ids
-            else True
-        )
+        # Relation entity should come before any proximity-only entity.
+        rel_idx = entity_ids.index(test_with_rel.id.value)
+        if test_proximity.id.value in entity_ids:
+            assert rel_idx < entity_ids.index(test_proximity.id.value)
 
     def test_runtime_test_path_not_selected_via_relation(self) -> None:
         """Runtime path lib/X/test/Y should NOT be selected even if a tests relation exists."""
@@ -323,8 +321,8 @@ class TestProximityScoring:
         entity_ids = [eid for eid, _ in result]
         assert stem_match.id.value in entity_ids
         if unrelated.id.value in entity_ids:
-            # Stem match must come first
-            assert entity_ids.index(stem_match.id.value) <= entity_ids.index(unrelated.id.value)
+            # Stem match must come first (strictly)
+            assert entity_ids.index(stem_match.id.value) < entity_ids.index(unrelated.id.value)
 
     def test_real_unit_test_preferred_over_runtime_test_path(self) -> None:
         """test/units/plugins/test_plugins.py preferred over lib/ansible/plugins/test/core.py."""

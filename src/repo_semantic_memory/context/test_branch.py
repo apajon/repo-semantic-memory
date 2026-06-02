@@ -321,6 +321,8 @@ def _score_proximity(
     score += len(path_tokens & lexical_set) * _LEXICAL_TOKEN_BONUS
 
     # Directory segment overlap with seed entity directory paths.
+    # test_dir_segments depends on this entity's path, so it is computed per-entity.
+    # seed_dir_segments is pre-built once outside this loop via _build_seed_index.
     test_dir_segments = {
         seg for seg in parts[:-1] if seg and seg not in _IGNORED_PROXIMITY_SEGMENTS
     }
