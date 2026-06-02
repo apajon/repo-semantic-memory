@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+from repo_semantic_memory.extractors.git_history import GitRepositorySummary
 from repo_semantic_memory.index_status import (
     IndexStatus,
     IndexStatusReason,
@@ -76,10 +77,8 @@ def _staleness_meta(
     }
 
 
-def _fresh_git(repo_path: str) -> object:
+def _fresh_git(repo_path: str) -> GitRepositorySummary:
     """Return a GitRepositorySummary matching the default _staleness_meta git_head."""
-    from repo_semantic_memory.extractors.git_history import GitRepositorySummary  # noqa: PLC0415
-
     return GitRepositorySummary(
         path=repo_path,
         in_git_repo=True,
