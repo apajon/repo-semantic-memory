@@ -84,11 +84,10 @@ def test_multiple_intents_can_fire() -> None:
     assert "implementation" in intent.intents
 
 
-def test_no_intent_for_pure_domain_query() -> None:
-    """A pure domain query with no intent-matching tokens returns empty intents."""
+def test_pure_domain_query_triggers_architecture_flow() -> None:
+    """Tokens like 'handler' and 'dispatch' trigger the architecture_flow intent."""
     intent = parse_query_intent("url resolver handler dispatch")
-    # None of the intent-trigger tokens are present; intents should be empty
-    # EXCEPT that "handler"/"dispatch" trigger architecture_flow.
+    # "handler" and "dispatch" are architecture-flow signal tokens.
     assert "architecture_flow" in intent.intents
 
 
@@ -147,9 +146,10 @@ def test_code_is_downweighted() -> None:
     assert "code" not in intent.lexical_tokens
 
 
-def test_work_and_works_are_downweighted() -> None:
+def test_works_is_downweighted() -> None:
+    # tokenize_text produces "works" (not "work") for this input
     intent = parse_query_intent("Find how plugin loading works and how it works")
-    assert "works" in intent.downweighted_tokens or "work" in intent.downweighted_tokens
+    assert "works" in intent.downweighted_tokens
     assert "works" not in intent.lexical_tokens
 
 

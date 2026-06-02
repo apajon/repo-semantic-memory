@@ -204,8 +204,9 @@ class QueryIntent:
         intents: Set of detected intent labels for this task.  Possible values:
             ``tests``, ``public_api``, ``implementation``, ``config_build_release``,
             ``error_handling``, ``architecture_flow``.
-        domain_tokens: Meaningful tokens extracted after removing generic phrases.
-            These are used for intent detection and could also be used for logging.
+        domain_tokens: All raw tokens that survived generic-token filtering, including
+            intent-only tokens (e.g. ``test``) that contribute to intent detection but are
+            excluded from ``lexical_tokens``.  Useful for logging and intent-detection context.
         downweighted_tokens: Generic tokens that were removed from lexical scoring.
         lexical_tokens: Filtered tokens suitable for BM25 entity scoring.
             Generic task-phrasing words and intent-only tokens are excluded so
