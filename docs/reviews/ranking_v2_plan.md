@@ -58,9 +58,18 @@
 > integration tests added in `tests/context/test_support_expansion.py`. Non-goals still deferred:
 > selection reasons (58.5), regression eval (58.6).
 
----
+> **58.5 — Selection reasons in context pack: ✅ implemented.**
+> Added `src/repo_semantic_memory/context/selection_reasons.py` with a 15-code closed vocabulary
+> (`SELECTION_REASON_CODES`), a `SelectionReason` frozen dataclass (validated `code` + optional
+> `detail`, `to_dict()` serialization), `dedupe_selection_reasons()`, `classify_reason_string()`,
+> and `build_selection_reasons()`. `ContextPack` gains a new `selection_reasons` field (always
+> computed, not gated on `include_compact_reasons`). `pack_builder.build_context_pack` maps
+> `score_capped_reasons_by_key` for all included entities/relations through
+> `build_selection_reasons` and stores the result in the pack. All 15 reason codes exported from
+> `context/__init__.py`. 50 unit and integration tests added in
+> `tests/context/test_selection_reasons.py`. Non-goals still deferred: regression eval (58.6).
 
-## 1. Executive summary
+
 
 ### Why current ranking fails
 
@@ -437,15 +446,13 @@ implementation model: Claude Sonnet 4.6.
   fixtures for Django URL routing, Ansible plugin loading, and HTTPX public API scenarios.
 - **Non-goals still deferred:** selection reasons (58.5), regression eval (58.6).
 
-### 58.5 — Selection reasons in context pack
+### 58.5 — Selection reasons in context pack ✅ implemented
 - **Goal:** Emit closed-vocabulary, machine-readable reasons per selected file (central/support/test/
   intent), reusing existing reason plumbing.
-- **Files likely touched:** `context/ranking.py`, `context/pack_builder.py`,
-  `context/context_pack.py`, `context/render_markdown.py`.
-- **Tests:** reason-vocabulary tests; determinism/order-stability tests.
-- **Risks:** reason inflation increasing char cost/budget pressure. Keep reasons deduped and capped per
-  item (existing `_cap_reasons_per_item`).
-- **Validation:** unit tests + golden pack snapshots.
+- **Files touched:** `context/selection_reasons.py` (new), `context/pack_builder.py`,
+  `context/context_pack.py`, `context/__init__.py`.
+- **Tests:** 50 unit and integration tests in `tests/context/test_selection_reasons.py`.
+- **Non-goals still deferred:** regression eval (58.6).
 
 ### 58.6 — Regression eval on Django / Ansible / Typer
 - **Goal:** Validate end-to-end improvements against §11 targets without hardcoding answers.

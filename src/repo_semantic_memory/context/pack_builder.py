@@ -44,6 +44,7 @@ from repo_semantic_memory.context.ranking import (
     build_breakdown,
     dedupe_stable,
 )
+from repo_semantic_memory.context.selection_reasons import build_selection_reasons
 from repo_semantic_memory.context.support_expansion import select_support_files
 from repo_semantic_memory.context.test_branch import select_test_branch
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
@@ -443,17 +444,26 @@ def build_context_pack(
         profile=resolved_profile,
     )
     include_compact_reasons = explain_ranking or resolved_profile.include_compact_score_reasons
+    included_keys = {
+        *(entity.id.value for entity in budgeted_entities),
+        *(relation_key(relation) for relation in budgeted_relations),
+    }
     why_selected = {}
     if include_compact_reasons:
-        included_reason_keys = {
-            *(entity.id.value for entity in budgeted_entities),
-            *(relation_key(relation) for relation in budgeted_relations),
-        }
-        for key in sorted(included_reason_keys):
+        for key in sorted(included_keys):
             reasons = score_capped_reasons_by_key.get(key, ())
             if not reasons:
                 continue
             why_selected[key] = reasons
+    # Always compute structured machine-readable selection reasons for all
+    # included entities and relations (Ranking v2 — Prompt 58.5).
+    selection_reasons = build_selection_reasons(
+        {
+            key: score_capped_reasons_by_key[key]
+            for key in sorted(included_keys)
+            if score_capped_reasons_by_key.get(key)
+        }
+    )
     include_ranking_breakdown = explain_ranking or resolved_profile.include_ranking_breakdown
     budgeted_breakdowns = _select_ranking_breakdowns(
         budgeted_entities=budgeted_entities,
@@ -475,6 +485,7 @@ def build_context_pack(
         suggested_files_to_inspect=tuple(suggested_files),
         forbidden_assumptions=_FORBIDDEN_ASSUMPTIONS,
         truncated=truncated,
+        selection_reasons=selection_reasons,
     )
 
 
