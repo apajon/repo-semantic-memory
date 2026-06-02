@@ -11,6 +11,7 @@ from pathlib import Path
 
 from repo_semantic_memory.context.path_roles import is_generated_artifact_path
 from repo_semantic_memory.extractors.filesystem import (
+    ScopeFilter,
     _build_entity,
     _is_binary_looking,
     _should_ignore_directory_name,
@@ -47,6 +48,7 @@ def extract_markdown_outline_path(
     repo_root: Path | str,
     *,
     progress: Callable[[int, int], None] | None = None,
+    scope_filter: ScopeFilter | None = None,
 ) -> MarkdownOutline:
     """Extract Markdown file and heading section entities from a file or directory."""
     target = Path(repo_root).resolve()
@@ -63,7 +65,7 @@ def extract_markdown_outline_path(
         return MarkdownOutline(entities=tuple(file_entities), relations=tuple(file_relations))
 
     root = target
-    markdown_files = _iter_markdown_files(root)
+    markdown_files = _iter_markdown_files(root, scope_filter=scope_filter)
     total = len(markdown_files)
     entities: list[Entity] = []
     relations: list[Relation] = []
@@ -107,24 +109,35 @@ def extract_markdown_file(
     return [doc_entity, *section_entities], relations
 
 
-def _iter_markdown_files(root: Path) -> list[Path]:
+def _iter_markdown_files(root: Path, *, scope_filter: ScopeFilter | None = None) -> list[Path]:
     discovered: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
         current_dir = Path(dirpath)
+        rel_current = current_dir.relative_to(root).as_posix()
+        if rel_current == ".":
+            rel_current = ""
         dirnames[:] = sorted(
             name
             for name in dirnames
             if not _should_ignore_directory_name(name)
             and not _should_ignore_directory_path(current_dir / name, root)
+            and (
+                scope_filter is None
+                or scope_filter.should_descend_directory(
+                    name if not rel_current else f"{rel_current}/{name}"
+                )
+            )
         )
         for filename in sorted(filenames):
             file_path = Path(dirpath) / filename
-            if file_path.suffix.lower() in _MARKDOWN_EXTENSIONS:
-                relative_path = file_path.relative_to(root).as_posix()
-                if not is_generated_artifact_path(relative_path) and not _is_binary_looking(
-                    file_path
-                ):
-                    discovered.append(file_path)
+            if file_path.suffix.lower() not in _MARKDOWN_EXTENSIONS:
+                continue
+            relative_path = file_path.relative_to(root).as_posix()
+            if is_generated_artifact_path(relative_path) or _is_binary_looking(file_path):
+                continue
+            if scope_filter is not None and not scope_filter.should_index_file(relative_path):
+                continue
+            discovered.append(file_path)
     return discovered
 
 

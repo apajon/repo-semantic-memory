@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+from repo_semantic_memory.extractors.git_history import GitRepositorySummary
 from repo_semantic_memory.index_status import (
     IndexStatus,
     IndexStatusReason,
@@ -74,6 +75,18 @@ def _staleness_meta(
         "relation_count": relation_count,
         "context_pack_version": context_pack_version or CONTEXT_PACK_VERSION,
     }
+
+
+def _fresh_git(repo_path: str) -> GitRepositorySummary:
+    """Return a GitRepositorySummary matching the default _staleness_meta git_head."""
+    return GitRepositorySummary(
+        path=repo_path,
+        in_git_repo=True,
+        repository_root=repo_path,
+        current_commit="abc123",
+        is_dirty=False,
+        tracked_file_count=1,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -663,3 +676,296 @@ def test_index_command_writes_staleness_metadata(
     assert meta["context_pack_version"] == CONTEXT_PACK_VERSION
     # git_head may be present or empty depending on CI environment
     assert "git_head" in meta
+
+
+# ---------------------------------------------------------------------------
+# Scope metadata persistence (Prompt 57.5)
+# ---------------------------------------------------------------------------
+
+
+def test_index_command_writes_scope_full(tmp_path: Path) -> None:
+    """rsm index without --include/--exclude writes index_scope=full and empty pattern lists."""
+    from repo_semantic_memory.cli import main
+
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db = tmp_path / "index.sqlite"
+
+    code = main(["index", str(fixture_root), "--db", str(db)])
+    assert code == 0
+
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        meta = store.get_metadata()
+    finally:
+        store.close()
+
+    assert meta.get("index_scope") == "full"
+    assert meta.get("include_patterns") == "[]"
+    assert meta.get("exclude_patterns") == "[]"
+
+
+def test_index_command_writes_scope_scoped_with_include(tmp_path: Path) -> None:
+    """rsm index --include writes index_scope=scoped and the include patterns list."""
+    import json
+
+    from repo_semantic_memory.cli import main
+
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db = tmp_path / "index.sqlite"
+
+    code = main(["index", str(fixture_root), "--db", str(db), "--include", "src/**"])
+    assert code == 0
+
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        meta = store.get_metadata()
+    finally:
+        store.close()
+
+    assert meta.get("index_scope") == "scoped"
+    assert json.loads(meta["include_patterns"]) == ["src/**"]
+    assert json.loads(meta["exclude_patterns"]) == []
+
+
+def test_index_command_writes_scope_scoped_with_exclude(tmp_path: Path) -> None:
+    """rsm index --exclude writes index_scope=scoped and the exclude patterns list."""
+    import json
+
+    from repo_semantic_memory.cli import main
+
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db = tmp_path / "index.sqlite"
+
+    code = main(["index", str(fixture_root), "--db", str(db), "--exclude", "docs/**"])
+    assert code == 0
+
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        meta = store.get_metadata()
+    finally:
+        store.close()
+
+    assert meta.get("index_scope") == "scoped"
+    assert json.loads(meta["include_patterns"]) == []
+    assert json.loads(meta["exclude_patterns"]) == ["docs/**"]
+
+
+def test_index_command_preserves_pattern_order(tmp_path: Path) -> None:
+    """Scope patterns are stored in user-provided order, not sorted."""
+    import json
+
+    from repo_semantic_memory.cli import main
+
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db = tmp_path / "index.sqlite"
+
+    code = main(
+        [
+            "index",
+            str(fixture_root),
+            "--db",
+            str(db),
+            "--include",
+            "src/**",
+            "--include",
+            "docs/**",
+        ]
+    )
+    assert code == 0
+
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        meta = store.get_metadata()
+    finally:
+        store.close()
+
+    assert json.loads(meta["include_patterns"]) == ["src/**", "docs/**"]
+
+
+def test_detect_stale_from_metadata_carries_scope_fields(tmp_path: Path) -> None:
+    """detect_stale_from_metadata exposes scope fields from metadata."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    db = tmp_path / "index.sqlite"
+    _make_db(
+        db,
+        repo,
+        extra_metadata={
+            **_staleness_meta(),
+            "index_scope": "scoped",
+            "include_patterns": '["src/**"]',
+            "exclude_patterns": '["tests/**"]',
+        },
+    )
+
+    with mock.patch(
+        "repo_semantic_memory.index_status.get_git_repository_summary",
+        return_value=_fresh_git(str(repo)),
+    ):
+        report = detect_stale_from_metadata(
+            repo_root=repo,
+            db_path=db,
+            index_mode="explicit_db",
+            metadata={
+                **_staleness_meta(),
+                "index_scope": "scoped",
+                "include_patterns": '["src/**"]',
+                "exclude_patterns": '["tests/**"]',
+            },
+        )
+
+    assert report.index_scope == "scoped"
+    assert report.include_patterns == ("src/**",)
+    assert report.exclude_patterns == ("tests/**",)
+
+
+def test_detect_stale_from_metadata_scope_full(tmp_path: Path) -> None:
+    """An index built without --include/--exclude has index_scope=full."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with mock.patch(
+        "repo_semantic_memory.index_status.get_git_repository_summary",
+        return_value=_fresh_git(str(repo)),
+    ):
+        report = detect_stale_from_metadata(
+            repo_root=repo,
+            db_path=tmp_path / "index.sqlite",
+            index_mode="explicit_db",
+            metadata={
+                **_staleness_meta(),
+                "index_scope": "full",
+                "include_patterns": "[]",
+                "exclude_patterns": "[]",
+            },
+        )
+
+    assert report.index_scope == "full"
+    assert report.include_patterns == ()
+    assert report.exclude_patterns == ()
+
+
+def test_detect_stale_from_metadata_scope_missing_is_none(tmp_path: Path) -> None:
+    """Old indexes without scope metadata have index_scope=None and empty tuples."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    with mock.patch(
+        "repo_semantic_memory.index_status.get_git_repository_summary",
+        return_value=_fresh_git(str(repo)),
+    ):
+        report = detect_stale_from_metadata(
+            repo_root=repo,
+            db_path=tmp_path / "index.sqlite",
+            index_mode="explicit_db",
+            metadata=_staleness_meta(),
+        )
+
+    assert report.index_scope is None
+    assert report.include_patterns == ()
+    assert report.exclude_patterns == ()
+
+
+def test_store_status_command_shows_scope_full(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """rsm store status shows 'Scope: full' for a full index."""
+    from repo_semantic_memory.cli import main
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    db = tmp_path / "index.sqlite"
+    _make_db(
+        db,
+        repo,
+        extra_metadata={
+            **_staleness_meta(),
+            "index_scope": "full",
+            "include_patterns": "[]",
+            "exclude_patterns": "[]",
+        },
+    )
+
+    with mock.patch(
+        "repo_semantic_memory.index_status.get_git_repository_summary",
+        return_value=_fresh_git(str(repo)),
+    ):
+        code = main(["store", "status", str(repo), "--db", str(db)])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Scope:  full" in out
+
+
+def test_store_status_command_shows_scope_scoped(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """rsm store status shows scope details for a scoped index."""
+    from repo_semantic_memory.cli import main
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    db = tmp_path / "index.sqlite"
+    _make_db(
+        db,
+        repo,
+        extra_metadata={
+            **_staleness_meta(),
+            "index_scope": "scoped",
+            "include_patterns": '["src/**"]',
+            "exclude_patterns": '["tests/**"]',
+        },
+    )
+
+    with mock.patch(
+        "repo_semantic_memory.index_status.get_git_repository_summary",
+        return_value=_fresh_git(str(repo)),
+    ):
+        code = main(["store", "status", str(repo), "--db", str(db)])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Scope:  scoped" in out
+    assert "Includes:" in out
+    assert "- src/**" in out
+    assert "Excludes:" in out
+    assert "- tests/**" in out
+
+
+def test_store_status_command_json_includes_scope(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """rsm store status --json includes index_scope, include_patterns, exclude_patterns."""
+    import json
+
+    from repo_semantic_memory.cli import main
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    db = tmp_path / "index.sqlite"
+    _make_db(
+        db,
+        repo,
+        extra_metadata={
+            **_staleness_meta(),
+            "index_scope": "scoped",
+            "include_patterns": '["src/**"]',
+            "exclude_patterns": "[]",
+        },
+    )
+
+    with mock.patch(
+        "repo_semantic_memory.index_status.get_git_repository_summary",
+        return_value=_fresh_git(str(repo)),
+    ):
+        code = main(["store", "status", str(repo), "--db", str(db), "--json"])
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["index_scope"] == "scoped"
+    assert payload["include_patterns"] == ["src/**"]
+    assert payload["exclude_patterns"] == []

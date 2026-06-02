@@ -33,6 +33,7 @@ from repo_semantic_memory.eval import (
 )
 from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_directory
 from repo_semantic_memory.extractors import (
+    ScopeFilter,
     extract_filesystem_entities,
     extract_markdown_outline_path,
     extract_test_relationships,
@@ -42,6 +43,7 @@ from repo_semantic_memory.extractors import (
 )
 from repo_semantic_memory.importers import import_jsonl_directory
 from repo_semantic_memory.indexing import IncrementalFallbackReason
+from repo_semantic_memory.indexing.profiler import IndexProfiler, _AnyProfiler, _NullProfiler
 from repo_semantic_memory.memory import (
     attach_git_metadata_to_entities,
     export_invariants_yaml,
@@ -112,6 +114,47 @@ def build_parser() -> argparse.ArgumentParser:
             "Attempt an incremental index update using local Git signals. "
             "Falls back to a full rebuild if incremental safety cannot be proven. "
             "Full rebuild is the default."
+        ),
+    )
+    index_parser.add_argument(
+        "--profile",
+        action="store_true",
+        help=(
+            "Emit a per-phase timing summary to stderr after indexing completes. "
+            "Observational only: does not change indexing behavior or output."
+        ),
+    )
+    index_parser.add_argument(
+        "--profile-report",
+        metavar="PATH",
+        default=None,
+        help=(
+            "Write a machine-readable JSON profiling report to PATH. "
+            "Implies --profile. Observational only: does not change indexing behavior or output."
+        ),
+    )
+    index_parser.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        dest="include",
+        help=(
+            "Limit indexing to files matching this glob pattern (repository-relative). "
+            "May be repeated. Excludes are applied first. "
+            "Example: --include 'src/**' --include 'tests/**'"
+        ),
+    )
+    index_parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        dest="exclude",
+        help=(
+            "Skip files matching this glob pattern (repository-relative). "
+            "May be repeated. Excludes take precedence over includes. "
+            "Example: --exclude 'docs/**'"
         ),
     )
 
@@ -551,10 +594,33 @@ def _format_version_output() -> str:
     )
 
 
+def _build_index_plan_parser() -> argparse.ArgumentParser:
+    """Create the parser for the ``rsm index plan`` advisory subcommand."""
+    parser = argparse.ArgumentParser(
+        prog=f"{DEFAULT_CONFIG.cli_name} index plan",
+        description=(
+            "Advisory scope planner. Inspect a repository cheaply and recommend "
+            "a safe indexing scope. Does not create or modify an index."
+        ),
+    )
+    parser.add_argument("path", help="Repository root path to inspect.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the scope plan as deterministic JSON.",
+    )
+    return parser
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return an exit code."""
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv[:2] == ["index", "plan"]:
+        plan_args = _build_index_plan_parser().parse_args(raw_argv[2:])
+        return _run_index_plan_command(path=plan_args.path, emit_json=plan_args.json)
+
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(raw_argv)
 
     if args.command == "version":
         print(_format_version_output())
@@ -599,6 +665,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             with_git=args.with_git,
             register=args.register,
             incremental=args.incremental,
+            profile=args.profile or bool(args.profile_report),
+            profile_report=args.profile_report,
+            includes=args.include or [],
+            excludes=args.exclude or [],
         )
     if args.command == "git":
         if args.git_target == "summary":
@@ -736,8 +806,41 @@ def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence
     return f"entities={len(entities)} relations={len(relations)}"
 
 
+def _run_index_plan_command(*, path: str, emit_json: bool) -> int:
+    """Run the advisory ``rsm index plan`` command.
+
+    Inspects the repository cheaply and prints a recommended scope.  Never
+    creates or modifies an index.
+    """
+    from repo_semantic_memory.indexing.scope_planner import (
+        format_scope_plan,
+        plan_index_scope,
+    )
+
+    try:
+        plan = plan_index_scope(path)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    if emit_json:
+        print(json.dumps(plan.to_json_dict(), indent=2))
+        return 0
+    print(format_scope_plan(plan))
+    return 0
+
+
 def _run_index_command(
-    *, path: str, db: str, with_git: bool, register: bool = False, incremental: bool = False
+    *,
+    path: str,
+    db: str,
+    with_git: bool,
+    register: bool = False,
+    incremental: bool = False,
+    profile: bool = False,
+    profile_report: str | None = None,
+    includes: list[str] | None = None,
+    excludes: list[str] | None = None,
 ) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
@@ -751,7 +854,9 @@ def _run_index_command(
                 file=sys.stderr,
             )
         elif db_path.exists():
-            result = _attempt_incremental_index(repository_root, db_path, with_git=with_git)
+            result = _attempt_incremental_index(
+                repository_root, db_path, with_git=with_git, includes=includes, excludes=excludes
+            )
             if result is not None:
                 if register:
                     _do_register(repository_root, db_path)
@@ -768,9 +873,21 @@ def _run_index_command(
                 f"info: incremental index fallback: {_reason}; running full rebuild",
                 file=sys.stderr,
             )
+    profiler: _AnyProfiler = IndexProfiler() if profile else _NullProfiler()
+    # Build a ScopeFilter only when at least one pattern is present. Empty
+    # lists are falsy, so ``includes or excludes`` is False when both are
+    # empty/None — preserving the zero-overhead passthrough path.
+    scope_filter: ScopeFilter | None = (
+        ScopeFilter(includes or [], excludes or []) if includes or excludes else None
+    )
+
     _index_start = time.monotonic()
+    _started_at = datetime.now(tz=UTC).isoformat()
     print("indexing: scanning files...", file=sys.stderr)
-    filesystem_entities = extract_filesystem_entities(repository_root)
+    with profiler.phase("file_discovery") as _ph_discovery:
+        filesystem_entities = extract_filesystem_entities(
+            repository_root, scope_filter=scope_filter
+        )
 
     # Compute per-type counts for the scan summary and progress callbacks.
     python_count = sum(1 for e in filesystem_entities if e.kind == "module")
@@ -783,6 +900,8 @@ def _run_index_command(
         1 for e in filesystem_entities if e.kind == "module" and e.name == "__init__.py"
     )
     other_count = len(filesystem_entities) - python_count - md_count
+    _ph_discovery.files_processed = len(filesystem_entities)
+    _ph_discovery.entities_created = len(filesystem_entities)
     print(
         f"indexing: discovered files: python={python_count} markdown={md_count}"
         f" other={other_count} total={len(filesystem_entities)}",
@@ -793,9 +912,15 @@ def _run_index_command(
 
     print("indexing: extracting Markdown...", file=sys.stderr)
     _t = time.monotonic()
-    markdown_outline = extract_markdown_outline_path(
-        repository_root, progress=_make_progress_callback("Markdown")
-    )
+    with profiler.phase("markdown_extraction") as _ph_md:
+        markdown_outline = extract_markdown_outline_path(
+            repository_root,
+            progress=_make_progress_callback("Markdown"),
+            scope_filter=scope_filter,
+        )
+    _ph_md.files_processed = md_count
+    _ph_md.entities_created = len(markdown_outline.entities)
+    _ph_md.relations_created = len(markdown_outline.relations)
     print(
         f"indexing: Markdown complete: {md_count}/{md_count} files,"
         f" elapsed={time.monotonic() - _t:.1f}s",
@@ -804,9 +929,15 @@ def _run_index_command(
 
     print("indexing: parsing Python...", file=sys.stderr)
     _t = time.monotonic()
-    python_entities, python_relations = index_python_path(
-        repository_root, progress=_make_progress_callback("Python")
-    )
+    with profiler.phase("python_ast") as _ph_py:
+        python_entities, python_relations = index_python_path(
+            repository_root,
+            progress=_make_progress_callback("Python"),
+            scope_filter=scope_filter,
+        )
+    _ph_py.files_processed = python_count
+    _ph_py.entities_created = len(python_entities)
+    _ph_py.relations_created = len(python_relations)
     print(
         f"indexing: Python complete: {python_count}/{python_count} files,"
         f" elapsed={time.monotonic() - _t:.1f}s",
@@ -815,9 +946,14 @@ def _run_index_command(
 
     print("indexing: extracting exports...", file=sys.stderr)
     _t = time.monotonic()
-    export_relations = index_python_exports(
-        repository_root, progress=_make_progress_callback("exports")
-    )
+    with profiler.phase("exports_extraction") as _ph_exp:
+        export_relations = index_python_exports(
+            repository_root,
+            progress=_make_progress_callback("exports"),
+            scope_filter=scope_filter,
+        )
+    _ph_exp.files_processed = init_count
+    _ph_exp.relations_created = len(export_relations)
     print(
         f"indexing: exports complete: {init_count}/{init_count} files,"
         f" elapsed={time.monotonic() - _t:.1f}s",
@@ -834,11 +970,13 @@ def _run_index_command(
         file=sys.stderr,
     )
     _t = time.monotonic()
-    test_relations = extract_test_relationships(
-        repository_root,
-        all_entities,
-        all_relations,
-    )
+    with profiler.phase("test_relationships") as _ph_test:
+        test_relations = extract_test_relationships(
+            repository_root,
+            all_entities,
+            all_relations,
+        )
+    _ph_test.relations_created = len(test_relations)
     all_relations = [*all_relations, *test_relations]
     print(
         f"indexing: test relationships complete:"
@@ -853,12 +991,14 @@ def _run_index_command(
 
     git_status = "disabled"
     if with_git:
-        temporal_result = attach_git_metadata_to_entities(
-            all_entities,
-            repository_root=repository_root,
-            summary=git_summary,
-        )
+        with profiler.phase("git_metadata") as _ph_git:
+            temporal_result = attach_git_metadata_to_entities(
+                all_entities,
+                repository_root=repository_root,
+                summary=git_summary,
+            )
         all_entities = temporal_result.entities
+        _ph_git.entities_created = len(all_entities)
         git_status = temporal_result.status
         if temporal_result.warning:
             print(f"git metadata: {temporal_result.warning}", file=sys.stderr)
@@ -902,13 +1042,27 @@ def _run_index_command(
         extra_meta["git_head"] = ""
         extra_meta["git_dirty"] = ""
 
+    # Scope metadata — always written so consumers can distinguish full vs scoped indexes.
+    if includes or excludes:
+        extra_meta["index_scope"] = "scoped"
+        extra_meta["include_patterns"] = json.dumps(includes or [])
+        extra_meta["exclude_patterns"] = json.dumps(excludes or [])
+    else:
+        extra_meta["index_scope"] = "full"
+        extra_meta["include_patterns"] = "[]"
+        extra_meta["exclude_patterns"] = "[]"
+
     store = SQLiteStore(db_path)
     print("indexing: writing index...", file=sys.stderr)
     _t = time.monotonic()
     try:
         store.initialize()
-        store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
-        store.write_extra_metadata(extra_meta)
+        with profiler.phase("sqlite_persist") as _ph_sqlite:
+            store.persist_index(entities=all_entities, relations=all_relations, metadata=metadata)
+        _ph_sqlite.entities_created = len(all_entities)
+        _ph_sqlite.relations_created = len(all_relations)
+        with profiler.phase("metadata_write"):
+            store.write_extra_metadata(extra_meta)
     finally:
         store.close()
     print(
@@ -929,6 +1083,25 @@ def _run_index_command(
         f" elapsed={time.monotonic() - _index_start:.1f}s",
         file=sys.stderr,
     )
+    if profile:
+        print(profiler.format_summary(), file=sys.stderr)
+    if profile_report:
+        _completed_at = datetime.now(tz=UTC).isoformat()
+        report_path = Path(profile_report)
+        try:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report = profiler.to_json_report(
+                repo_root=str(repository_root),
+                started_at=_started_at,
+                completed_at=_completed_at,
+            )
+            report_path.write_text(json.dumps(report, indent=2))
+        except OSError as exc:
+            print(
+                f"error: could not write profile report to {profile_report!r}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
     if with_git:
         print(
             f"entities={len(all_entities)} relations={len(all_relations)} git_metadata={git_status}"
@@ -999,17 +1172,55 @@ def _make_python_progress_callback() -> Callable[[int, int], None]:
     return _make_progress_callback("Python")
 
 
+def _scope_matches_metadata(
+    meta: dict[str, str],
+    includes: list[str] | None,
+    excludes: list[str] | None,
+) -> bool:
+    """Return ``True`` when the stored scope matches the requested scope.
+
+    A stored scope of ``None`` (old index built before 57.5) is treated as
+    ``"full"`` so that legacy indexes remain compatible with full incremental
+    runs.
+    """
+    stored_scope = meta.get("index_scope") or "full"
+    req_includes = sorted(includes or [])
+    req_excludes = sorted(excludes or [])
+    requested_scope = "scoped" if (req_includes or req_excludes) else "full"
+
+    if stored_scope != requested_scope:
+        return False
+
+    if requested_scope == "scoped":
+        try:
+            stored_includes = sorted(json.loads(meta.get("include_patterns", "[]")))
+            stored_excludes = sorted(json.loads(meta.get("exclude_patterns", "[]")))
+        except (json.JSONDecodeError, TypeError):
+            return False  # malformed stored patterns → treat as mismatch
+
+        return stored_includes == req_includes and stored_excludes == req_excludes
+
+    return True  # both "full"
+
+
 def _attempt_incremental_index(
     repo_root: Path,
     db_path: Path,
     *,
     with_git: bool,
+    includes: list[str] | None = None,
+    excludes: list[str] | None = None,
 ) -> IncrementalResult | None:
     """Try an incremental index update.
 
     Returns an :class:`~repo_semantic_memory.indexing.executor.IncrementalResult`
     on success, or ``None`` when the planner rejects or the executor raises
     (in both cases a fallback message is printed to stderr).
+
+    When the requested scope (``includes``/``excludes``) differs from the scope
+    stored in the existing index metadata, the function falls back immediately
+    with reason :attr:`~repo_semantic_memory.indexing.incremental
+    .IncrementalFallbackReason.SCOPE_MISMATCH`.
     """
     from repo_semantic_memory.indexing import plan_incremental_update
     from repo_semantic_memory.indexing.executor import run_incremental_index
@@ -1021,6 +1232,16 @@ def _attempt_incremental_index(
         meta = store.get_metadata()
     finally:
         store.close()
+
+    # Scope mismatch check — must precede Git planning so that a full rebuild
+    # rewrites scope metadata correctly rather than proceeding with a stale scope.
+    if not _scope_matches_metadata(meta, includes, excludes):
+        print(
+            f"info: incremental index fallback: {IncrementalFallbackReason.SCOPE_MISMATCH};"
+            " running full rebuild",
+            file=sys.stderr,
+        )
+        return None
 
     indexed_head = meta.get("git_head") or None
     plan = plan_incremental_update(
@@ -1598,6 +1819,9 @@ def _run_store_status_command(*, repo: str, db: str | None, emit_json: bool) -> 
             "schema_version": report.schema_version,
             "context_pack_version": report.context_pack_version,
             "suggested_action": report.suggested_action,
+            "index_scope": report.index_scope,
+            "include_patterns": list(report.include_patterns),
+            "exclude_patterns": list(report.exclude_patterns),
         }
         print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
         return 0
@@ -1608,6 +1832,17 @@ def _run_store_status_command(*, repo: str, db: str | None, emit_json: bool) -> 
     print(f"Index:  {db_display}")
     print(f"Mode:   {report.index_mode}")
     print(f"Status: {report.index_status.value}")
+    if report.index_scope:
+        print(f"Scope:  {report.index_scope}")
+        if report.index_scope == "scoped":
+            if report.include_patterns:
+                print("Includes:")
+                for pat in report.include_patterns:
+                    print(f"  - {pat}")
+            if report.exclude_patterns:
+                print("Excludes:")
+                for pat in report.exclude_patterns:
+                    print(f"  - {pat}")
     if report.indexed_at:
         print(f"Indexed at: {report.indexed_at}")
     if report.indexed_git_head:

@@ -1045,3 +1045,297 @@ def test_markdown_progress_callback_silent_below_threshold(
         cb(i, total)
 
     assert capsys.readouterr().err == ""
+
+
+# ---------------------------------------------------------------------------
+# --profile flag (Prompt 57.1)
+# ---------------------------------------------------------------------------
+
+_FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+
+
+def test_index_profile_writes_to_stderr(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """rsm index --profile must write the profiling summary to stderr."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile"])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing profile:" in err
+
+
+def test_index_profile_contains_phase_names(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The profiling summary must include all expected phase rows."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile"])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    for phase in (
+        "file_discovery",
+        "markdown_extraction",
+        "python_ast",
+        "exports_extraction",
+        "test_relationships",
+        "sqlite_persist",
+        "metadata_write",
+    ):
+        assert phase in err, f"Expected phase '{phase}' in profiling output"
+
+
+def test_index_profile_stdout_unchanged(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """--profile must not add or remove anything from stdout."""
+    db_path_no_profile = tmp_path / "no_profile" / "index.sqlite"
+    db_path_profile = tmp_path / "profile" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path_no_profile)])
+    out_no_profile = capsys.readouterr().out
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path_profile), "--profile"])
+    out_profile = capsys.readouterr().out
+
+    assert out_profile == out_no_profile
+
+
+def test_index_no_profile_flag_omits_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without --profile, the profiling summary must not appear on stderr."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    exit_code = main(["index", str(_FIXTURE_ROOT), "--db", str(db_path)])
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "indexing profile:" not in err
+
+
+def test_index_profile_db_output_identical_with_and_without(
+    tmp_path: Path,
+) -> None:
+    """The DB entity/relation counts must be the same with or without --profile."""
+    import sqlite3
+
+    db_no_profile = tmp_path / "no_profile" / "index.sqlite"
+    db_profile = tmp_path / "profile" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_no_profile)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_profile), "--profile"])
+
+    def _get_db_counts(db: Path) -> tuple[int, int]:
+        with sqlite3.connect(db) as conn:
+            (entities,) = conn.execute("SELECT COUNT(*) FROM entities").fetchone()
+            (relations,) = conn.execute("SELECT COUNT(*) FROM relations").fetchone()
+        return int(entities), int(relations)
+
+    assert _get_db_counts(db_no_profile) == _get_db_counts(db_profile)
+
+
+# ---------------------------------------------------------------------------
+# --profile-report flag (Prompt 57.2)
+# ---------------------------------------------------------------------------
+
+
+def test_index_profile_report_writes_json_file(tmp_path: Path) -> None:
+    """--profile-report must write a JSON file to the given path."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    exit_code = main(
+        ["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)]
+    )
+    assert exit_code == 0
+    assert report_path.exists(), "profile report file was not created"
+    report = json.loads(report_path.read_text())
+    assert isinstance(report, dict)
+
+
+def test_index_profile_report_top_level_keys(tmp_path: Path) -> None:
+    """JSON report must contain all required top-level keys."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)])
+    report = json.loads(report_path.read_text())
+    for key in (
+        "schema_version",
+        "repo_root",
+        "started_at",
+        "completed_at",
+        "total_elapsed_seconds",
+        "phases",
+        "summary",
+        "diagnostics",
+    ):
+        assert key in report, f"Missing key: {key!r}"
+
+
+def test_index_profile_report_phases_ordered(tmp_path: Path) -> None:
+    """Phases in the JSON report must be in insertion (pipeline) order."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)])
+    report = json.loads(report_path.read_text())
+    names = [p["name"] for p in report["phases"]]
+    # file_discovery must come before python_ast which comes before sqlite_persist
+    assert names.index("file_discovery") < names.index("python_ast")
+    assert names.index("python_ast") < names.index("sqlite_persist")
+
+
+def test_index_profile_report_no_stdout_pollution(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--profile-report must not write anything to stdout."""
+    db_path_no_report = tmp_path / "no_report" / "index.sqlite"
+    db_path_report = tmp_path / "report" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path_no_report)])
+    out_no_report = capsys.readouterr().out
+
+    main(
+        [
+            "index",
+            str(_FIXTURE_ROOT),
+            "--db",
+            str(db_path_report),
+            "--profile-report",
+            str(report_path),
+        ]
+    )
+    out_report = capsys.readouterr().out
+
+    assert out_report == out_no_report
+
+
+def test_index_profile_report_absent_without_flag(tmp_path: Path) -> None:
+    """JSON report file must not be created when --profile-report is absent."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path)])
+    assert not report_path.exists(), "report file should not exist without --profile-report"
+
+
+def test_index_profile_report_implies_profile_stderr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--profile-report implies --profile: summary must appear on stderr."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    exit_code = main(
+        ["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)]
+    )
+    assert exit_code == 0
+    err = capsys.readouterr().err
+    assert "indexing profile:" in err
+
+
+def test_index_profile_report_elapsed_fields_present(tmp_path: Path) -> None:
+    """Each phase entry in the JSON report must include elapsed_seconds."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    report_path = tmp_path / "profile.json"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--profile-report", str(report_path)])
+    report = json.loads(report_path.read_text())
+    for phase in report["phases"]:
+        assert "elapsed_seconds" in phase, f"Phase {phase['name']!r} missing elapsed_seconds"
+
+
+# ---------------------------------------------------------------------------
+# --include / --exclude scoped indexing (Prompt 57.4)
+# ---------------------------------------------------------------------------
+
+
+def _db_entity_names(db: Path) -> set[str]:
+    """Return all qualified_name values from the entities table of an indexed DB."""
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute("SELECT qualified_name FROM entities").fetchall()
+    return {row[0] for row in rows}
+
+
+def test_index_include_reduces_entities(tmp_path: Path) -> None:
+    """--include src/** should index fewer entities than a full run."""
+    db_full = tmp_path / "full" / "index.sqlite"
+    db_scoped = tmp_path / "scoped" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_full)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_scoped), "--include", "src/**"])
+
+    full_count = len(_db_entity_names(db_full))
+    scoped_count = len(_db_entity_names(db_scoped))
+
+    assert scoped_count < full_count, (
+        f"Expected fewer entities with --include src/**, got {scoped_count} vs {full_count}"
+    )
+
+
+def test_index_include_src_only_has_no_doc_entities(tmp_path: Path) -> None:
+    """--include src/** must exclude docs/guide.md entities."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--include", "src/**"])
+    names = _db_entity_names(db_path)
+    doc_names = {n for n in names if n.startswith("docs/")}
+    assert not doc_names, f"Expected no docs/ entities with --include src/**, got: {doc_names}"
+
+
+def test_index_exclude_reduces_entities(tmp_path: Path) -> None:
+    """--exclude docs/** should index fewer entities than a full run."""
+    db_full = tmp_path / "full" / "index.sqlite"
+    db_scoped = tmp_path / "scoped" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_full)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_scoped), "--exclude", "docs/**"])
+
+    full_count = len(_db_entity_names(db_full))
+    scoped_count = len(_db_entity_names(db_scoped))
+
+    assert scoped_count < full_count
+
+
+def test_index_exclude_docs_has_no_doc_entities(tmp_path: Path) -> None:
+    """--exclude docs/** must not produce any docs/ entities."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--exclude", "docs/**"])
+    names = _db_entity_names(db_path)
+    doc_names = {n for n in names if n.startswith("docs/")}
+    assert not doc_names, f"Expected no docs/ entities with --exclude docs/**, got: {doc_names}"
+
+
+def test_index_no_scope_patterns_unchanged(tmp_path: Path) -> None:
+    """Default behavior (no --include/--exclude) must be identical to before."""
+    db_a = tmp_path / "a" / "index.sqlite"
+    db_b = tmp_path / "b" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_a)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_b)])
+
+    assert _db_entity_names(db_a) == _db_entity_names(db_b)
+
+
+def test_index_multiple_includes(tmp_path: Path) -> None:
+    """Multiple --include flags combine as OR."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    main(
+        [
+            "index",
+            str(_FIXTURE_ROOT),
+            "--db",
+            str(db_path),
+            "--include",
+            "src/**",
+            "--include",
+            "docs/**",
+        ]
+    )
+    names = _db_entity_names(db_path)
+    # Python modules from src/ are stored with module-qualified names (e.g. "app")
+    assert "app" in names or any(n.startswith("app.") for n in names), (
+        f"Expected Python entities from src/ to be present; got: {sorted(names)}"
+    )
+    # Doc entities from docs/ are stored with path-based qualified names
+    assert any(n.startswith("docs/") for n in names), (
+        f"Expected docs/ entities to be present; got: {sorted(names)}"
+    )
+    # config/ should NOT be indexed (not in either include pattern)
+    config_names = {n for n in names if n.startswith("config/")}
+    assert not config_names, f"Expected no config/ entities, got: {config_names}"

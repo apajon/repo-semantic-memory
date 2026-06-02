@@ -336,6 +336,7 @@ performs a full rebuild whenever any of the following holds:
 | Indexed HEAD is not reachable from current HEAD (`merge-base --is-ancestor` failure).  | `incremental_history_unreachable`   |
 | Previous index was built dirty (`metadata.git_dirty == "true"`).                       | `incremental_previous_dirty`        |
 | Change set exceeds the safety threshold (default 50% of indexed files).                | `incremental_changeset_too_large`   |
+| Requested `--include`/`--exclude` scope differs from the stored scope.                 | `incremental_scope_mismatch`        |
 | Any uncaught exception during the per-file pass.                                       | `incremental_internal_error`        |
 
 These reason strings are stable and match the `IncrementalFallbackReason`
@@ -363,6 +364,37 @@ correct. The cost is wall-clock time, not correctness.
   pipeline (§2.3); the resulting `git_dirty` metadata reflects post-run
   state.
 - Untracked relevant files. Treated as `changed_paths` and re-extracted.
+
+### 4.3 Scope mismatch safety (Prompt 57.5.1)
+
+If the `--include`/`--exclude` patterns supplied on the current run differ
+from the patterns stored in `metadata.include_patterns` /
+`metadata.exclude_patterns`, the incremental path **cannot** safely update
+the existing index: deleted entries from previously-indexed paths that are
+now excluded, and new entries for newly-included paths, would be silently
+missed.
+
+RSM therefore falls back to a full rebuild whenever the requested scope
+differs from the stored scope:
+
+| Transition                                   | Fallback? |
+| -------------------------------------------- | --------- |
+| full index → incremental full                | no        |
+| full index → incremental with --include/--exclude | yes (`incremental_scope_mismatch`) |
+| scoped index → incremental full (no patterns) | yes (`incremental_scope_mismatch`) |
+| scoped index → incremental with same patterns | no        |
+| scoped index → incremental with different patterns | yes (`incremental_scope_mismatch`) |
+
+After a scope-mismatch fallback, the full rebuild writes the *new* scope
+metadata — so the next incremental run against the same scope will proceed
+normally.
+
+Scope comparison is order-insensitive: `["a/", "b/"]` and `["b/", "a/"]`
+are considered the same scope.
+
+Legacy indexes built before Prompt 57.5 carry no scope metadata.  They are
+treated as full-scope indexes: an incremental full run proceeds normally;
+an incremental scoped run triggers `incremental_scope_mismatch`.
 
 ## 5. Metadata model (reuse, not extend)
 

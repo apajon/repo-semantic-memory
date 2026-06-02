@@ -1040,3 +1040,147 @@ def test_stdio_brief_default_size_is_smaller_than_compact(
     # Use ``<=`` rather than ``<`` because the indexed-repo fixture is tiny
     # and may produce equal payloads when streams already fit under both caps.
     assert brief_bytes <= compact_bytes
+
+
+# ---------------------------------------------------------------------------
+# Scope metadata in rsm_status (Prompt 57.5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def scoped_indexed_repo(tmp_path: Path) -> tuple[Path, Path]:
+    """Fixture for a repo indexed with include/exclude scope metadata."""
+    repo_root = tmp_path / "repo"
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "src" / "core.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    db_path = repo_root / ".rsm" / "index.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    entities = [
+        Entity(
+            id=StableId("python:module:src.core"),
+            kind="module",
+            name="core",
+            qualified_name="src.core",
+            source_range=SourceRange(path="src/core.py", start_line=1, end_line=2),
+        ),
+    ]
+
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        store.persist_index(
+            entities=entities,
+            relations=[],
+            metadata=build_default_extraction_metadata(
+                repository_root=repo_root,
+                extractor_names=("filesystem", "python_ast"),
+                timestamp="2026-05-20T00:00:00+00:00",
+            ),
+        )
+        store.write_extra_metadata(
+            {
+                "indexed_at": "2026-05-20T00:00:00+00:00",
+                "entity_count": "1",
+                "relation_count": "0",
+                "index_scope": "scoped",
+                "include_patterns": '["src/**"]',
+                "exclude_patterns": '["tests/**"]',
+            }
+        )
+    finally:
+        store.close()
+    return repo_root, db_path
+
+
+def test_rsm_status_includes_scope_fields_full(indexed_repo: tuple[Path, Path]) -> None:
+    """rsm_status returns index_scope, include_patterns, exclude_patterns for full index."""
+    repo, db = indexed_repo
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        store.write_extra_metadata(
+            {
+                "indexed_at": "2026-05-20T00:00:00+00:00",
+                "entity_count": "2",
+                "relation_count": "1",
+                "index_scope": "full",
+                "include_patterns": "[]",
+                "exclude_patterns": "[]",
+            }
+        )
+    finally:
+        store.close()
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_status", {}, session)
+    assert result["index_scope"] == "full"
+    assert result["include_patterns"] == []
+    assert result["exclude_patterns"] == []
+
+
+def test_rsm_status_includes_scope_fields_scoped(scoped_indexed_repo: tuple[Path, Path]) -> None:
+    """rsm_status returns correct scope for a scoped index."""
+    repo, db = scoped_indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_status", {}, session)
+    assert result["index_scope"] == "scoped"
+    assert result["include_patterns"] == ["src/**"]
+    assert result["exclude_patterns"] == ["tests/**"]
+
+
+def test_rsm_status_scope_none_for_old_index(indexed_repo: tuple[Path, Path]) -> None:
+    """rsm_status returns index_scope=None and empty lists for old indexes lacking scope."""
+    repo, db = indexed_repo
+    # indexed_repo fixture doesn't write scope metadata → simulates old index
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_status", {}, session)
+    assert "index_scope" in result
+    assert result["index_scope"] is None
+    assert result["include_patterns"] == []
+    assert result["exclude_patterns"] == []
+
+
+def test_rsm_build_context_pack_scope_warning_scoped(
+    scoped_indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_build_context_pack includes scope_warning and scope fields for scoped indexes."""
+    repo, db = scoped_indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "find run function"},
+        session,
+    )
+    assert result.get("index_scope") == "scoped"
+    assert result.get("include_patterns") == ["src/**"]
+    assert result.get("exclude_patterns") == ["tests/**"]
+    assert "scope_warning" in result
+
+
+def test_rsm_build_context_pack_no_scope_warning_full(indexed_repo: tuple[Path, Path]) -> None:
+    """rsm_build_context_pack has no scope_warning for a full index."""
+    repo, db = indexed_repo
+    store = SQLiteStore(db)
+    try:
+        store.initialize()
+        store.write_extra_metadata(
+            {
+                "indexed_at": "2026-05-20T00:00:00+00:00",
+                "entity_count": "2",
+                "relation_count": "1",
+                "index_scope": "full",
+                "include_patterns": "[]",
+                "exclude_patterns": "[]",
+            }
+        )
+    finally:
+        store.close()
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "find run function"},
+        session,
+    )
+    # For full indexes, scope_warning should be absent
+    assert "scope_warning" not in result
+    assert result.get("index_scope") == "full"

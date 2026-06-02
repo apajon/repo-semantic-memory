@@ -41,6 +41,7 @@ class IncrementalFallbackReason:
     PREVIOUS_DIRTY: str = "incremental_previous_dirty"
     CHANGESET_TOO_LARGE: str = "incremental_changeset_too_large"
     INTERNAL_ERROR: str = "incremental_internal_error"
+    SCOPE_MISMATCH: str = "incremental_scope_mismatch"
 
 
 @dataclass(frozen=True)

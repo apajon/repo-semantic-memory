@@ -1,6 +1,6 @@
 """Extractor entry points."""
 
-from repo_semantic_memory.extractors.filesystem import extract_filesystem_entities
+from repo_semantic_memory.extractors.filesystem import ScopeFilter, extract_filesystem_entities
 from repo_semantic_memory.extractors.git_history import (
     GitFileMetadata,
     GitRepositorySummary,
@@ -23,6 +23,7 @@ __all__ = [
     "GitFileMetadata",
     "GitRepositorySummary",
     "MarkdownOutline",
+    "ScopeFilter",
     "collect_git_file_metadata",
     "extract_filesystem_entities",
     "extract_markdown_file",

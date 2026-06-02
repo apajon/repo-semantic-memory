@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from repo_semantic_memory.extractors.filesystem import (
+    ScopeFilter,
     _should_ignore_directory_name,
     _should_ignore_directory_path,
 )
@@ -134,6 +135,7 @@ def index_python_exports(
     path: Path | str,
     *,
     progress: Callable[[int, int], None] | None = None,
+    scope_filter: ScopeFilter | None = None,
 ) -> list[Relation]:
     """Index exports from all ``__init__.py`` files under a path.
 
@@ -142,6 +144,8 @@ def index_python_exports(
         progress: Optional callback invoked after each file is processed.
             Called as ``progress(done, total)`` where *done* is the number of
             files processed so far and *total* is the total file count.
+        scope_filter: Optional scope filter to restrict which files and
+            directories are indexed.
 
     Returns:
         Sorted list of all ``exports`` Relation objects found.
@@ -158,7 +162,7 @@ def index_python_exports(
         return file_relations
 
     root = target
-    init_files = _iter_init_files(root)
+    init_files = _iter_init_files(root, scope_filter=scope_filter)
     total = len(init_files)
     relations: list[Relation] = []
     for done, init_file in enumerate(init_files, start=1):
@@ -339,19 +343,33 @@ def _sort_relations(relations: list[Relation]) -> list[Relation]:
     )
 
 
-def _iter_init_files(root: Path) -> list[Path]:
+def _iter_init_files(root: Path, *, scope_filter: ScopeFilter | None = None) -> list[Path]:
     discovered: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root, topdown=True):
         current_dir = Path(dirpath)
+        rel_current = current_dir.relative_to(root).as_posix()
+        if rel_current == ".":
+            rel_current = ""
         dirnames[:] = sorted(
             name
             for name in dirnames
             if not _should_ignore_directory_name(name)
             and not _should_ignore_directory_path(current_dir / name, root)
+            and (
+                scope_filter is None
+                or scope_filter.should_descend_directory(
+                    name if not rel_current else f"{rel_current}/{name}"
+                )
+            )
         )
         for filename in sorted(filenames):
-            if filename == "__init__.py":
-                discovered.append(Path(dirpath) / filename)
+            if filename != "__init__.py":
+                continue
+            file_path = Path(dirpath) / filename
+            rel_path = file_path.relative_to(root).as_posix()
+            if scope_filter is not None and not scope_filter.should_index_file(rel_path):
+                continue
+            discovered.append(file_path)
     return discovered
 
 
