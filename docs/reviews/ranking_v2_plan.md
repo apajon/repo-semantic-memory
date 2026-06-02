@@ -41,6 +41,22 @@
 > Fully backward-compatible: `select_test_branch` returns `[]` when `"tests"` is absent from
 > intent. 35 unit and integration tests added in `tests/context/test_test_branch.py`. Non-goals
 > still deferred: support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
+>
+> **58.4 — Support-file expansion: ✅ implemented.**
+> Added `src/repo_semantic_memory/context/support_expansion.py` (`select_support_files()` function).
+> After main ranking + graph expansion and before the test-file branch, an independent support-file
+> pass expands from selected central entities using `imports`, `exports`, and `inherits` relations.
+> Scoring: forward-import (+10), reverse-export (+8), forward-export (+6), inherits (+5),
+> reverse-import (+4), same-package proximity (+2), public-API `__init__.py` boost (+4 when
+> `public_api` intent), lexical path token overlap (+1 per token). Minimum qualifying score is 4.0
+> (same-package alone does not qualify). Test files (TEST_ROLE), runtime-named paths
+> (`lib/ansible/plugins/test/`), docs/examples (unless `public_api` or `architecture_flow` intent),
+> and already-selected entities are excluded. Results are deduplicated by `source_path` (prefer
+> `kind="module"` over child nodes), capped at `max_support_files=5`, and appended to
+> `selected_entity_ids` in `build_context_pack` with `"support: …"` reasons. Fully
+> backward-compatible: callers that do not pass `query_intent` are unaffected. 39 unit and
+> integration tests added in `tests/context/test_support_expansion.py`. Non-goals still deferred:
+> selection reasons (58.5), regression eval (58.6).
 
 ---
 
@@ -404,18 +420,22 @@ implementation model: Claude Sonnet 4.6.
   → test-root path proximity (+2). Deduped by `source_path`, capped at 5 files, appended after
   main ranking. Runtime-named paths excluded via `is_runtime_test_named_path()`.
 - **Tests:** 35 unit and integration tests in `tests/context/test_test_branch.py`.
-- **Non-goals still deferred:** support-file expansion (58.4), selection reasons (58.5),
-  regression eval (58.6).
+- **Non-goals still deferred:** selection reasons (58.5), regression eval (58.6).
 
-### 58.4 — Support-file expansion
+### 58.4 — Support-file expansion ✅ implemented
 - **Goal:** Intent-directed, bounded expansion from central file to imports/exports, containing module,
   public-API wrapper, and dispatch-adjacent files.
-- **Files likely touched:** `context/pack_builder.py`, `context/graph_selection.py` (directed expansion
-  config), reuse `context/import_scoring.py`.
-- **Tests:** expansion tests on fixture repos; assert dispatch/handler/loader neighbors pulled in and
-  generated/tooling excluded.
-- **Risks:** expansion blowups → noise. Enforce `max_support_files` cap and first-party-only rule.
-- **Validation:** unit tests + eval implementation-localization tasks.
+- **Files changed:** `context/support_expansion.py` (new), `context/pack_builder.py` (wire-in after
+  graph expansion, before test branch).
+- **Algorithm:** relation-based scoring (`imports` forward +10, `exports` reverse +8, `exports`
+  forward +6, `inherits` +5, `imports` reverse +4) + same-package proximity (+2) + public-API init
+  boost (+4 when `public_api` intent) + lexical path token overlap (+1 per token). Minimum score
+  threshold 4.0. Test files, runtime-named paths, docs/examples (unless `public_api` or
+  `architecture_flow` intent), and already-selected entities are excluded. Deduped by `source_path`,
+  capped at `max_support_files=5`. Results appended with `"support: …"` reasons.
+- **Tests:** 39 unit and integration tests in `tests/context/test_support_expansion.py`. Regression
+  fixtures for Django URL routing, Ansible plugin loading, and HTTPX public API scenarios.
+- **Non-goals still deferred:** selection reasons (58.5), regression eval (58.6).
 
 ### 58.5 — Selection reasons in context pack
 - **Goal:** Emit closed-vocabulary, machine-readable reasons per selected file (central/support/test/

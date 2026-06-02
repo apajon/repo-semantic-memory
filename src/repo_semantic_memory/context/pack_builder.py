@@ -44,6 +44,7 @@ from repo_semantic_memory.context.ranking import (
     build_breakdown,
     dedupe_stable,
 )
+from repo_semantic_memory.context.support_expansion import select_support_files
 from repo_semantic_memory.context.test_branch import select_test_branch
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation, SemanticComponent
@@ -309,6 +310,35 @@ def build_context_pack(
                     matched_fields=existing.matched_fields,
                     reasons=dedupe_stable_reasons(existing_reason_tuples + reason_tuples),
                 )
+
+    # Support-file expansion (Ranking v2 — Prompt 58.4).
+    # Runs AFTER graph expansion, BEFORE the test branch.
+    # Selects adjacent implementation files around the already-selected entities
+    # using import/export/inherits relations, same-package proximity, and lexical
+    # token overlap.  Test files are intentionally excluded (handled below by the
+    # test branch).
+    support_file_results = select_support_files(
+        selected_entities=[entity_by_id[eid] for eid in selected_entity_ids if eid in entity_by_id],
+        all_entities=normalized_entities,
+        relations=normalized_relations,
+        query_intent=query_intent,
+        source_roots=source_roots,
+    )
+    for support_entity_id, support_reason in support_file_results:
+        is_new = _add_entity(support_entity_id, selected_entity_ids, selected_entity_set)
+        reasons_by_key[support_entity_id].append(support_reason)
+        if is_new and (explain_ranking or resolved_profile.include_ranking_breakdown):
+            ranking_breakdowns_by_id[support_entity_id] = build_breakdown(
+                lexical=0,
+                path_role=0,
+                task_intent=0,
+                component=0,
+                graph=0,
+                penalty=0,
+                matched_terms=(),
+                matched_fields=(),
+                reasons=dedupe_stable_reasons((("task_intent", support_reason, 0.0),)),
+            )
 
     # Test-file retrieval branch (Ranking v2 — Prompt 58.3).
     # Runs AFTER graph expansion so test entities can be selected independently
