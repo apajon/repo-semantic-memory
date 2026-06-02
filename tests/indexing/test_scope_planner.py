@@ -16,6 +16,7 @@ from repo_semantic_memory.indexing.scope_planner import (
     GENERIC_LARGE_PYTHON_THRESHOLD,
     LARGE_MIN_PYTHON_FILES,
     SMALL_MAX_PYTHON_FILES,
+    ScopePlan,
     ScopeRecommendation,
     classify_scale,
     plan_index_scope,
@@ -138,12 +139,12 @@ def test_counts_are_accurate(tmp_path: Path) -> None:
 
 
 def test_largest_subtrees_deterministic_order(tmp_path: Path) -> None:
-    plan_a = plan_index_scope_after_build(tmp_path)
-    plan_b = plan_index_scope_after_build(tmp_path)
+    plan_a = build_and_plan(tmp_path)
+    plan_b = build_and_plan(tmp_path)
     assert plan_a.to_json_dict() == plan_b.to_json_dict()
 
 
-def plan_index_scope_after_build(root: Path) -> object:
+def build_and_plan(root: Path) -> ScopePlan:
     _make_home_assistant_like(root)
     return plan_index_scope(root)
 

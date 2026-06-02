@@ -824,7 +824,7 @@ def _run_index_plan_command(*, path: str, emit_json: bool) -> int:
         return 2
 
     if emit_json:
-        print(json.dumps(plan.to_json_dict(), indent=2, sort_keys=False))
+        print(json.dumps(plan.to_json_dict(), indent=2))
         return 0
     print(format_scope_plan(plan))
     return 0
