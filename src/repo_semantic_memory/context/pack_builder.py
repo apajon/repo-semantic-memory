@@ -44,6 +44,7 @@ from repo_semantic_memory.context.ranking import (
     build_breakdown,
     dedupe_stable,
 )
+from repo_semantic_memory.context.test_branch import select_test_branch
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation, SemanticComponent
 
@@ -308,6 +309,35 @@ def build_context_pack(
                     matched_fields=existing.matched_fields,
                     reasons=dedupe_stable_reasons(existing_reason_tuples + reason_tuples),
                 )
+
+    # Test-file retrieval branch (Ranking v2 — Prompt 58.3).
+    # Runs AFTER graph expansion so test entities can be selected independently
+    # of the main ranking pool.  Only active when the ``tests`` intent is detected.
+    # Test branch entities are appended to the selection after graph neighbors,
+    # so they are lower-priority for budget truncation but still included when
+    # budget allows.
+    test_branch_results = select_test_branch(
+        entities=normalized_entities,
+        relations=normalized_relations,
+        query_intent=query_intent,
+        seed_entity_ids=frozenset(selected_entity_ids),
+        source_roots=source_roots,
+    )
+    for test_entity_id, test_reason in test_branch_results:
+        is_new = _add_entity(test_entity_id, selected_entity_ids, selected_entity_set)
+        reasons_by_key[test_entity_id].append(test_reason)
+        if is_new and (explain_ranking or resolved_profile.include_ranking_breakdown):
+            ranking_breakdowns_by_id[test_entity_id] = build_breakdown(
+                lexical=0,
+                path_role=0,
+                task_intent=0,
+                component=0,
+                graph=0,
+                penalty=0,
+                matched_terms=(),
+                matched_fields=(),
+                reasons=dedupe_stable_reasons((("task_intent", test_reason, 0.0),)),
+            )
 
     # Collect all relations incident to any selected entity.
     relations_by_entity_id = _relations_by_entity_id(normalized_relations)

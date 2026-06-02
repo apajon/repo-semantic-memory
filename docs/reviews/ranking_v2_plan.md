@@ -13,8 +13,8 @@
 > `transport`, `middleware`) are preserved via allowlist guard. `pack_builder.build_context_pack`
 > now passes `lexical_tokens` (filtered) to `_rank_entities`; intent detection (`_task_hints`,
 > `_is_code_task`) still uses the full raw token set. 42 unit tests added in
-> `tests/context/test_query_intent.py`. Non-goals still deferred: test-file
-> branch (58.3), support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
+> `tests/context/test_query_intent.py`. Non-goals still deferred: support-file expansion (58.4),
+> selection reasons (58.5), regression eval (58.6).
 >
 > **58.2 — Task-aware path priors: ✅ implemented.**
 > Added `is_runtime_test_named_path()`, `is_public_api_file()`, and `path_prior_multiplier()` to
@@ -27,6 +27,20 @@
 > TEST_ROLE`, so Ansible `test/units/...` paths are now boosted correctly. Tests extended in
 > `tests/context/test_path_roles.py`. Non-goals still deferred: test-file branch (58.3),
 > support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
+>
+> **58.3 — First-class test-file retrieval branch: ✅ implemented.**
+> Added `src/repo_semantic_memory/context/test_branch.py` (`select_test_branch()` function).
+> When `QueryIntent.intents` contains `"tests"`, an independent test-file branch runs after the
+> main ranking + graph expansion. Candidate selection is relation-first: existing `tests` relations
+> from/to seed implementation entities are followed first (bonus +100), then stem-similarity
+> proximity (+20), lexical token overlap (+3 per token), and test-root path proximity (+2 per
+> shared segment). Runtime-named paths (`lib/ansible/plugins/test/`) are excluded via
+> `is_runtime_test_named_path()`; only real test roots (`tests/`, `test/`) qualify. Results are
+> deduplicated by `source_path` (prefer `kind="module"` over child nodes), capped at 5 files,
+> and appended to `selected_entity_ids` in `build_context_pack` with `"test branch: …"` reasons.
+> Fully backward-compatible: `select_test_branch` returns `[]` when `"tests"` is absent from
+> intent. 35 unit and integration tests added in `tests/context/test_test_branch.py`. Non-goals
+> still deferred: support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
 
 ---
 
@@ -383,15 +397,15 @@ implementation model: Claude Sonnet 4.6.
   and conditional.
 - **Validation:** unit tests + eval; confirm docs/test roles not net-penalized under matching intent.
 
-### 58.3 — Test-file retrieval branch
-- **Goal:** Independent test retrieval (relations → path/name → proximity), returned as a separate
-  section, capped.
-- **Files likely touched:** `context/pack_builder.py` (new selection branch), reuse
-  `extractors/test_relationships.py` outputs; possibly `context/context_pack.py` for a tests grouping in
-  reasons (no format change to existing fields).
-- **Tests:** new tests asserting Ansible `test/units/...` retrieval and exclusion of `plugins/test/`.
-- **Risks:** mixing tests into implementation pool; cap tuning. Keep section separation explicit.
-- **Validation:** unit tests + eval test-localization tasks.
+### 58.3 — Test-file retrieval branch ✅
+- **Goal:** Independent test retrieval (relations → path/name → proximity), bounded and capped.
+- **Files changed:** `context/test_branch.py` (new), `context/pack_builder.py` (wire-in).
+- **Algorithm:** relation-first (bonus +100) → stem proximity (+20) → lexical token overlap (+3)
+  → test-root path proximity (+2). Deduped by `source_path`, capped at 5 files, appended after
+  main ranking. Runtime-named paths excluded via `is_runtime_test_named_path()`.
+- **Tests:** 35 unit and integration tests in `tests/context/test_test_branch.py`.
+- **Non-goals still deferred:** support-file expansion (58.4), selection reasons (58.5),
+  regression eval (58.6).
 
 ### 58.4 — Support-file expansion
 - **Goal:** Intent-directed, bounded expansion from central file to imports/exports, containing module,
