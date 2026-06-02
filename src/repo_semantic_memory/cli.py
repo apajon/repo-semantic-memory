@@ -807,7 +807,9 @@ def _run_index_command(
                 file=sys.stderr,
             )
         elif db_path.exists():
-            result = _attempt_incremental_index(repository_root, db_path, with_git=with_git)
+            result = _attempt_incremental_index(
+                repository_root, db_path, with_git=with_git, includes=includes, excludes=excludes
+            )
             if result is not None:
                 if register:
                     _do_register(repository_root, db_path)
@@ -1123,17 +1125,55 @@ def _make_python_progress_callback() -> Callable[[int, int], None]:
     return _make_progress_callback("Python")
 
 
+def _scope_matches_metadata(
+    meta: dict[str, str],
+    includes: list[str] | None,
+    excludes: list[str] | None,
+) -> bool:
+    """Return ``True`` when the stored scope matches the requested scope.
+
+    A stored scope of ``None`` (old index built before 57.5) is treated as
+    ``"full"`` so that legacy indexes remain compatible with full incremental
+    runs.
+    """
+    stored_scope = meta.get("index_scope") or "full"
+    req_includes = sorted(includes or [])
+    req_excludes = sorted(excludes or [])
+    requested_scope = "scoped" if (req_includes or req_excludes) else "full"
+
+    if stored_scope != requested_scope:
+        return False
+
+    if requested_scope == "scoped":
+        try:
+            stored_includes = sorted(json.loads(meta.get("include_patterns", "[]")))
+            stored_excludes = sorted(json.loads(meta.get("exclude_patterns", "[]")))
+        except (json.JSONDecodeError, TypeError):
+            return False  # malformed stored patterns → treat as mismatch
+
+        return stored_includes == req_includes and stored_excludes == req_excludes
+
+    return True  # both "full"
+
+
 def _attempt_incremental_index(
     repo_root: Path,
     db_path: Path,
     *,
     with_git: bool,
+    includes: list[str] | None = None,
+    excludes: list[str] | None = None,
 ) -> IncrementalResult | None:
     """Try an incremental index update.
 
     Returns an :class:`~repo_semantic_memory.indexing.executor.IncrementalResult`
     on success, or ``None`` when the planner rejects or the executor raises
     (in both cases a fallback message is printed to stderr).
+
+    When the requested scope (``includes``/``excludes``) differs from the scope
+    stored in the existing index metadata, the function falls back immediately
+    with reason :attr:`~repo_semantic_memory.indexing.incremental
+    .IncrementalFallbackReason.SCOPE_MISMATCH`.
     """
     from repo_semantic_memory.indexing import plan_incremental_update
     from repo_semantic_memory.indexing.executor import run_incremental_index
@@ -1145,6 +1185,16 @@ def _attempt_incremental_index(
         meta = store.get_metadata()
     finally:
         store.close()
+
+    # Scope mismatch check — must precede Git planning so that a full rebuild
+    # rewrites scope metadata correctly rather than proceeding with a stale scope.
+    if not _scope_matches_metadata(meta, includes, excludes):
+        print(
+            f"info: incremental index fallback: {IncrementalFallbackReason.SCOPE_MISMATCH};"
+            " running full rebuild",
+            file=sys.stderr,
+        )
+        return None
 
     indexed_head = meta.get("git_head") or None
     plan = plan_incremental_update(
