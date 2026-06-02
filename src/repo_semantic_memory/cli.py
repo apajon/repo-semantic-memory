@@ -594,10 +594,33 @@ def _format_version_output() -> str:
     )
 
 
+def _build_index_plan_parser() -> argparse.ArgumentParser:
+    """Create the parser for the ``rsm index plan`` advisory subcommand."""
+    parser = argparse.ArgumentParser(
+        prog=f"{DEFAULT_CONFIG.cli_name} index plan",
+        description=(
+            "Advisory scope planner. Inspect a repository cheaply and recommend "
+            "a safe indexing scope. Does not create or modify an index."
+        ),
+    )
+    parser.add_argument("path", help="Repository root path to inspect.")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the scope plan as deterministic JSON.",
+    )
+    return parser
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the CLI and return an exit code."""
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    if raw_argv[:2] == ["index", "plan"]:
+        plan_args = _build_index_plan_parser().parse_args(raw_argv[2:])
+        return _run_index_plan_command(path=plan_args.path, emit_json=plan_args.json)
+
     parser = build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(raw_argv)
 
     if args.command == "version":
         print(_format_version_output())
@@ -781,6 +804,30 @@ def _format_scan_table(entities: Sequence[Entity]) -> str:
 
 def _format_index_python_summary(entities: Sequence[Entity], relations: Sequence[Relation]) -> str:
     return f"entities={len(entities)} relations={len(relations)}"
+
+
+def _run_index_plan_command(*, path: str, emit_json: bool) -> int:
+    """Run the advisory ``rsm index plan`` command.
+
+    Inspects the repository cheaply and prints a recommended scope.  Never
+    creates or modifies an index.
+    """
+    from repo_semantic_memory.indexing.scope_planner import (
+        format_scope_plan,
+        plan_index_scope,
+    )
+
+    try:
+        plan = plan_index_scope(path)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
+    if emit_json:
+        print(json.dumps(plan.to_json_dict(), indent=2, sort_keys=False))
+        return 0
+    print(format_scope_plan(plan))
+    return 0
 
 
 def _run_index_command(

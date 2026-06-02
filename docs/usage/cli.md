@@ -218,6 +218,81 @@ Example JSON excerpt:
 > **Note:** Profiling is observational. It does not optimize indexing, change
 > indexing semantics, or modify DB content.
 
+## Index scope planner
+
+`rsm index plan <repo>` is an **advisory** command. It inspects a repository
+cheaply (a single filesystem walk — no parsing, no DB writes) and recommends a
+safe indexing scope for large repositories. It never creates or modifies an
+index and never silently applies exclusions.
+
+```bash
+rsm index plan /path/to/core
+rsm index plan /path/to/core --json
+```
+
+The plan reports the repository root, detected project kind (if any), total and
+Python file counts, the heaviest subtrees, a `small` / `medium` / `large` scale
+classification, and a recommended scope when a deterministic heuristic matches.
+
+Scale thresholds (Python files): `small` < 1,000, `medium` 1,000–9,999,
+`large` ≥ 10,000.
+
+### Home Assistant Core example
+
+When the `homeassistant/`, `homeassistant/components/`, and `tests/components/`
+layout is detected, the planner recommends excluding the integration packages:
+
+```
+RSM index plan
+
+Repository: /path/to/core
+Detected project: home-assistant-core
+Scale: large
+Files: 23972
+Python files: 17404
+
+Largest subtrees:
+  homeassistant/components  files=... python=...
+  tests/components          files=... python=...
+
+Recommended scope: home-assistant-core
+Reason: Exclude integration packages to index the core architecture quickly.
+
+Suggested command:
+  rsm index /path/to/core --exclude 'homeassistant/components/**' --exclude 'tests/components/**'
+
+Warning:
+  Scoped indexes are incomplete by design. Use full indexing for integration-specific tasks.
+```
+
+JSON output uses deterministic ordering:
+
+```json
+{
+  "repo_root": "/path/to/core",
+  "detected_kind": "home-assistant-core",
+  "scale": "large",
+  "total_files": 23972,
+  "python_files": 17404,
+  "largest_subtrees": [
+    {"path": "homeassistant/components", "files": 12000, "python_files": 9000}
+  ],
+  "recommendation": {
+    "scope_name": "home-assistant-core",
+    "include_patterns": [],
+    "exclude_patterns": ["homeassistant/components/**", "tests/components/**"],
+    "reason": "Exclude integration packages to index the core architecture quickly.",
+    "suggested_command": "rsm index /path/to/core --exclude 'homeassistant/components/**' --exclude 'tests/components/**'"
+  }
+}
+```
+
+Generic large Python repositories (no known preset) list their heaviest
+subtrees and advise manual scoping **without inventing exclude patterns**. Small
+repositories return no recommendation. To apply a scope, pass the suggested
+`--include` / `--exclude` patterns to `rsm index`; scoped indexes are incomplete
+by design, so prefer full indexing for integration-specific tasks.
+
 ## Database resolution for reader commands
 
 Reader commands can use an explicit `--db`, an entry in the RSM Index Store, or the legacy
