@@ -13,8 +13,20 @@
 > `transport`, `middleware`) are preserved via allowlist guard. `pack_builder.build_context_pack`
 > now passes `lexical_tokens` (filtered) to `_rank_entities`; intent detection (`_task_hints`,
 > `_is_code_task`) still uses the full raw token set. 42 unit tests added in
-> `tests/context/test_query_intent.py`. Non-goals still deferred: path priors (58.2), test-file
+> `tests/context/test_query_intent.py`. Non-goals still deferred: test-file
 > branch (58.3), support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
+>
+> **58.2 — Task-aware path priors: ✅ implemented.**
+> Added `is_runtime_test_named_path()`, `is_public_api_file()`, and `path_prior_multiplier()` to
+> `src/repo_semantic_memory/context/path_roles.py`. Priors are additive deltas applied in
+> `_score_entity` when a `QueryIntent` is available. Key behaviours: `tests` intent boosts real
+> test roots (`tests/`, `test/`) and penalises runtime-named paths (`lib/ansible/plugins/test/`);
+> `implementation` intent penalises docs/examples; `public_api` intent modestly boosts
+> `__init__.py`; `config_build_release` intent boosts pyproject/setup/config files. Fixed the
+> long-standing bug where `source_path.startswith("tests/")` was used instead of `path_role ==
+> TEST_ROLE`, so Ansible `test/units/...` paths are now boosted correctly. Tests extended in
+> `tests/context/test_path_roles.py`. Non-goals still deferred: test-file branch (58.3),
+> support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
 
 ---
 
@@ -359,12 +371,14 @@ implementation model: Claude Sonnet 4.6.
   intent-only path, not lexical scoring against runtime `plugins/test/`).
 - **Validation:** 885 tests pass; ruff + mypy clean.
 
-### 58.2 — Task-aware path priors
+### 58.2 — Task-aware path priors ✅
 - **Goal:** Replace fixed global penalties with intent-conditioned role multipliers; fix `test/` singular
   root handling and nested-runtime-`test` disambiguation.
-- **Files likely touched:** `context/pack_builder.py` (`_score_entity`), `context/path_roles.py` (helper
-  to detect top-level test roots vs nested runtime `test` packages).
-- **Tests:** `tests/context/test_path_roles.py`, pack-builder scoring tests for each intent.
+- **Files touched:** `context/path_roles.py` (`is_runtime_test_named_path`, `is_public_api_file`,
+  `path_prior_multiplier`, 5 scoring constants), `context/pack_builder.py` (`_score_entity` —
+  fixed `startswith("tests/")` → `path_role == TEST_ROLE`, wired `path_prior_multiplier`).
+- **Tests:** `tests/context/test_path_roles.py` extended with `TestIsRuntimeTestNamedPath`,
+  `TestIsPublicApiFile`, `TestPathPriorMultiplier`, `TestPathPriorIntegration`.
 - **Risks:** double-counting boosts; intent collisions (implementation + tests). Keep priors additive
   and conditional.
 - **Validation:** unit tests + eval; confirm docs/test roles not net-penalized under matching intent.

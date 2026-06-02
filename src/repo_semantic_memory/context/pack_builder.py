@@ -28,12 +28,14 @@ from repo_semantic_memory.context.import_scoring import (
 from repo_semantic_memory.context.path_roles import (
     DOC_ROLE,
     SOURCE_ROLE,
+    TEST_ROLE,
     TOOL_ROLE,
     classify_path_role,
     infer_source_roots,
     is_generated_artifact_path,
+    path_prior_multiplier,
 )
-from repo_semantic_memory.context.query_intent import parse_query_intent
+from repo_semantic_memory.context.query_intent import QueryIntent, parse_query_intent
 from repo_semantic_memory.context.ranking import (
     RankingBreakdown,
     RankingCategory,
@@ -202,6 +204,7 @@ def build_context_pack(
         task_tokens=lexical_tokens,
         is_code_task=is_code_task,
         task_hints=task_hints,
+        query_intent=query_intent,
         public_api_entity_ids=public_api_entity_ids,
         export_source_entity_ids=export_source_entity_ids,
         export_target_entity_ids=export_target_entity_ids,
@@ -423,6 +426,7 @@ def _rank_entities(
     task_tokens: tuple[str, ...],
     is_code_task: bool,
     task_hints: set[str],
+    query_intent: QueryIntent | None = None,
     public_api_entity_ids: set[str],
     export_source_entity_ids: set[str],
     export_target_entity_ids: set[str],
@@ -444,6 +448,7 @@ def _rank_entities(
             bm25_index=bm25_index,
             is_code_task=is_code_task,
             task_hints=task_hints,
+            query_intent=query_intent,
             public_api_entity_ids=public_api_entity_ids,
             export_source_entity_ids=export_source_entity_ids,
             export_target_entity_ids=export_target_entity_ids,
@@ -462,6 +467,7 @@ def _score_entity(
     bm25_index: FieldedBM25Index,
     is_code_task: bool,
     task_hints: set[str],
+    query_intent: QueryIntent | None = None,
     public_api_entity_ids: set[str],
     export_source_entity_ids: set[str],
     export_target_entity_ids: set[str],
@@ -515,7 +521,7 @@ def _score_entity(
             )
         )
 
-    path_role_score = 0
+    path_role_score: float = 0
     task_intent_score = 0
     if "implementation" in task_hints and path_role == SOURCE_ROLE:
         path_role_score += _IMPLEMENTATION_PATH_ROLE_BONUS
@@ -550,14 +556,14 @@ def _score_entity(
             )
         )
 
-    if "tests" in task_hints and source_path.startswith("tests/"):
+    if "tests" in task_hints and path_role == TEST_ROLE:
         if "implementation" in task_hints:
             path_role_score += _IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS
             task_intent_score += _IMPLEMENTATION_TEST_SUPPORT_TASK_INTENT_BONUS
             reasons.append(
                 (
                     "path_role",
-                    'implementation + test task hints -> kept "tests/" as supporting context',
+                    "implementation + test task hints -> kept test root as supporting context",
                     _IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS,
                 )
             )
@@ -572,7 +578,7 @@ def _score_entity(
             path_role_score += _TEST_PATH_ROLE_BONUS
             task_intent_score += _TEST_TASK_INTENT_BONUS
             reasons.append(
-                ("path_role", 'test task hint -> boosted "tests/"', _TEST_PATH_ROLE_BONUS)
+                ("path_role", "test task hint -> boosted test root", _TEST_PATH_ROLE_BONUS)
             )
             reasons.append(("task_intent", "test-like task intent boost", _TEST_TASK_INTENT_BONUS))
 
@@ -683,6 +689,17 @@ def _score_entity(
 
     if lexical_score > 0:
         reasons.append(("lexical", "lexical baseline relevance", float(lexical_score)))
+
+    # Apply intent-conditioned path prior (Ranking v2 — Prompt 58.2).
+    # The prior is an additive delta that adjusts for path-role/intent mismatch without
+    # overwhelming strong lexical/semantic scores.  It is only applied when a QueryIntent
+    # is available (i.e. from the full build_context_pack path; test callers may omit it).
+    if query_intent is not None:
+        prior_delta = path_prior_multiplier(source_path, query_intent)
+        if prior_delta != 0.0:
+            path_role_score += prior_delta
+            category: RankingCategory = "path_role" if prior_delta > 0 else "penalty"
+            reasons.append((category, f"path prior ({prior_delta:+.1f})", prior_delta))
 
     graph_score = 0
     normalized_reasons = dedupe_stable_reasons(tuple(reasons))

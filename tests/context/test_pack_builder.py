@@ -883,7 +883,7 @@ def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
         for reason in breakdown.reasons
     )
     assert any(
-        'test task hint -> boosted "tests/"' in reason.message
+        "test task hint -> boosted test root" in reason.message
         for breakdown in test_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )

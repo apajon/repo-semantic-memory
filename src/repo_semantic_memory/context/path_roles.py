@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from repo_semantic_memory.model import Entity
+
+if TYPE_CHECKING:
+    from repo_semantic_memory.context.query_intent import QueryIntent
 
 PathRole = Literal[
     "source",
@@ -73,6 +76,28 @@ _GENERATED_ARTIFACT_PATTERNS = (
     ".egg-info/",
 )
 
+# ---------------------------------------------------------------------------
+# Path-prior scoring constants (Ranking v2 — Prompt 58.2)
+# ---------------------------------------------------------------------------
+# All deltas are conservative (≤ 8 absolute) so they adjust rank without
+# overwhelming strong lexical or semantic matches.
+
+# Extra boost applied by path_prior_multiplier for real test-root paths (tests/ or
+# test/) when the tests intent fires.  This is *additive* to the existing
+# _TEST_PATH_ROLE_BONUS in pack_builder so it should be kept small.
+_PATH_PRIOR_TEST_ROOT_BOOST: float = 4.0
+# Penalty applied to runtime paths that contain a ``test`` directory segment in
+# a non-root position (e.g. lib/ansible/plugins/test/core.py) when the tests
+# intent fires.
+_PATH_PRIOR_RUNTIME_TEST_PENALTY: float = -6.0
+# Boost for __init__.py files when the public_api intent fires (additive to the
+# existing _PUBLIC_API_PATH_ROLE_BONUS in pack_builder).
+_PATH_PRIOR_PUBLIC_API_INIT_BOOST: float = 3.0
+# Mild downrank for docs/examples when an implementation-only intent fires.
+_PATH_PRIOR_IMPL_DOC_PENALTY: float = -2.0
+# Boost for config/build files when config_build_release intent fires.
+_PATH_PRIOR_CONFIG_BOOST: float = 3.0
+
 
 def classify_path_role(*, path: str, source_roots: Sequence[str]) -> PathRole:
     """Classify a repository-relative path into a deterministic role bucket."""
@@ -129,6 +154,97 @@ def is_generated_artifact_path(path: str) -> bool:
     """
     normalized = f"/{_normalize(path)}/"
     return any(pattern in normalized for pattern in _GENERATED_ARTIFACT_PATTERNS)
+
+
+def is_runtime_test_named_path(path: str) -> bool:
+    """Return True if *path* contains a ``test`` directory segment that is NOT a test root.
+
+    Paths like ``lib/ansible/plugins/test/core.py`` have ``test`` as a library-internal
+    directory, not a unit-test root.  Real test roots begin at the repository root with
+    ``tests/`` or ``test/`` and are detected by :func:`classify_path_role`.
+
+    This helper lets path priors differentiate real unit-test trees from runtime
+    directories that happen to be named ``test``.
+
+    Examples::
+
+        is_runtime_test_named_path("lib/ansible/plugins/test/core.py")  # True
+        is_runtime_test_named_path("test/units/plugins/test_x.py")      # False (real root)
+        is_runtime_test_named_path("tests/test_core.py")                 # False (real root)
+        is_runtime_test_named_path("src/mypackage/utils.py")             # False (no test seg)
+    """
+    normalized = _normalize(path)
+    # A real test root starts with tests/ or test/ at the repository root.
+    if normalized.startswith(_TEST_PREFIXES):
+        return False
+    # Detect an embedded /test/ or /tests/ directory segment that is not leading.
+    bracketed = f"/{normalized}/"
+    return "/test/" in bracketed or "/tests/" in bracketed
+
+
+def is_public_api_file(path: str) -> bool:
+    """Return True if *path* is an ``__init__.py`` package API surface file.
+
+    Examples::
+
+        is_public_api_file("httpx/__init__.py")           # True
+        is_public_api_file("django/urls/__init__.py")     # True
+        is_public_api_file("__init__.py")                 # True
+        is_public_api_file("django/urls/resolvers.py")    # False
+    """
+    normalized = _normalize(path)
+    return normalized == "__init__.py" or normalized.endswith("/__init__.py")
+
+
+def path_prior_multiplier(path: str, intent: QueryIntent) -> float:
+    """Return an additive score delta based on path role conditioned on *intent*.
+
+    Applies deterministic, intent-conditioned path priors to the ranking score.
+    All deltas are conservative (≤ 8 absolute) to avoid overwhelming strong
+    lexical or semantic matches.
+
+    Rules applied:
+
+    - **tests intent** — boost real test-root paths (``tests/`` or ``test/`` prefix);
+      penalize runtime paths where ``test`` is an embedded non-root directory segment
+      (e.g. ``lib/ansible/plugins/test/core.py``).
+    - **public_api intent** — modestly boost ``__init__.py`` package surfaces.
+    - **implementation intent** — mild downrank for ``docs/`` and ``examples/`` paths.
+    - **config_build_release intent** — boost package marker / config files.
+    - **unknown intents / neutral combinations** — return ``0.0``.
+
+    Args:
+        path: Repository-relative POSIX path.
+        intent: Parsed :class:`~repo_semantic_memory.context.query_intent.QueryIntent`.
+
+    Returns:
+        Additive score delta.  Positive boosts the entity; negative downranks it.
+    """
+    normalized = _normalize(path)
+    delta: float = 0.0
+
+    if "tests" in intent.intents:
+        if normalized.startswith(_TEST_PREFIXES):
+            delta += _PATH_PRIOR_TEST_ROOT_BOOST
+        elif is_runtime_test_named_path(normalized):
+            delta += _PATH_PRIOR_RUNTIME_TEST_PENALTY
+
+    if "public_api" in intent.intents:
+        if is_public_api_file(normalized):
+            delta += _PATH_PRIOR_PUBLIC_API_INIT_BOOST
+
+    if "implementation" in intent.intents and "tests" not in intent.intents:
+        # Mild downrank for docs/examples when the query is implementation-only.
+        # Do not apply when tests intent also fires (combined queries should not suppress tests).
+        if normalized.startswith(_DOC_PREFIXES) or normalized.startswith(_EXAMPLE_PREFIXES):
+            delta += _PATH_PRIOR_IMPL_DOC_PENALTY
+
+    if "config_build_release" in intent.intents:
+        filename = normalized.rsplit("/", maxsplit=1)[-1]
+        if filename in _MARKER_FILENAMES or normalized.startswith(_CONFIG_PREFIXES):
+            delta += _PATH_PRIOR_CONFIG_BOOST
+
+    return delta
 
 
 def _is_source_path(path: str, source_roots: Sequence[str]) -> bool:
