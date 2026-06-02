@@ -4,6 +4,17 @@
 > Target design model: Claude Opus 4.7 / 4.8. Implementation model later: Claude Sonnet 4.6.
 > **No code changes are made in this prompt.** This document specifies the design and the
 > implementation prompt sequence (58.1–58.6) that follow.
+>
+> **58.1 — Query intent parser and generic-token downweighting: ✅ implemented.**
+> Added `src/repo_semantic_memory/context/query_intent.py` (`QueryIntent` dataclass,
+> `parse_query_intent()`). Generic stop tokens (`find`, `how`, `files`, `implementation`, `test`,
+> `tests`, `behavior`, `code`, `work`, `works`, function words) are stripped from BM25 lexical
+> scoring; domain tokens (`loader`, `resolver`, `handler`, `dispatch`, `url`, `plugin`, `timeout`,
+> `transport`, `middleware`) are preserved via allowlist guard. `pack_builder.build_context_pack`
+> now passes `lexical_tokens` (filtered) to `_rank_entities`; intent detection (`_task_hints`,
+> `_is_code_task`) still uses the full raw token set. 42 unit tests added in
+> `tests/context/test_query_intent.py`. Non-goals still deferred: path priors (58.2), test-file
+> branch (58.3), support-file expansion (58.4), selection reasons (58.5), regression eval (58.6).
 
 ---
 
@@ -336,16 +347,17 @@ Design requirements:
 Implementation is split into focused prompts. Each is independently testable and reversible. Default
 implementation model: Claude Sonnet 4.6.
 
-### 58.1 — Query intent parser and generic-token downweighting
+### 58.1 — Query intent parser and generic-token downweighting ✅
 - **Goal:** Add a deterministic intent parser and generic-phrase stop-set; downweight generics before
   BM25; preserve domain tokens.
-- **Files likely touched:** `context/pack_builder.py` (`_task_hints`, `_tokenize` callers), possibly a
-  new `context/query_intent.py`; `context/bm25.py` only if query-side filtering hooks are needed.
-- **Tests:** new `tests/context/test_query_intent.py`; extend pack-builder ranking tests to assert
-  `find`/`files`/`test` no longer lexically boost `find.py` / `files/*` / runtime `plugins/test/`.
-- **Risks:** over-filtering domain tokens (`loader`, `resolve`, `test`-as-intent). Mitigate with the
-  allowlist guard (§5).
-- **Validation:** ranking unit tests + existing benchmark eval show no regression on current gold tasks.
+- **Files touched:** new `context/query_intent.py` (`QueryIntent` dataclass, `parse_query_intent()`);
+  `context/pack_builder.py` (`build_context_pack` now calls `parse_query_intent` and passes
+  `lexical_tokens` to `_rank_entities`; intent detection still uses full raw tokens).
+- **Tests:** 42 new tests in `tests/context/test_query_intent.py` covering intent detection, generic
+  downweighting, domain token preservation, backward compat, and focused BM25 score comparisons.
+- **Risks mitigated:** allowlist guard prevents stripping domain tokens (`loader`, `resolve`, `test` →
+  intent-only path, not lexical scoring against runtime `plugins/test/`).
+- **Validation:** 885 tests pass; ruff + mypy clean.
 
 ### 58.2 — Task-aware path priors
 - **Goal:** Replace fixed global penalties with intent-conditioned role multipliers; fix `test/` singular

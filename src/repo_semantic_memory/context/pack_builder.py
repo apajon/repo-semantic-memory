@@ -33,6 +33,7 @@ from repo_semantic_memory.context.path_roles import (
     infer_source_roots,
     is_generated_artifact_path,
 )
+from repo_semantic_memory.context.query_intent import parse_query_intent
 from repo_semantic_memory.context.ranking import (
     RankingBreakdown,
     RankingCategory,
@@ -164,6 +165,12 @@ def build_context_pack(
     )
     entity_by_id = {entity.id.value: entity for entity in normalized_entities}
     task_tokens = _tokenize(task)
+    # Parse query intent: separates generic task-phrasing tokens from meaningful
+    # domain tokens.  Intent detection uses the full raw token set; BM25 lexical
+    # scoring uses only the filtered lexical_tokens so generic words like "find",
+    # "files", "how" cannot boost unrelated files via source_path field matching.
+    query_intent = parse_query_intent(task)
+    lexical_tokens = query_intent.lexical_tokens
     is_code_task = _is_code_task(task_tokens)
     task_hints = _task_hints(task_tokens)
     inferred_components = infer_semantic_components(
@@ -192,7 +199,7 @@ def build_context_pack(
         entities=normalized_entities,
         relations=normalized_relations,
         inferred_components=inferred_components,
-        task_tokens=task_tokens,
+        task_tokens=lexical_tokens,
         is_code_task=is_code_task,
         task_hints=task_hints,
         public_api_entity_ids=public_api_entity_ids,
