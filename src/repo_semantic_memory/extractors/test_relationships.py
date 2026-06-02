@@ -73,8 +73,12 @@ class _SourceIndex:
         self.classes_by_name: dict[str, list[Entity]] = {}
         # All non-test entities keyed by qualified_name for symbol matching.
         self.symbols_by_qname: dict[str, Entity] = {}
-        # All non-test class entities for token-overlap search.
-        self.classes: list[Entity] = []
+        # Function/method/class entities keyed by lowercase name, for the
+        # function-name heuristic (replaces a full symbol scan per test).
+        self.callables_by_lower_name: dict[str, list[Entity]] = {}
+        # Token → class entities, for the token-overlap fallback (replaces a
+        # full class scan per test class).
+        self.classes_by_token: dict[str, list[Entity]] = {}
 
 
 def _build_source_index(entities: Sequence[Entity]) -> _SourceIndex:
@@ -83,13 +87,16 @@ def _build_source_index(entities: Sequence[Entity]) -> _SourceIndex:
         if _is_test_entity(entity):
             continue
         idx.symbols_by_qname[entity.qualified_name] = entity
+        if entity.kind in ("function", "method", "class"):
+            idx.callables_by_lower_name.setdefault(entity.name.lower(), []).append(entity)
         if entity.kind == "module":
             idx.modules_by_qname[entity.qualified_name] = entity
             stem = _path_stem(entity.source_range.path)
             idx.modules_by_stem.setdefault(stem, []).append(entity)
         elif entity.kind == "class":
             idx.classes_by_name.setdefault(entity.name, []).append(entity)
-            idx.classes.append(entity)
+            for token in set(_tokenize_name(entity.name)):
+                idx.classes_by_token.setdefault(token, []).append(entity)
     return idx
 
 
@@ -282,8 +289,15 @@ def _class_name_relations(
     test_tokens = set(_tokenize_name(stripped))
     if len(test_tokens) < _MIN_TOKEN_OVERLAP:
         return []
+    # Gather only classes that share at least one token with the test class
+    # (a necessary condition for the ``>= _MIN_TOKEN_OVERLAP`` check below),
+    # instead of scanning every source class.
+    candidate_ids: dict[str, Entity] = {}
+    for token in test_tokens:
+        for cls_entity in source_index.classes_by_token.get(token, []):
+            candidate_ids.setdefault(cls_entity.id.value, cls_entity)
     result: list[Relation] = []
-    for cls_entity in sorted(source_index.classes, key=lambda e: e.id.value):
+    for cls_entity in sorted(candidate_ids.values(), key=lambda e: e.id.value):
         src_tokens = set(_tokenize_name(cls_entity.name))
         overlap = test_tokens & src_tokens
         if len(overlap) >= _MIN_TOKEN_OVERLAP:
@@ -311,20 +325,18 @@ def _function_name_relations(
         return []
 
     result: list[Relation] = []
-    for entity in sorted(source_index.symbols_by_qname.values(), key=lambda e: e.id.value):
-        if entity.kind not in ("function", "method", "class"):
-            continue
-        if entity.name.lower() == stripped.lower():
-            result.append(
-                _make_relation(
-                    source=test_entity,
-                    target=entity,
-                    heuristic="function_name",
-                    confidence="medium",
-                    matched_terms=[stripped],
-                    note=f"test function {func_name!r} \u2192 source symbol {stripped!r}",
-                )
+    candidates = source_index.callables_by_lower_name.get(stripped.lower(), [])
+    for entity in sorted(candidates, key=lambda e: e.id.value):
+        result.append(
+            _make_relation(
+                source=test_entity,
+                target=entity,
+                heuristic="function_name",
+                confidence="medium",
+                matched_terms=[stripped],
+                note=f"test function {func_name!r} \u2192 source symbol {stripped!r}",
             )
+        )
     return result
 
 

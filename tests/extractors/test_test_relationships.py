@@ -600,3 +600,153 @@ def test_no_test_execution_occurs(tmp_path: Path) -> None:
     # This must not raise or execute test_dangerous_operation.
     rels = extract_test_relationships(tmp_path, [test_fn, src_fn])
     assert isinstance(rels, list)
+
+
+# ---------------------------------------------------------------------------
+# Performance / bounded-candidate regression tests (Prompt 57.3)
+# ---------------------------------------------------------------------------
+
+
+def test_token_overlap_uses_bounded_candidate_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The token-overlap fallback must not tokenize every source class per test.
+
+    Under the previous O(test_classes x source_classes) implementation, the
+    fallback tokenized every source class once for each test class.  The token
+    index means each source class is tokenized once at index-build time and only
+    matching candidates are re-tokenized, keeping total work near-linear.
+    """
+    import repo_semantic_memory.extractors.test_relationships as tr
+
+    call_count = 0
+    original = tr._tokenize_name
+
+    def _counting_tokenize(name: str) -> list[str]:
+        nonlocal call_count
+        call_count += 1
+        return original(name)
+
+    monkeypatch.setattr(tr, "_tokenize_name", _counting_tokenize)
+
+    num_tests = 40
+    num_sources = 200
+    entities: list[Entity] = []
+    # Test classes whose tokens match nothing in the source set.
+    for i in range(num_tests):
+        entities.append(
+            _class_entity(
+                f"tests/test_alpha_{i}.py",
+                f"tests.test_alpha_{i}.TestAlphaBeta{i}",
+                f"TestAlphaBeta{i}",
+            )
+        )
+    # Source classes using a disjoint token vocabulary (no shared tokens).
+    for j in range(num_sources):
+        entities.append(
+            _class_entity(
+                f"src/zeta_{j}.py",
+                f"pkg.zeta_{j}.ZetaGamma{j}",
+                f"ZetaGamma{j}",
+            )
+        )
+
+    rels = extract_test_relationships(tmp_path, entities)
+
+    # No spurious relations: disjoint vocabularies share no tokens.
+    token_rels = [r for r in rels if r.metadata.get("heuristic") == "token_overlap"]
+    assert token_rels == []
+
+    # A naive full-scan fallback would tokenize ~num_tests * num_sources times.
+    # The indexed implementation stays far below that quadratic bound.
+    assert call_count < num_tests * num_sources // 4
+
+
+def test_token_overlap_finds_matches_at_scale(tmp_path: Path) -> None:
+    """Token-overlap still finds the correct matches among many source classes."""
+    entities: list[Entity] = []
+    for j in range(300):
+        entities.append(
+            _class_entity(
+                f"src/noise_{j}.py",
+                f"pkg.noise_{j}.NoiseWidget{j}",
+                f"NoiseWidget{j}",
+            )
+        )
+    test_cls = _class_entity(
+        "tests/test_cleanup.py",
+        "tests.test_cleanup.TestCleanupOwnership",
+        "TestCleanupOwnership",
+    )
+    target = _class_entity(
+        "src/mgr.py",
+        "pkg.mgr.CleanupOwnershipManager",
+        "CleanupOwnershipManager",
+    )
+    entities.extend([test_cls, target])
+
+    rels = extract_test_relationships(tmp_path, entities)
+    token_targets = {
+        r.target_entity_id.value for r in rels if r.metadata.get("heuristic") == "token_overlap"
+    }
+    assert token_targets == {target.id.value}
+
+
+def test_function_name_matching_scales(tmp_path: Path) -> None:
+    """test_foo finds source foo even with many unrelated source symbols."""
+    entities: list[Entity] = []
+    for j in range(500):
+        entities.append(
+            _function_entity(
+                f"src/mod_{j}.py",
+                f"pkg.mod_{j}.unrelated_symbol_{j}",
+                f"unrelated_symbol_{j}",
+            )
+        )
+    test_fn = _function_entity(
+        "tests/test_target.py",
+        "tests.test_target.test_build_widget",
+        "test_build_widget",
+    )
+    target = _function_entity(
+        "src/widget.py",
+        "pkg.widget.build_widget",
+        "build_widget",
+    )
+    entities.extend([test_fn, target])
+
+    rels = extract_test_relationships(tmp_path, entities)
+    fn_targets = {
+        r.target_entity_id.value for r in rels if r.metadata.get("heuristic") == "function_name"
+    }
+    assert fn_targets == {target.id.value}
+
+
+def test_function_name_matches_methods_and_classes(tmp_path: Path) -> None:
+    """function_name heuristic still matches method and class targets by name."""
+    test_fn = _function_entity(
+        "tests/test_x.py",
+        "tests.test_x.test_handle",
+        "test_handle",
+    )
+    method = _method_entity("src/svc.py", "pkg.svc.Service.handle", "handle")
+    klass = _class_entity("src/h.py", "pkg.h.Handle", "Handle")
+    rels = extract_test_relationships(tmp_path, [test_fn, method, klass])
+    fn_targets = {
+        r.target_entity_id.value for r in rels if r.metadata.get("heuristic") == "function_name"
+    }
+    assert fn_targets == {method.id.value, klass.id.value}
+
+
+def test_single_shared_token_does_not_match(tmp_path: Path) -> None:
+    """A single shared token stays below _MIN_TOKEN_OVERLAP and produces no relation."""
+    test_cls = _class_entity(
+        "tests/test_cleanup.py",
+        "tests.test_cleanup.TestCleanupWorker",
+        "TestCleanupWorker",
+    )
+    # Shares only the "cleanup" token (one token < _MIN_TOKEN_OVERLAP).
+    src_cls = _class_entity("src/c.py", "pkg.c.CleanupRegistry", "CleanupRegistry")
+    rels = extract_test_relationships(tmp_path, [test_cls, src_cls])
+    token_rels = [r for r in rels if r.metadata.get("heuristic") == "token_overlap"]
+    assert token_rels == []
