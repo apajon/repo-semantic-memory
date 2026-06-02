@@ -993,6 +993,16 @@ def _run_index_command(
         extra_meta["git_head"] = ""
         extra_meta["git_dirty"] = ""
 
+    # Scope metadata — always written so consumers can distinguish full vs scoped indexes.
+    if includes or excludes:
+        extra_meta["index_scope"] = "scoped"
+        extra_meta["include_patterns"] = json.dumps(includes or [])
+        extra_meta["exclude_patterns"] = json.dumps(excludes or [])
+    else:
+        extra_meta["index_scope"] = "full"
+        extra_meta["include_patterns"] = "[]"
+        extra_meta["exclude_patterns"] = "[]"
+
     store = SQLiteStore(db_path)
     print("indexing: writing index...", file=sys.stderr)
     _t = time.monotonic()
@@ -1712,6 +1722,9 @@ def _run_store_status_command(*, repo: str, db: str | None, emit_json: bool) -> 
             "schema_version": report.schema_version,
             "context_pack_version": report.context_pack_version,
             "suggested_action": report.suggested_action,
+            "index_scope": report.index_scope,
+            "include_patterns": list(report.include_patterns),
+            "exclude_patterns": list(report.exclude_patterns),
         }
         print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
         return 0
@@ -1722,6 +1735,17 @@ def _run_store_status_command(*, repo: str, db: str | None, emit_json: bool) -> 
     print(f"Index:  {db_display}")
     print(f"Mode:   {report.index_mode}")
     print(f"Status: {report.index_status.value}")
+    if report.index_scope:
+        print(f"Scope:  {report.index_scope}")
+        if report.index_scope == "scoped":
+            if report.include_patterns:
+                print("Includes:")
+                for pat in report.include_patterns:
+                    print(f"  - {pat}")
+            if report.exclude_patterns:
+                print("Excludes:")
+                for pat in report.exclude_patterns:
+                    print(f"  - {pat}")
     if report.indexed_at:
         print(f"Indexed at: {report.indexed_at}")
     if report.indexed_git_head:

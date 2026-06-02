@@ -295,11 +295,17 @@ def _tool_status(
         payload["working_tree_dirty"] = report.working_tree_dirty
         payload["index_mode"] = report.index_mode
         payload["suggested_action"] = report.suggested_action
+        payload["index_scope"] = report.index_scope
+        payload["include_patterns"] = list(report.include_patterns)
+        payload["exclude_patterns"] = list(report.exclude_patterns)
     except Exception:  # noqa: BLE001 — staleness errors must not break status
         payload["index_status"] = "unknown"
         payload["index_status_reason"] = "detection_error"
         payload["index_mode"] = session.index_mode
         payload["suggested_action"] = None
+        payload["index_scope"] = None
+        payload["include_patterns"] = []
+        payload["exclude_patterns"] = []
 
     return payload
 
@@ -478,6 +484,39 @@ def _tool_build_context_pack(
         preview_caps=preview_caps,
     )
     payload["detail_level"] = detail_level
+
+    # Append scope warning when the index was built with include/exclude filters.
+    # Errors here must never break context-pack delivery.
+    try:
+        from repo_semantic_memory.index_status import detect_stale_from_metadata  # noqa: PLC0415
+
+        _cp_store = SQLiteStore(session.db_path)
+        try:
+            _cp_store.initialize()
+            _meta = _cp_store.get_metadata()
+        finally:
+            _cp_store.close()
+        _cp_report = detect_stale_from_metadata(
+            repo_root=session.repo_root,
+            db_path=session.db_path,
+            index_mode=session.index_mode,
+            metadata=_meta,
+        )
+        if _cp_report.index_scope == "scoped":
+            payload["index_scope"] = "scoped"
+            payload["include_patterns"] = list(_cp_report.include_patterns)
+            payload["exclude_patterns"] = list(_cp_report.exclude_patterns)
+            payload["scope_warning"] = (
+                "This index is scoped and may not cover the full repository. "
+                "Results are limited to the indexed paths."
+            )
+        else:
+            payload["index_scope"] = _cp_report.index_scope
+            payload["include_patterns"] = []
+            payload["exclude_patterns"] = []
+    except Exception:  # noqa: BLE001 — scope warnings must never break context packs
+        pass
+
     return payload
 
 

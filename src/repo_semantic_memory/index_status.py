@@ -12,6 +12,7 @@ Policy is report-only: this module never auto-rebuilds an index.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -67,6 +68,9 @@ class IndexStatusReport:
     schema_version: str | None
     context_pack_version: str | None
     suggested_action: str | None
+    index_scope: str | None = None
+    include_patterns: tuple[str, ...] = ()
+    exclude_patterns: tuple[str, ...] = ()
 
 
 def detect_index_status(
@@ -375,6 +379,21 @@ def _report(
     suggested_action: str | None,
 ) -> IndexStatusReport:
     """Construct an ``IndexStatusReport`` from common fields + metadata dict."""
+    scope = _nonempty(metadata.get("index_scope"))
+    include_patterns: tuple[str, ...] = ()
+    exclude_patterns: tuple[str, ...] = ()
+    try:
+        raw_inc = metadata.get("include_patterns")
+        if raw_inc:
+            include_patterns = tuple(json.loads(raw_inc))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    try:
+        raw_exc = metadata.get("exclude_patterns")
+        if raw_exc:
+            exclude_patterns = tuple(json.loads(raw_exc))
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
     return IndexStatusReport(
         index_status=status,
         index_status_reason=reason,
@@ -390,6 +409,9 @@ def _report(
             _nonempty(metadata.get("context_pack_version")) or CONTEXT_PACK_VERSION
         ),
         suggested_action=suggested_action,
+        index_scope=scope,
+        include_patterns=include_patterns,
+        exclude_patterns=exclude_patterns,
     )
 
 
