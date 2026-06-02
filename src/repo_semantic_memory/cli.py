@@ -33,6 +33,7 @@ from repo_semantic_memory.eval import (
 )
 from repo_semantic_memory.exporters import AiDirectoryExporter, export_jsonl_directory
 from repo_semantic_memory.extractors import (
+    ScopeFilter,
     extract_filesystem_entities,
     extract_markdown_outline_path,
     extract_test_relationships,
@@ -130,6 +131,30 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Write a machine-readable JSON profiling report to PATH. "
             "Implies --profile. Observational only: does not change indexing behavior or output."
+        ),
+    )
+    index_parser.add_argument(
+        "--include",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        dest="include",
+        help=(
+            "Limit indexing to files matching this glob pattern (repository-relative). "
+            "May be repeated. Excludes are applied first. "
+            "Example: --include 'src/**' --include 'tests/**'"
+        ),
+    )
+    index_parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="GLOB",
+        dest="exclude",
+        help=(
+            "Skip files matching this glob pattern (repository-relative). "
+            "May be repeated. Excludes take precedence over includes. "
+            "Example: --exclude 'docs/**'"
         ),
     )
 
@@ -619,6 +644,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             incremental=args.incremental,
             profile=args.profile or bool(args.profile_report),
             profile_report=args.profile_report,
+            includes=args.include or [],
+            excludes=args.exclude or [],
         )
     if args.command == "git":
         if args.git_target == "summary":
@@ -765,6 +792,8 @@ def _run_index_command(
     incremental: bool = False,
     profile: bool = False,
     profile_report: str | None = None,
+    includes: list[str] | None = None,
+    excludes: list[str] | None = None,
 ) -> int:
     repository_root = Path(path).resolve()
     db_path = Path(db)
@@ -796,12 +825,20 @@ def _run_index_command(
                 file=sys.stderr,
             )
     profiler: _AnyProfiler = IndexProfiler() if profile else _NullProfiler()
+    # Build a ScopeFilter only when at least one pattern is present. Empty
+    # lists are falsy, so ``includes or excludes`` is False when both are
+    # empty/None — preserving the zero-overhead passthrough path.
+    scope_filter: ScopeFilter | None = (
+        ScopeFilter(includes or [], excludes or []) if includes or excludes else None
+    )
 
     _index_start = time.monotonic()
     _started_at = datetime.now(tz=UTC).isoformat()
     print("indexing: scanning files...", file=sys.stderr)
     with profiler.phase("file_discovery") as _ph_discovery:
-        filesystem_entities = extract_filesystem_entities(repository_root)
+        filesystem_entities = extract_filesystem_entities(
+            repository_root, scope_filter=scope_filter
+        )
 
     # Compute per-type counts for the scan summary and progress callbacks.
     python_count = sum(1 for e in filesystem_entities if e.kind == "module")
@@ -828,7 +865,9 @@ def _run_index_command(
     _t = time.monotonic()
     with profiler.phase("markdown_extraction") as _ph_md:
         markdown_outline = extract_markdown_outline_path(
-            repository_root, progress=_make_progress_callback("Markdown")
+            repository_root,
+            progress=_make_progress_callback("Markdown"),
+            scope_filter=scope_filter,
         )
     _ph_md.files_processed = md_count
     _ph_md.entities_created = len(markdown_outline.entities)
@@ -843,7 +882,9 @@ def _run_index_command(
     _t = time.monotonic()
     with profiler.phase("python_ast") as _ph_py:
         python_entities, python_relations = index_python_path(
-            repository_root, progress=_make_progress_callback("Python")
+            repository_root,
+            progress=_make_progress_callback("Python"),
+            scope_filter=scope_filter,
         )
     _ph_py.files_processed = python_count
     _ph_py.entities_created = len(python_entities)
@@ -858,7 +899,9 @@ def _run_index_command(
     _t = time.monotonic()
     with profiler.phase("exports_extraction") as _ph_exp:
         export_relations = index_python_exports(
-            repository_root, progress=_make_progress_callback("exports")
+            repository_root,
+            progress=_make_progress_callback("exports"),
+            scope_filter=scope_filter,
         )
     _ph_exp.files_processed = init_count
     _ph_exp.relations_created = len(export_relations)

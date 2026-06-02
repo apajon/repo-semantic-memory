@@ -1237,3 +1237,105 @@ def test_index_profile_report_elapsed_fields_present(tmp_path: Path) -> None:
     report = json.loads(report_path.read_text())
     for phase in report["phases"]:
         assert "elapsed_seconds" in phase, f"Phase {phase['name']!r} missing elapsed_seconds"
+
+
+# ---------------------------------------------------------------------------
+# --include / --exclude scoped indexing (Prompt 57.4)
+# ---------------------------------------------------------------------------
+
+
+def _db_entity_names(db: Path) -> set[str]:
+    """Return all qualified_name values from the entities table of an indexed DB."""
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        rows = conn.execute("SELECT qualified_name FROM entities").fetchall()
+    return {row[0] for row in rows}
+
+
+def test_index_include_reduces_entities(tmp_path: Path) -> None:
+    """--include src/** should index fewer entities than a full run."""
+    db_full = tmp_path / "full" / "index.sqlite"
+    db_scoped = tmp_path / "scoped" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_full)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_scoped), "--include", "src/**"])
+
+    full_count = len(_db_entity_names(db_full))
+    scoped_count = len(_db_entity_names(db_scoped))
+
+    assert scoped_count < full_count, (
+        f"Expected fewer entities with --include src/**, got {scoped_count} vs {full_count}"
+    )
+
+
+def test_index_include_src_only_has_no_doc_entities(tmp_path: Path) -> None:
+    """--include src/** must exclude docs/guide.md entities."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--include", "src/**"])
+    names = _db_entity_names(db_path)
+    doc_names = {n for n in names if n.startswith("docs/")}
+    assert not doc_names, f"Expected no docs/ entities with --include src/**, got: {doc_names}"
+
+
+def test_index_exclude_reduces_entities(tmp_path: Path) -> None:
+    """--exclude docs/** should index fewer entities than a full run."""
+    db_full = tmp_path / "full" / "index.sqlite"
+    db_scoped = tmp_path / "scoped" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_full)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_scoped), "--exclude", "docs/**"])
+
+    full_count = len(_db_entity_names(db_full))
+    scoped_count = len(_db_entity_names(db_scoped))
+
+    assert scoped_count < full_count
+
+
+def test_index_exclude_docs_has_no_doc_entities(tmp_path: Path) -> None:
+    """--exclude docs/** must not produce any docs/ entities."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_path), "--exclude", "docs/**"])
+    names = _db_entity_names(db_path)
+    doc_names = {n for n in names if n.startswith("docs/")}
+    assert not doc_names, f"Expected no docs/ entities with --exclude docs/**, got: {doc_names}"
+
+
+def test_index_no_scope_patterns_unchanged(tmp_path: Path) -> None:
+    """Default behavior (no --include/--exclude) must be identical to before."""
+    db_a = tmp_path / "a" / "index.sqlite"
+    db_b = tmp_path / "b" / "index.sqlite"
+
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_a)])
+    main(["index", str(_FIXTURE_ROOT), "--db", str(db_b)])
+
+    assert _db_entity_names(db_a) == _db_entity_names(db_b)
+
+
+def test_index_multiple_includes(tmp_path: Path) -> None:
+    """Multiple --include flags combine as OR."""
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    main(
+        [
+            "index",
+            str(_FIXTURE_ROOT),
+            "--db",
+            str(db_path),
+            "--include",
+            "src/**",
+            "--include",
+            "docs/**",
+        ]
+    )
+    names = _db_entity_names(db_path)
+    # Python modules from src/ are stored with module-qualified names (e.g. "app")
+    assert "app" in names or any(n.startswith("app.") for n in names), (
+        f"Expected Python entities from src/ to be present; got: {sorted(names)}"
+    )
+    # Doc entities from docs/ are stored with path-based qualified names
+    assert any(n.startswith("docs/") for n in names), (
+        f"Expected docs/ entities to be present; got: {sorted(names)}"
+    )
+    # config/ should NOT be indexed (not in either include pattern)
+    config_names = {n for n in names if n.startswith("config/")}
+    assert not config_names, f"Expected no config/ entities, got: {config_names}"
