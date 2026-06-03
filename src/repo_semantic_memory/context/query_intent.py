@@ -78,6 +78,22 @@ _ARCHITECTURE_FLOW_TOKENS: frozenset[str] = frozenset(
         "middleware",
     }
 )
+_DOCS_EXAMPLES_TOKENS: frozenset[str] = frozenset(
+    {
+        # Explicit documentation requests.
+        "docs",
+        "doc",
+        "documentation",
+        # Tutorial / example / guide requests.
+        "tutorial",
+        "tutorials",
+        "example",
+        "examples",
+        "usage",
+        "guide",
+        "readme",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Generic phrase / token stop-set
@@ -217,6 +233,9 @@ class QueryIntent:
     domain_tokens: tuple[str, ...]
     downweighted_tokens: tuple[str, ...]
     lexical_tokens: tuple[str, ...]
+    # Possible intent labels: ``tests``, ``public_api``, ``implementation``,
+    # ``config_build_release``, ``error_handling``, ``architecture_flow``,
+    # ``docs_examples``.
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +294,8 @@ def _detect_intents(tokens: tuple[str, ...]) -> frozenset[str]:
         intents.add("error_handling")
     if token_set & _ARCHITECTURE_FLOW_TOKENS:
         intents.add("architecture_flow")
+    if token_set & _DOCS_EXAMPLES_TOKENS:
+        intents.add("docs_examples")
 
     return frozenset(intents)
 

@@ -379,3 +379,53 @@ def test_domain_token_still_ranks_domain_path() -> None:
         f"Resolver score {scores['python:module:django.urls.resolvers']} "
         f"should exceed noise score {scores['python:module:django.contrib.staticfiles.finders']}"
     )
+
+
+# ---------------------------------------------------------------------------
+# docs_examples intent detection (58.7C)
+# ---------------------------------------------------------------------------
+
+
+def test_detects_docs_examples_intent_from_docs_token() -> None:
+    intent = parse_query_intent("Show me the docs for URL routing")
+    assert "docs_examples" in intent.intents
+
+
+def test_detects_docs_examples_intent_from_documentation_token() -> None:
+    intent = parse_query_intent("Find documentation for the resolver module")
+    assert "docs_examples" in intent.intents
+
+
+def test_detects_docs_examples_intent_from_tutorial_token() -> None:
+    intent = parse_query_intent("Find the tutorial for callback commands")
+    assert "docs_examples" in intent.intents
+
+
+def test_detects_docs_examples_intent_from_example_token() -> None:
+    intent = parse_query_intent("Show an example of URL resolver usage")
+    assert "docs_examples" in intent.intents
+
+
+def test_detects_docs_examples_intent_from_examples_token() -> None:
+    intent = parse_query_intent("Find examples of callback usage")
+    assert "docs_examples" in intent.intents
+
+
+def test_detects_docs_examples_intent_from_guide_token() -> None:
+    intent = parse_query_intent("Find the migration guide for the resolver")
+    assert "docs_examples" in intent.intents
+
+
+def test_detects_docs_examples_intent_from_readme_token() -> None:
+    intent = parse_query_intent("Show the README for this package")
+    assert "docs_examples" in intent.intents
+
+
+def test_implementation_query_does_not_trigger_docs_examples_intent() -> None:
+    intent = parse_query_intent("Find where URL routing resolver is implemented")
+    assert "docs_examples" not in intent.intents
+
+
+def test_neutral_code_query_does_not_trigger_docs_examples_intent() -> None:
+    intent = parse_query_intent("Find how Typer callback command processing works")
+    assert "docs_examples" not in intent.intents

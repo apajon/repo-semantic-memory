@@ -2604,3 +2604,117 @@ def test_ansible_plugin_loader_outranks_cgroup_loads_method() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 58.7C regression tests: docs/tutorial/example path noise suppression
+# ---------------------------------------------------------------------------
+
+
+def test_implementation_file_outranks_docs_src_tutorial_for_neutral_query() -> None:
+    """docs_src/ tutorial files must not outrank source implementation files for code-search queries.
+
+    Regression for: Typer docs_src/commands/callback/tutorial001.py ranking ahead of
+    typer/core.py when querying "Find how Typer callback command processing works".
+    """
+    tutorial = _make_module_entity(
+        eid="python:docs_src/commands/callback/tutorial001.py:module:tutorial001",
+        name="tutorial001",
+        qualified_name="tutorial001",
+        source_path="docs_src/commands/callback/tutorial001.py",
+    )
+    impl = _make_module_entity(
+        eid="python:typer/core.py:module:typer.core",
+        name="core",
+        qualified_name="typer.core",
+        source_path="typer/core.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+    task = "Find how Typer callback command processing works"
+    pack = _build_pack([tutorial, impl, *filler], task)
+
+    selected_qnames = [e.qualified_name for e in pack.selected_entities]
+    impl_index = next(
+        (i for i, q in enumerate(selected_qnames) if q == "typer.core"),
+        None,
+    )
+    tutorial_index = next(
+        (i for i, q in enumerate(selected_qnames) if "tutorial001" in q),
+        len(selected_qnames),
+    )
+    assert impl_index is not None, (
+        "typer.core implementation module must be selected for a callback-processing query"
+    )
+    assert impl_index < tutorial_index, (
+        f"typer.core (rank {impl_index}) must rank ahead of docs_src tutorial "
+        f"(rank {tutorial_index})"
+    )
+
+
+def test_tutorials_path_does_not_outrank_source_for_neutral_query() -> None:
+    """tutorials/ paths must be penalized for neutral code-search queries."""
+    tutorial = _make_module_entity(
+        eid="python:tutorials/getting_started.py:module:getting_started",
+        name="getting_started",
+        qualified_name="getting_started",
+        source_path="tutorials/getting_started.py",
+    )
+    impl = _make_module_entity(
+        eid="python:src/mypackage/core.py:module:mypackage.core",
+        name="core",
+        qualified_name="mypackage.core",
+        source_path="src/mypackage/core.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+    task = "How does core processing work in mypackage"
+    pack = _build_pack([tutorial, impl, *filler], task)
+
+    selected_qnames = [e.qualified_name for e in pack.selected_entities]
+    impl_index = next(
+        (i for i, q in enumerate(selected_qnames) if q == "mypackage.core"),
+        None,
+    )
+    tutorial_index = next(
+        (i for i, q in enumerate(selected_qnames) if q == "getting_started"),
+        len(selected_qnames),
+    )
+    assert impl_index is not None, "mypackage.core must be selected for an implementation query"
+    assert impl_index < tutorial_index, (
+        f"source impl (rank {impl_index}) must rank ahead of tutorials/ path "
+        f"(rank {tutorial_index})"
+    )
+
+
+def test_docs_tutorial_selectable_when_query_explicitly_requests_tutorial() -> None:
+    """docs_src/ tutorial files must NOT be suppressed when the query explicitly asks for tutorial/example content.
+
+    This verifies the docs_examples intent gate: penalty is skipped for documentation queries.
+    """
+    tutorial = _make_module_entity(
+        eid="python:docs_src/commands/callback/tutorial001.py:module:tutorial001",
+        name="tutorial001",
+        qualified_name="tutorial001",
+        source_path="docs_src/commands/callback/tutorial001.py",
+    )
+    impl = _make_module_entity(
+        eid="python:typer/core.py:module:typer.core",
+        name="core",
+        qualified_name="typer.core",
+        source_path="typer/core.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+    # Explicit tutorial/example request → docs_examples intent fires → no penalty
+    task = "Show me the tutorial examples for callback commands"
+    pack = _build_pack([tutorial, impl, *filler], task)
+
+    selected_qnames = [e.qualified_name for e in pack.selected_entities]
+    assert "tutorial001" in selected_qnames, (
+        "docs_src tutorial must remain selectable when query explicitly asks for tutorial/example content"
+    )
+

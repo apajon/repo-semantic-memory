@@ -44,7 +44,7 @@ _COMMON_SOURCE_ROOT_NAMES = (
 _MARKER_FILENAMES = {"pyproject.toml", "package.xml", "setup.py", "setup.cfg"}
 _TEST_PREFIXES = ("tests/", "test/")
 _EXAMPLE_PREFIXES = ("examples/", "example/")
-_DOC_PREFIXES = ("docs/", "doc/")
+_DOC_PREFIXES = ("docs/", "doc/", "docs_src/", "tutorials/", "tutorial/")
 _CI_PREFIXES = (".github/", ".gitlab/", ".circleci/", ".buildkite/", "ci/")
 _TOOL_PREFIXES = ("tools/", "scripts/")
 _CONFIG_PREFIXES = ("config/",)
@@ -93,8 +93,9 @@ _PATH_PRIOR_RUNTIME_TEST_PENALTY: float = -6.0
 # Boost for __init__.py files when the public_api intent fires (additive to the
 # existing _PUBLIC_API_PATH_ROLE_BONUS in pack_builder).
 _PATH_PRIOR_PUBLIC_API_INIT_BOOST: float = 3.0
-# Mild downrank for docs/examples when an implementation-only intent fires.
-_PATH_PRIOR_IMPL_DOC_PENALTY: float = -2.0
+# Downrank for docs/tutorial/example paths when the query does not explicitly ask
+# for documentation or examples (i.e. the ``docs_examples`` intent is absent).
+_PATH_PRIOR_DOC_EXAMPLE_PENALTY: float = -4.0
 # Boost for config/build files when config_build_release intent fires.
 _PATH_PRIOR_CONFIG_BOOST: float = 3.0
 
@@ -209,9 +210,21 @@ def path_prior_multiplier(path: str, intent: QueryIntent) -> float:
       penalize runtime paths where ``test`` is an embedded non-root directory segment
       (e.g. ``lib/ansible/plugins/test/core.py``).
     - **public_api intent** — modestly boost ``__init__.py`` package surfaces.
-    - **implementation intent** — mild downrank for ``docs/`` and ``examples/`` paths.
+    - **no docs/api/arch intent** — downrank for docs/tutorial/example paths
+      (``docs/``, ``doc/``, ``docs_src/``, ``tutorials/``, ``tutorial/``,
+      ``examples/``, ``example/``) when none of ``docs_examples``,
+      ``public_api``, or ``architecture_flow`` are present.
+
+      Design rationale: neutral or implementation-oriented queries default to
+      code-search mode.  Tutorial and example files have high lexical overlap
+      with real implementation tokens (e.g. "callback", "routing") and
+      consistently dominate rankings without a path-prior penalty.  The penalty
+      is additive (``–4.0``), not exclusion: a strong lexical match in a doc
+      file can still overcome it.  Architecture queries are explicitly exempt
+      via the ``architecture_flow`` intent; doc/guide/README queries are exempt
+      via ``docs_examples``; public-API queries are exempt via ``public_api``.
     - **config_build_release intent** — boost package marker / config files.
-    - **unknown intents / neutral combinations** — return ``0.0``.
+    - **unknown intents on non-doc paths** — return ``0.0``.
 
     Args:
         path: Repository-relative POSIX path.
@@ -233,11 +246,12 @@ def path_prior_multiplier(path: str, intent: QueryIntent) -> float:
         if is_public_api_file(normalized):
             delta += _PATH_PRIOR_PUBLIC_API_INIT_BOOST
 
-    if "implementation" in intent.intents and "tests" not in intent.intents:
-        # Mild downrank for docs/examples when the query is implementation-only.
-        # Do not apply when tests intent also fires (combined queries should not suppress tests).
+    if not (intent.intents & {"docs_examples", "public_api", "architecture_flow"}):
+        # Downrank doc/tutorial/example paths for code-search queries that do not
+        # explicitly request documentation, tutorials, examples, public API, or
+        # architecture/flow information.  Mirrors the support_expansion allowance logic.
         if normalized.startswith(_DOC_PREFIXES) or normalized.startswith(_EXAMPLE_PREFIXES):
-            delta += _PATH_PRIOR_IMPL_DOC_PENALTY
+            delta += _PATH_PRIOR_DOC_EXAMPLE_PENALTY
 
     if "config_build_release" in intent.intents:
         filename = normalized.rsplit("/", maxsplit=1)[-1]

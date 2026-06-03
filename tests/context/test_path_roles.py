@@ -175,7 +175,12 @@ class TestClassifySourceRole:
         # examples
         ("examples/example_usage.py", EXAMPLE_ROLE),
         ("example/demo.py", EXAMPLE_ROLE),
-        # docs
+        # docs — extended prefixes (58.7C)
+        ("docs_src/commands/callback/tutorial001.py", DOC_ROLE),
+        ("docs_src/overview.md", DOC_ROLE),
+        ("tutorials/getting_started.py", DOC_ROLE),
+        ("tutorial/quickstart.md", DOC_ROLE),
+        # docs — existing
         ("docs/guide.md", DOC_ROLE),
         ("doc/api.rst", DOC_ROLE),
         # ci
@@ -441,6 +446,118 @@ class TestPathPriorMultiplier:
         path = "test/units/plugins/test_plugins.py"
         assert path_prior_multiplier(path, intent) == path_prior_multiplier(path, intent)
 
+    # --- docs_examples intent guard (58.7C) ---
+
+    def test_docs_src_tutorial_penalized_for_neutral_query(self) -> None:
+        """docs_src/ tutorial files must be penalized even without an explicit 'implementation' token."""
+        intent = _intent("Find how Typer callback command processing works")
+        assert "docs_examples" not in intent.intents
+        delta = path_prior_multiplier("docs_src/commands/callback/tutorial001.py", intent)
+        assert delta < 0
+
+    def test_tutorials_path_penalized_for_neutral_query(self) -> None:
+        """tutorials/ paths must be penalized for code-search queries."""
+        intent = _intent("Find how URL resolver works")
+        assert "docs_examples" not in intent.intents
+        assert "architecture_flow" not in intent.intents
+        assert "public_api" not in intent.intents
+        delta = path_prior_multiplier("tutorials/getting_started.py", intent)
+        assert delta < 0
+
+    def test_docs_not_penalized_when_docs_examples_intent_fires(self) -> None:
+        """docs/ paths must NOT be penalized when the query explicitly asks for docs."""
+        intent = _intent("Show me the documentation for URL routing")
+        assert "docs_examples" in intent.intents
+        delta = path_prior_multiplier("docs/guide.md", intent)
+        assert delta == 0.0
+
+    def test_tutorial_not_penalized_when_tutorial_intent_fires(self) -> None:
+        """docs_src/ paths must NOT be penalized when the query asks for a tutorial."""
+        intent = _intent("Find the tutorial for callback commands")
+        assert "docs_examples" in intent.intents
+        delta = path_prior_multiplier("docs_src/commands/callback/tutorial001.py", intent)
+        assert delta == 0.0
+
+    def test_examples_not_penalized_when_examples_intent_fires(self) -> None:
+        """examples/ paths must NOT be penalized when the query asks for examples."""
+        intent = _intent("Find examples of callback usage")
+        assert "docs_examples" in intent.intents
+        delta = path_prior_multiplier("examples/demo.py", intent)
+        assert delta == 0.0
+
+    def test_docs_src_penalized_for_implementation_query(self) -> None:
+        """docs_src/ is penalized for queries with explicit implementation intent."""
+        intent = _intent("Where is callback parsing implemented")
+        assert "implementation" in intent.intents
+        assert "docs_examples" not in intent.intents
+        delta = path_prior_multiplier("docs_src/commands/callback/tutorial001.py", intent)
+        assert delta < 0
+
+    # --- architecture_flow intent exempts docs (58.7C side-effects) ---
+
+    def test_docs_not_penalized_for_architecture_flow_query(self) -> None:
+        """docs/ files must NOT be penalized when architecture_flow intent fires.
+
+        Architecture queries legitimately reference architecture docs, and
+        architecture_flow is one of the three exemptions in the docs penalty rule.
+        """
+        intent = _intent("How does the lifecycle dispatch flow work")
+        assert "architecture_flow" in intent.intents
+        assert "docs_examples" not in intent.intents
+        delta = path_prior_multiplier("docs/architecture.rst", intent)
+        assert delta == 0.0
+
+    def test_docs_src_not_penalized_for_architecture_flow_query(self) -> None:
+        """docs_src/ tutorial files must NOT be penalized for architecture queries."""
+        intent = _intent("Explain the request response pipeline architecture")
+        assert "architecture_flow" in intent.intents
+        delta = path_prior_multiplier("docs_src/advanced/tutorial001.py", intent)
+        assert delta == 0.0
+
+    # --- README exempted via docs_examples (58.7C) ---
+
+    def test_docs_not_penalized_for_readme_query(self) -> None:
+        """Explicit README/usage queries fire docs_examples and must not penalize docs/."""
+        intent = _intent("Show the README for this package")
+        assert "docs_examples" in intent.intents
+        delta = path_prior_multiplier("docs/getting_started.md", intent)
+        assert delta == 0.0
+
+    # --- design-intent: neutral queries penalize docs by default ---
+
+    def test_neutral_query_penalizes_docs_by_design(self) -> None:
+        """Neutral code-search queries (no intent tokens) penalize docs/ by design.
+
+        When a query has no explicit docs/api/arch markers (e.g. "Find how Typer
+        callback command processing works"), the default assumption is code-search.
+        Tutorial and example files are penalized to prevent them from outranking
+        real implementation files on shared domain tokens like 'callback'.
+        The penalty is additive (–4.0), not exclusion.
+        """
+        intent = _intent("Find how Typer callback command processing works")
+        # Confirm truly neutral: no exempting intents
+        assert not (intent.intents & {"docs_examples", "public_api", "architecture_flow"})
+        delta_docs_src = path_prior_multiplier("docs_src/commands/callback/tutorial001.py", intent)
+        delta_impl = path_prior_multiplier("typer/core.py", intent)
+        assert delta_docs_src < 0, "docs_src tutorial must be downranked for neutral query"
+        assert delta_impl == 0.0, "implementation file must not be penalized"
+
+    def test_tests_only_intent_penalizes_docs(self) -> None:
+        """Tests-only queries penalize docs/ — test queries want test code, not tutorial files."""
+        intent = _intent("Find tests for callback behavior")
+        assert "tests" in intent.intents
+        assert not (intent.intents & {"docs_examples", "public_api", "architecture_flow"})
+        delta = path_prior_multiplier("docs_src/commands/callback/tutorial001.py", intent)
+        assert delta < 0
+
+    def test_config_build_intent_penalizes_docs(self) -> None:
+        """Config/build queries penalize docs/ — they target packaging files, not tutorials."""
+        intent = _intent("Where is the pyproject setup configuration")
+        assert "config_build_release" in intent.intents
+        assert not (intent.intents & {"docs_examples", "public_api", "architecture_flow"})
+        delta = path_prior_multiplier("docs/configuration.md", intent)
+        assert delta < 0
+
 
 # ---------------------------------------------------------------------------
 # Ranking v2 (Prompt 58.2) — integration: scoring tests
@@ -557,10 +674,9 @@ class TestPathPriorIntegration:
         intent = parse_query_intent("Find tests for how resolver is implemented")
         assert "implementation" in intent.intents
         assert "tests" in intent.intents
-        # docs penalty must be suppressed when tests intent is also present
         doc_delta = path_prior_multiplier("docs/guide.md", intent)
         test_delta = path_prior_multiplier("tests/test_resolver.py", intent)
-        # doc penalty is suppressed (combined intent overrides implementation-only rule)
-        assert doc_delta == 0.0
+        # docs are penalized — neither docs_examples, public_api nor architecture_flow fire
+        assert doc_delta < 0
         # test boost still fires
         assert test_delta > 0

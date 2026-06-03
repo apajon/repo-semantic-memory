@@ -261,9 +261,11 @@ def select_support_files(
         if role == TEST_ROLE:
             continue
 
-        # Exclude docs/examples unless public_api or architecture_flow intent.
+        # Exclude docs/examples unless an intent that warrants them is present:
+        # public_api (API surfaces may have docs), architecture_flow (architectural
+        # diagrams/docs), or docs_examples (query explicitly asked for docs/tutorials).
         if role in (DOC_ROLE, EXAMPLE_ROLE):
-            if not ({"public_api", "architecture_flow"} & query_intent.intents):
+            if not ({"public_api", "architecture_flow", "docs_examples"} & query_intent.intents):
                 continue
 
         score = base_score

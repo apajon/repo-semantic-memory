@@ -446,6 +446,46 @@ class TestExcludeDocsExamples:
         # docs allowed with public_api intent
         assert doc.id.value in _ids(result)
 
+    def test_docs_src_excluded_by_default(self) -> None:
+        """docs_src/ paths (58.7C extended prefix) are excluded for implementation queries."""
+        resolver = _entity("pkg/urls/resolvers.py")
+        doc = _entity("docs_src/commands/tutorial001.py")
+        intent = parse_query_intent("URL resolver implementation")
+        result = select_support_files(
+            selected_entities=[resolver],
+            all_entities=[resolver, doc],
+            relations=[_rel(resolver, doc, "imports")],
+            query_intent=intent,
+        )
+        assert doc.id.value not in _ids(result)
+
+    def test_docs_src_allowed_with_docs_examples_intent(self) -> None:
+        """docs_src/ paths are included when the query explicitly requests tutorial/example content."""
+        resolver = _entity("pkg/urls/resolvers.py")
+        doc = _entity("docs_src/commands/tutorial001.py")
+        intent = parse_query_intent("Show tutorial examples for URL resolver usage")
+        assert "docs_examples" in intent.intents
+        result = select_support_files(
+            selected_entities=[resolver],
+            all_entities=[resolver, doc],
+            relations=[_rel(resolver, doc, "imports")],
+            query_intent=intent,
+        )
+        assert doc.id.value in _ids(result)
+
+    def test_tutorials_path_excluded_by_default(self) -> None:
+        """tutorials/ paths are excluded for neutral code-search queries."""
+        resolver = _entity("pkg/urls/resolvers.py")
+        doc = _entity("tutorials/getting_started.py")
+        intent = parse_query_intent("URL resolver implementation")
+        result = select_support_files(
+            selected_entities=[resolver],
+            all_entities=[resolver, doc],
+            relations=[_rel(resolver, doc, "imports")],
+            query_intent=intent,
+        )
+        assert doc.id.value not in _ids(result)
+
 
 # ---------------------------------------------------------------------------
 # TestCapAndDeduplication
