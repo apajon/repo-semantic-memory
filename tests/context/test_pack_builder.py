@@ -12,7 +12,7 @@ from repo_semantic_memory.context.compression import (
     filter_related_relations,
     resolve_profile,
 )
-from repo_semantic_memory.context.context_pack import relation_key
+from repo_semantic_memory.context.context_pack import ContextPack, relation_key
 from repo_semantic_memory.context.import_scoring import build_import_scoring_context
 from repo_semantic_memory.context.pack_builder import (
     _PACK_FIXED_OVERHEAD_CHARS,
@@ -2717,4 +2717,158 @@ def test_docs_tutorial_selectable_when_query_explicitly_requests_tutorial() -> N
     assert "tutorial001" in selected_qnames, (
         "docs_src tutorial must remain selectable when query explicitly asks for tutorial/example content"
     )
+
+
+# ---------------------------------------------------------------------------
+# 58.7E — compact preview per-file cap
+# ---------------------------------------------------------------------------
+
+
+def _make_direct_pack(entities: list[Entity], budget: int = 8000) -> ContextPack:
+    """Build a minimal ContextPack for render-layer tests; bypasses ranking."""
+    return ContextPack(
+        task="test task",
+        budget=budget,
+        selected_entities=tuple(entities),
+        selected_relations=(),
+        source_citations=(),
+        why_selected={},
+        ranking_breakdowns={},
+        semantic_components=(),
+        uncertainties=(),
+        suggested_files_to_inspect=(),
+        forbidden_assumptions=(),
+    )
+
+
+class TestCompactPerPathCap:
+    """Compact rendering must show ≤5 entities per source_path without altering selected_entities."""
+
+    def test_compact_capped_at_five_per_source_path(self) -> None:
+        """Compact output shows at most 5 entities for a single source file."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        # Only 5 bullets for pkg/big_module.py should appear in the output
+        visible_lines = [
+            line for line in markdown.splitlines()
+            if line.startswith("- `pkg.func") and "big_module.py" in line
+        ]
+        assert len(visible_lines) == 5, (
+            f"Expected 5 visible entities for big_module.py, got {len(visible_lines)}: {visible_lines}"
+        )
+
+    def test_selected_entities_unchanged_after_compact_render(self) -> None:
+        """Rendering must not touch selected_entities — internal state is always complete."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        _ = render_context_pack_markdown(pack)
+
+        # All 8 entities must still be present in the pack
+        assert len(pack.selected_entities) == 8, (
+            "selected_entities must remain unmodified after compact rendering"
+        )
+
+    def test_cap_is_per_source_path_not_global(self) -> None:
+        """Cap applies independently per source file; entities from other files are not affected."""
+        entities_a = [
+            _make_module_entity(
+                eid=f"python:pkg/file_a.py:function:pkg.a_func{i}",
+                name=f"a_func{i}",
+                qualified_name=f"pkg.a_func{i}",
+                source_path="pkg/file_a.py",
+            )
+            for i in range(7)
+        ]
+        entities_b = [
+            _make_module_entity(
+                eid=f"python:pkg/file_b.py:function:pkg.b_func{i}",
+                name=f"b_func{i}",
+                qualified_name=f"pkg.b_func{i}",
+                source_path="pkg/file_b.py",
+            )
+            for i in range(3)
+        ]
+        pack = _make_direct_pack(entities_a + entities_b)
+        markdown = render_context_pack_markdown(pack)
+
+        lines_a = [l for l in markdown.splitlines() if "a_func" in l and l.startswith("- `pkg.")]
+        lines_b = [l for l in markdown.splitlines() if "b_func" in l and l.startswith("- `pkg.")]
+        # file_a.py has 7 → capped to 5; file_b.py has 3 → all 3 visible
+        assert len(lines_a) == 5, f"file_a.py: expected 5 visible, got {len(lines_a)}"
+        assert len(lines_b) == 3, f"file_b.py: expected 3 visible, got {len(lines_b)}"
+
+    def test_hidden_count_indicator_emitted(self) -> None:
+        """Compact output must emit a '... (N more from path)' indicator for capped paths."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        # 8 - 5 = 3 hidden; indicator line must mention 3 and the path
+        assert "3 more from" in markdown and "big_module.py" in markdown, (
+            f"Expected hidden-count indicator '3 more from ... big_module.py' in:\n{markdown}"
+        )
+
+    def test_compact_deterministic_ordering_respects_input_order(self) -> None:
+        """First 5 entities in iteration order must be the visible ones (stable, deterministic)."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        # func0..func4 should appear; func5..func7 should not
+        for i in range(5):
+            assert f"`pkg.func{i}`" in markdown, f"pkg.func{i} must be visible"
+        for i in range(5, 8):
+            assert f"`pkg.func{i}` " not in markdown, f"pkg.func{i} must be hidden (capped)"
+
+    def test_no_indicator_when_under_cap(self) -> None:
+        """No hidden-count indicator when entity count is at or below the cap."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/small_module.py:function:pkg.sfunc{i}",
+                name=f"sfunc{i}",
+                qualified_name=f"pkg.sfunc{i}",
+                source_path="pkg/small_module.py",
+            )
+            for i in range(5)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        assert "more from" not in markdown, (
+            "No hidden-count indicator should appear when entity count == cap"
+        )
 

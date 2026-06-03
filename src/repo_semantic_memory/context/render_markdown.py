@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from repo_semantic_memory.context.budget import CharacterBudget
 from repo_semantic_memory.context.context_pack import ContextPack
 from repo_semantic_memory.model import Entity, Relation
+
+# Maximum number of entities from the same source file shown in compact preview.
+# Prevents a single large file (e.g. typer/_click/core.py) from dominating the
+# visible selected-symbols section.  Internal selected_entities are not changed.
+_MAX_COMPACT_ENTITIES_PER_SOURCE_PATH: int = 5
 
 
 def render_context_pack_markdown(
@@ -78,7 +85,17 @@ def _append_selected_symbols(
         if not _append_or_truncate(budget, ""):
             return False
         return True
+    # Per-source-path cap: track how many entities have been rendered per file.
+    # Entities beyond _MAX_COMPACT_ENTITIES_PER_SOURCE_PATH are skipped in the
+    # visible output; the hidden count is reported at the end of the section.
+    visible_count_by_path: dict[str, int] = defaultdict(int)
+    hidden_count_by_path: dict[str, int] = defaultdict(int)
     for entity in entities:
+        source_path = entity.source_range.path.replace("\\", "/")
+        if visible_count_by_path[source_path] >= _MAX_COMPACT_ENTITIES_PER_SOURCE_PATH:
+            hidden_count_by_path[source_path] += 1
+            continue
+        visible_count_by_path[source_path] += 1
         if not _append_or_truncate(
             budget,
             f"- `{entity.qualified_name}` {_format_source_citation(entity)}",
@@ -103,6 +120,12 @@ def _append_selected_symbols(
             # Keep output compact in explain mode by showing only the first reason.
             if reasons and not _append_or_truncate(budget, f"  Reason: {reasons[0]}"):
                 return False
+    # Emit hidden-entity indicators in deterministic path order.
+    for source_path in sorted(hidden_count_by_path.keys()):
+        count = hidden_count_by_path[source_path]
+        line = f"- ... ({count} more from `{source_path}` not shown in compact preview)"
+        if not _append_or_truncate(budget, line):
+            return False
     return _append_or_truncate(budget, "")
 
 
