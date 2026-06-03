@@ -2362,3 +2362,245 @@ def test_realistic_fixture_favors_local_helper_import_over_dependency_noise(
         "python:src/pkg/helper.py:function:pkg.helper.assist"
     ]
     assert any("imports/local_package" in reason.message for reason in helper_breakdown.reasons)
+
+
+# ---------------------------------------------------------------------------
+# 58.7B regression tests: exact-name boost path-coherence guard
+# ---------------------------------------------------------------------------
+
+
+def _make_method_entity(
+    eid: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+) -> Entity:
+    return Entity(
+        id=StableId(eid),
+        kind="method",
+        name=name,
+        qualified_name=qualified_name,
+        source_range=SourceRange(path=source_path, start_line=1, end_line=5),
+    )
+
+
+def _make_module_entity(
+    eid: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+) -> Entity:
+    return Entity(
+        id=StableId(eid),
+        kind="module",
+        name=name,
+        qualified_name=qualified_name,
+        source_range=SourceRange(path=source_path, start_line=1, end_line=100),
+    )
+
+
+def _make_class_entity(
+    eid: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+) -> Entity:
+    return Entity(
+        id=StableId(eid),
+        kind="class",
+        name=name,
+        qualified_name=qualified_name,
+        source_range=SourceRange(path=source_path, start_line=1, end_line=50),
+    )
+
+
+def _build_pack(entities: list[Entity], task: str, budget: int = 8000) -> "ContextPack":  # type: ignore[name-defined]  # noqa: F821
+    return build_context_pack(task=task, entities=entities, relations=[], budget_chars=budget)
+
+
+def test_url_routing_module_outranks_unrelated_url_method(tmp_path: Path) -> None:
+    """A url-routing module (path-coherent) must rank ahead of a bare .url attribute
+    on an unrelated class that only matches via name equality.
+
+    Regression for: Storage.url, FieldFile.url, StaticNode.url, Stylesheet.url,
+    HashedFilesMixin.url getting the full exact-match boost for a URL-routing query.
+    """
+    # Routing module: "url" appears in source_path ("django/urls/resolvers.py")
+    routing_module = _make_module_entity(
+        eid="python:django/urls/resolvers.py:module:django.urls.resolvers",
+        name="resolvers",
+        qualified_name="django.urls.resolvers",
+        source_path="django/urls/resolvers.py",
+    )
+    routing_class = _make_class_entity(
+        eid="python:django/urls/resolvers.py:class:django.urls.resolvers.URLResolver",
+        name="URLResolver",
+        qualified_name="django.urls.resolvers.URLResolver",
+        source_path="django/urls/resolvers.py",
+    )
+    # Unrelated storage method named "url": source_path does NOT contain "url" segment.
+    storage_url_method = _make_method_entity(
+        eid="python:django/core/files/storage.py:method:django.core.files.storage.Storage.url",
+        name="url",
+        qualified_name="django.core.files.storage.Storage.url",
+        source_path="django/core/files/storage.py",
+    )
+    fieldfile_url_method = _make_method_entity(
+        eid="python:django/db/models/fields/files.py:method:django.db.models.fields.files.FieldFile.url",
+        name="url",
+        qualified_name="django.db.models.fields.files.FieldFile.url",
+        source_path="django/db/models/fields/files.py",
+    )
+    # Filler entities to give BM25 IDF realistic corpus diversity.
+    filler = [
+        _make_module_entity(
+            f"filler:{i}",
+            f"module{i}",
+            f"pkg.module{i}",
+            f"pkg/module{i}.py",
+        )
+        for i in range(20)
+    ]
+
+    entities = [routing_module, routing_class, storage_url_method, fieldfile_url_method, *filler]
+    task = "Find how URL routing resolver implementation works"
+    pack = _build_pack(entities, task)
+
+    selected_ids = [e.id.value for e in pack.selected_entities]
+    routing_index = next(
+        (i for i, e in enumerate(pack.selected_entities) if "resolvers" in e.source_range.path),
+        None,
+    )
+    storage_index = next(
+        (
+            i
+            for i, e in enumerate(pack.selected_entities)
+            if e.qualified_name == "django.core.files.storage.Storage.url"
+        ),
+        len(selected_ids),  # not selected = effectively last
+    )
+    fieldfile_index = next(
+        (
+            i
+            for i, e in enumerate(pack.selected_entities)
+            if e.qualified_name == "django.db.models.fields.files.FieldFile.url"
+        ),
+        len(selected_ids),
+    )
+
+    assert routing_index is not None, (
+        "django.urls.resolvers module/class must be selected for a URL-routing query"
+    )
+    assert routing_index < storage_index, (
+        f"routing module (rank {routing_index}) must precede Storage.url "
+        f"(rank {storage_index})"
+    )
+    assert routing_index < fieldfile_index, (
+        f"routing module (rank {routing_index}) must precede FieldFile.url "
+        f"(rank {fieldfile_index})"
+    )
+
+
+def test_url_method_in_urls_path_retains_selection() -> None:
+    """A .url method whose source_path contains 'url' as a segment is still eligible for selection.
+
+    This ensures the path-coherence guard does not suppress legitimate URL-subsystem entities.
+    """
+    urls_url_method = _make_method_entity(
+        eid="python:django/urls/resolvers.py:method:django.urls.resolvers.ResolverMatch.url",
+        name="url",
+        qualified_name="django.urls.resolvers.ResolverMatch.url",
+        source_path="django/urls/resolvers.py",
+    )
+    unrelated_url_method = _make_method_entity(
+        eid="python:django/core/files/storage.py:method:django.core.files.storage.Storage.url",
+        name="url",
+        qualified_name="django.core.files.storage.Storage.url",
+        source_path="django/core/files/storage.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+
+    task = "Find how URL routing resolver implementation works"
+    pack = _build_pack([urls_url_method, unrelated_url_method, *filler], task)
+
+    selected_names = [e.qualified_name for e in pack.selected_entities]
+    urls_index = next(
+        (i for i, n in enumerate(selected_names) if "ResolverMatch.url" in n),
+        None,
+    )
+    unrelated_index = next(
+        (i for i, n in enumerate(selected_names) if "Storage.url" in n),
+        len(selected_names),
+    )
+    # The urls-subsystem method must be selected and rank ahead of the unrelated one.
+    assert urls_index is not None, "url method in urls/ path must be selected"
+    assert urls_index < unrelated_index, (
+        f"url method in urls/ ({urls_index}) must rank before unrelated Storage.url "
+        f"({unrelated_index})"
+    )
+
+
+def test_ansible_plugin_loader_outranks_cgroup_loads_method() -> None:
+    """Ansible plugin loader module must outrank unrelated .loads methods in cgroup code.
+
+    Regression for: MountEntry.loads and CGroupEntry.loads winning over
+    lib/ansible/plugins/loader.py for an Ansible plugin-loading query.
+    """
+    loader_module = _make_module_entity(
+        eid="python:lib/ansible/plugins/loader.py:module:ansible.plugins.loader",
+        name="loader",
+        qualified_name="ansible.plugins.loader",
+        source_path="lib/ansible/plugins/loader.py",
+    )
+    cgroup_loads_method = _make_method_entity(
+        eid="python:test/lib/ansible_test/_internal/cgroup.py:method:cgroup.CGroupEntry.loads",
+        name="loads",
+        qualified_name="cgroup.CGroupEntry.loads",
+        source_path="test/lib/ansible_test/_internal/cgroup.py",
+    )
+    mount_loads_method = _make_method_entity(
+        eid="python:test/lib/ansible_test/_internal/cgroup.py:method:cgroup.MountEntry.loads",
+        name="loads",
+        qualified_name="cgroup.MountEntry.loads",
+        source_path="test/lib/ansible_test/_internal/cgroup.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+
+    entities = [loader_module, cgroup_loads_method, mount_loads_method, *filler]
+    task = "Find how Ansible plugin loading works"
+    pack = _build_pack(entities, task)
+
+    selected_names = [e.qualified_name for e in pack.selected_entities]
+    loader_index = next(
+        (i for i, n in enumerate(selected_names) if "ansible.plugins.loader" in n),
+        None,
+    )
+    cgroup_index = next(
+        (i for i, n in enumerate(selected_names) if "CGroupEntry.loads" in n),
+        len(selected_names),
+    )
+    mount_index = next(
+        (i for i, n in enumerate(selected_names) if "MountEntry.loads" in n),
+        len(selected_names),
+    )
+
+    assert loader_index is not None, (
+        "ansible.plugins.loader must be selected for a plugin-loading query"
+    )
+    assert loader_index < cgroup_index, (
+        f"ansible loader (rank {loader_index}) must precede CGroupEntry.loads "
+        f"(rank {cgroup_index})"
+    )
+    assert loader_index < mount_index, (
+        f"ansible loader (rank {loader_index}) must precede MountEntry.loads "
+        f"(rank {mount_index})"
+    )
+
+
+# ---------------------------------------------------------------------------

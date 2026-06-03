@@ -93,6 +93,13 @@ _FORBIDDEN_ASSUMPTIONS = (
 _PACK_FIXED_OVERHEAD_CHARS = 300
 _CODE_PATH_SUFFIXES = (".py",)
 _EXACT_FIELD_MATCH_BOOST = 6.0
+# Kinds for which a bare name-equality hit must also be supported by the entity's
+# source path to earn the full exact-match boost.  Short attribute names (``url``,
+# ``loads``, …) are common across many unrelated subsystems; awarding the full
+# boost solely because the method name matches a task token over-selects unrelated
+# attribute entities.  Requiring path support filters these out without affecting
+# module/class-level matches, where the name is already distinctive.
+_PATH_COHERENCE_REQUIRED_KINDS: frozenset[str] = frozenset({"method", "field"})
 # Scoring weights — all scoring/penalty constants remain here because they are
 # ranking concerns specific to pack_builder, not path classification concerns.
 _SOURCE_CITATION_BONUS = 2
@@ -563,10 +570,31 @@ def _score_entity(
             )
         )
 
+    # For attribute-level entities (method, field), a bare name-equality hit only
+    # earns the exact-match boost when the token also appears as a path segment of
+    # the entity's source file (path-subsystem coherence).  This prevents short
+    # attribute names such as ``url``, ``loads``, or ``loader`` from outranking
+    # module/class entities whose source path directly contains the token.
+    # Module and class-level entities are never restricted: their names are
+    # distinctive enough that exact matches are always meaningful.
+    # The same guard applies to qualified_name hits for method/field: the terminal
+    # name component (after the last dot) must have path support, otherwise a
+    # qualified_name like ``Storage.url`` would still earn the boost via the
+    # qualified_name field despite the name guard.
+    source_path_segments = frozenset(_source_path_segments(source_path))
+    requires_path_coherence = entity.kind in _PATH_COHERENCE_REQUIRED_KINDS
     exact_hits = sum(
         1
         for token in task_tokens
-        if token == name or token == qualified_name or token == source_path or token == entity_id
+        if token == source_path or token == entity_id
+        or (
+            token == name
+            and (not requires_path_coherence or token in source_path_segments)
+        )
+        or (
+            token == qualified_name
+            and (not requires_path_coherence or token in source_path_segments)
+        )
     )
     lexical_score += exact_hits * _EXACT_FIELD_MATCH_BOOST
     if entity.source_range.path:
@@ -791,6 +819,28 @@ def _score_entity(
         matched_fields=dedupe_stable(tuple(matched_fields)),
         reasons=normalized_reasons,
     )
+
+
+def _source_path_segments(source_path: str) -> tuple[str, ...]:
+    """Return the individual path segments (directory names and bare filename stem) for *source_path*.
+
+    Used for path-subsystem coherence checks: a token must appear in these segments
+    to earn the exact-match boost on attribute-level entities.
+
+    Examples::
+
+        _source_path_segments("django/urls/resolvers.py")  -> ("django", "urls", "resolvers")
+        _source_path_segments("lib/ansible/plugins/loader.py")  -> ("lib", "ansible", "plugins", "loader")
+        _source_path_segments("django/core/files/storage.py")  -> ("django", "core", "files", "storage")
+    """
+    normalized = source_path.replace("\\", "/").strip("/")
+    parts = normalized.split("/")
+    segments: list[str] = []
+    for part in parts:
+        # Strip file extension from the last component to expose the stem.
+        stem = part.rsplit(".", 1)[0] if "." in part else part
+        segments.append(stem)
+    return tuple(segments)
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
