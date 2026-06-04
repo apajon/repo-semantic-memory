@@ -44,6 +44,15 @@ _RELATION_FIRST_BONUS: float = 100.0
 # E.g. ``test_resolvers.py`` matches ``resolvers.py`` stem → +20.
 _STEM_MATCH_BONUS: float = 20.0
 
+# Bonus when the test filename stem matches a *directory segment* of the seed
+# entity's source path (domain-stem fallback).  Handles cases where the test
+# file is named after the subsystem/package rather than the specific source
+# module.  Example: ``lib/ansible/plugins/loader.py`` seed has ``plugins`` as a
+# directory segment → ``tests/test_plugins.py`` (stem ``plugins``) earns this
+# bonus even though there is no shared directory between the two paths.  Scored
+# lower than a direct filename-stem match (20) but well above lexical noise.
+_DOMAIN_STEM_BONUS: float = 15.0
+
 # Bonus per query lexical token that appears in the test entity's path/name.
 _LEXICAL_TOKEN_BONUS: float = 3.0
 
@@ -207,7 +216,7 @@ def select_test_branch(
         if eid in relation_reason:
             reason = relation_reason[eid]
         else:
-            reason = _build_proximity_reason(entity, seed_stems, lexical_set)
+            reason = _build_proximity_reason(entity, seed_stems, seed_dir_segments, lexical_set)
         result.append((eid, reason))
 
     return result
@@ -315,6 +324,12 @@ def _score_proximity(
     test_stem = _normalize_filename_stem(filename)
     if test_stem and test_stem in seed_stems:
         score += _STEM_MATCH_BONUS
+    elif test_stem and test_stem in seed_dir_segments:
+        # Domain-stem fallback: the test file stem appears as a directory
+        # segment of the seed source path (e.g. loader.py lives under
+        # plugins/ → test_plugins.py stem "plugins" is in seed dir segments).
+        # Only fires when the direct stem match has not already fired.
+        score += _DOMAIN_STEM_BONUS
 
     # Lexical token overlap: query tokens found in the test entity's path.
     path_tokens = frozenset(tokenize_text(path))
@@ -334,6 +349,7 @@ def _score_proximity(
 def _build_proximity_reason(
     entity: Entity,
     seed_stems: set[str],
+    seed_dir_segments: set[str],
     lexical_set: frozenset[str],
 ) -> str:
     """Build a human-readable reason string for a proximity-scored test entity."""
@@ -344,6 +360,9 @@ def _build_proximity_reason(
 
     if test_stem and test_stem in seed_stems:
         return f"test branch: filename stem proximity ({test_stem!r})"
+
+    if test_stem and test_stem in seed_dir_segments:
+        return f"test branch: domain-stem proximity ({test_stem!r} in source path)"
 
     path_tokens = frozenset(tokenize_text(path))
     matched_lex = sorted(path_tokens & lexical_set)

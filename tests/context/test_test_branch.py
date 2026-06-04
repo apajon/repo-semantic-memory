@@ -635,3 +635,164 @@ class TestIntegrationWithBuildContextPack:
 
         paths = [e.source_range.path for e in pack.selected_entities]
         assert paths.count("tests/test_loader.py") == 1
+
+
+# ---------------------------------------------------------------------------
+# 58.7D regression tests: domain-stem fallback
+# ---------------------------------------------------------------------------
+
+
+class TestDomainStemFallback:
+    """Domain-stem fallback: test file stem appears as a directory segment of the
+    seed entity's source path.  Handles cases where the test file is named after
+    the subsystem rather than the specific source module.
+    """
+
+    def test_loader_selects_flat_test_plugins_via_domain_stem(self) -> None:
+        """loader.py (under plugins/) should find tests/test_plugins.py via domain-stem."""
+        impl = _entity("lib/ansible/plugins/loader.py")
+        test_flat = _entity("tests/test_plugins.py")
+        intent = parse_query_intent("plugin loader tests")
+
+        result = select_test_branch(
+            entities=[impl, test_flat],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        entity_ids = [eid for eid, _ in result]
+        assert test_flat.id.value in entity_ids
+
+    def test_domain_stem_reason_mentions_domain_stem(self) -> None:
+        """Reason string should indicate domain-stem proximity, not bare 'path proximity'."""
+        impl = _entity("lib/ansible/plugins/loader.py")
+        test_flat = _entity("tests/test_plugins.py")
+        intent = parse_query_intent("plugin loader tests")
+
+        result = select_test_branch(
+            entities=[impl, test_flat],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        reasons = {eid: r for eid, r in result}
+        reason = reasons.get(test_flat.id.value, "")
+        assert "domain-stem" in reason
+
+    def test_domain_stem_also_selects_deep_test_plugins(self) -> None:
+        """Shared-directory test path should still be selected (regression guard)."""
+        impl = _entity("lib/ansible/plugins/loader.py")
+        test_deep = _entity("test/units/plugins/test_plugins.py")
+        intent = parse_query_intent("plugin loader tests")
+
+        result = select_test_branch(
+            entities=[impl, test_deep],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        entity_ids = [eid for eid, _ in result]
+        assert test_deep.id.value in entity_ids
+
+    def test_direct_stem_match_outranks_domain_stem(self) -> None:
+        """test_loader.py (direct stem) must outrank test_plugins.py (domain-stem)."""
+        impl = _entity("lib/ansible/plugins/loader.py")
+        test_stem = _entity("tests/test_loader.py")  # direct stem match
+        test_domain = _entity("tests/test_plugins.py")  # domain-stem match
+        intent = parse_query_intent("plugin loader tests")
+
+        result = select_test_branch(
+            entities=[impl, test_stem, test_domain],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        entity_ids = [eid for eid, _ in result]
+        assert test_stem.id.value in entity_ids
+        if test_domain.id.value in entity_ids:
+            assert entity_ids.index(test_stem.id.value) < entity_ids.index(test_domain.id.value)
+
+    def test_unrelated_test_file_not_selected_by_domain_stem(self) -> None:
+        """test_routing.py should not match django/auth/views.py seed (no shared path seg)."""
+        impl = _entity("django/auth/views.py")
+        test_unrelated = _entity("tests/test_routing.py")  # stem "routing" not in seed path
+        intent = parse_query_intent("auth views tests")
+
+        result = select_test_branch(
+            entities=[impl, test_unrelated],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        entity_ids = [eid for eid, _ in result]
+        assert test_unrelated.id.value not in entity_ids
+
+    def test_runtime_path_not_selected_alongside_domain_stem(self) -> None:
+        """Runtime test-named path stays excluded even when a real test is found via domain-stem."""
+        impl = _entity("lib/ansible/plugins/loader.py")
+        runtime_test = _entity("lib/ansible/plugins/test/core.py")
+        test_flat = _entity("tests/test_plugins.py")
+        intent = parse_query_intent("plugin loader tests")
+
+        result = select_test_branch(
+            entities=[impl, runtime_test, test_flat],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        entity_ids = [eid for eid, _ in result]
+        assert runtime_test.id.value not in entity_ids
+        assert test_flat.id.value in entity_ids
+
+
+class TestDirectStemFallback:
+    """Direct stem match: test_resolvers.py matches resolvers.py seed stem.
+    These cases work via the existing _STEM_MATCH_BONUS; the tests here serve as
+    explicit regression guards for 58.7D.
+    """
+
+    def test_resolver_stem_matches_test_resolvers(self) -> None:
+        """resolvers.py seed should find tests/urlpatterns/test_resolvers.py via stem."""
+        impl = _entity("django/urls/resolvers.py")
+        test_e = _entity("tests/urlpatterns/test_resolvers.py")
+        intent = parse_query_intent("url resolver behavior tests")
+
+        result = select_test_branch(
+            entities=[impl, test_e],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        entity_ids = [eid for eid, _ in result]
+        assert test_e.id.value in entity_ids
+
+    def test_resolver_stem_reason_mentions_stem_proximity(self) -> None:
+        impl = _entity("django/urls/resolvers.py")
+        test_e = _entity("tests/urlpatterns/test_resolvers.py")
+        intent = parse_query_intent("url resolver behavior tests")
+
+        result = select_test_branch(
+            entities=[impl, test_e],
+            relations=[],
+            query_intent=intent,
+            seed_entity_ids=frozenset({impl.id.value}),
+            source_roots=(),
+        )
+
+        reasons = {eid: r for eid, r in result}
+        reason = reasons.get(test_e.id.value, "")
+        assert "stem proximity" in reason
