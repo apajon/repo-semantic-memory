@@ -413,3 +413,66 @@ only when the source file stem maps to a `test_<stem>.py` filename. This misses:
 
 **Test to add:** Update `TestBranchRegressions` in `tests/context/test_ranking_v2_regression.py`
 to cover the domain-stem mismatch case (source stem ≠ test file stem).
+
+---
+
+## 58.7 Cleanup — Completed
+
+> **Date:** 2026-06-03
+> **Scope:** Cleanup sequence 58.7B–58.7E (no new ranking behavior beyond the
+> targeted fixes below).
+
+### 58.7B — URL / short method-field exact-match cleanup
+
+- exact-hit boost for method/field now requires source_path coherence
+- unrelated `.url` methods no longer dominate URL-routing tasks
+- Ansible `loads`/`loader` noise improved through the same generic rule
+
+### 58.7C — docs/tutorial/example cleanup
+
+- `docs_src/`, `tutorials/`, `tutorial/` are classified as docs/example-like paths
+- `docs_examples` intent added
+- implementation/neutral code-search queries penalize docs/tutorial/example paths
+- explicit docs/tutorial/example/guide/README queries remain supported
+- support expansion avoids reintroducing docs/example noise for implementation tasks
+
+### 58.7D — test branch domain-stem fallback
+
+- `_DOMAIN_STEM_BONUS = 15.0`
+- direct stem bonus remains stronger at 20.0
+- `loader.py` -> `test_plugins.py` works through source directory segment matching,
+  not hardcoding
+- `resolvers.py` -> `test_resolvers.py` remains covered
+- runtime test-named paths remain excluded
+
+### 58.7E — compact preview per-file cap
+
+- compact rendering caps visible entities per `source_path` to 5
+- `selected_entities` remain unchanged
+- deterministic hidden count indicator added
+
+### Validation results
+
+| Check | Command | Result |
+|-------|---------|--------|
+| format | `ruff format --check .` | `142 files already formatted` |
+| lint | `ruff check .` | `All checks passed!` |
+| types | `mypy src` | `Success: no issues found in 70 source files` |
+| tests | `pytest` | `1111 passed in 189.09s` |
+| context | `pytest tests/context/` | `422 passed` |
+
+### Updated status
+
+58.7 cleanup completed.
+
+Ranking v2 is now cleaner and safer for:
+- URL-routing tasks
+- implementation queries polluted by docs/tutorial examples
+- test retrieval through domain-stem fallback
+- compact output readability
+
+Remaining next step:
+59.0 Benchmark harness design.
+
+Do not start chunks, embeddings, Semble backend, CodeGraph backend, or context
+graph export before the benchmark harness is designed.
