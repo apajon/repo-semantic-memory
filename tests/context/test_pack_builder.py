@@ -2414,7 +2414,7 @@ def _make_class_entity(
     )
 
 
-def _build_pack(entities: list[Entity], task: str, budget: int = 8000) -> "ContextPack":  # type: ignore[name-defined]  # noqa: F821
+def _build_pack(entities: list[Entity], task: str, budget: int = 8000) -> ContextPack:
     return build_context_pack(task=task, entities=entities, relations=[], budget_chars=budget)
 
 
@@ -2492,12 +2492,10 @@ def test_url_routing_module_outranks_unrelated_url_method(tmp_path: Path) -> Non
         "django.urls.resolvers module/class must be selected for a URL-routing query"
     )
     assert routing_index < storage_index, (
-        f"routing module (rank {routing_index}) must precede Storage.url "
-        f"(rank {storage_index})"
+        f"routing module (rank {routing_index}) must precede Storage.url (rank {storage_index})"
     )
     assert routing_index < fieldfile_index, (
-        f"routing module (rank {routing_index}) must precede FieldFile.url "
-        f"(rank {fieldfile_index})"
+        f"routing module (rank {routing_index}) must precede FieldFile.url (rank {fieldfile_index})"
     )
 
 
@@ -2594,12 +2592,10 @@ def test_ansible_plugin_loader_outranks_cgroup_loads_method() -> None:
         "ansible.plugins.loader must be selected for a plugin-loading query"
     )
     assert loader_index < cgroup_index, (
-        f"ansible loader (rank {loader_index}) must precede CGroupEntry.loads "
-        f"(rank {cgroup_index})"
+        f"ansible loader (rank {loader_index}) must precede CGroupEntry.loads (rank {cgroup_index})"
     )
     assert loader_index < mount_index, (
-        f"ansible loader (rank {loader_index}) must precede MountEntry.loads "
-        f"(rank {mount_index})"
+        f"ansible loader (rank {loader_index}) must precede MountEntry.loads (rank {mount_index})"
     )
 
 
@@ -2609,7 +2605,7 @@ def test_ansible_plugin_loader_outranks_cgroup_loads_method() -> None:
 
 
 def test_implementation_file_outranks_docs_src_tutorial_for_neutral_query() -> None:
-    """docs_src/ tutorial files must not outrank source implementation files for code-search queries.
+    """docs_src/ tutorial files must not outrank source impl files for code-search queries.
 
     Regression for: Typer docs_src/commands/callback/tutorial001.py ranking ahead of
     typer/core.py when querying "Find how Typer callback command processing works".
@@ -2689,7 +2685,7 @@ def test_tutorials_path_does_not_outrank_source_for_neutral_query() -> None:
 
 
 def test_docs_tutorial_selectable_when_query_explicitly_requests_tutorial() -> None:
-    """docs_src/ tutorial files must NOT be suppressed when the query explicitly asks for tutorial/example content.
+    """docs_src/ tutorial files stay selectable when the query explicitly asks for tutorials.
 
     This verifies the docs_examples intent gate: penalty is skipped for documentation queries.
     """
@@ -2715,7 +2711,7 @@ def test_docs_tutorial_selectable_when_query_explicitly_requests_tutorial() -> N
 
     selected_qnames = [e.qualified_name for e in pack.selected_entities]
     assert "tutorial001" in selected_qnames, (
-        "docs_src tutorial must remain selectable when query explicitly asks for tutorial/example content"
+        "docs_src tutorial must stay selectable when query explicitly asks for tutorials"
     )
 
 
@@ -2742,7 +2738,7 @@ def _make_direct_pack(entities: list[Entity], budget: int = 8000) -> ContextPack
 
 
 class TestCompactPerPathCap:
-    """Compact rendering must show ≤5 entities per source_path without altering selected_entities."""
+    """Compact rendering shows ≤5 entities per source_path; selected_entities unchanged."""
 
     def test_compact_capped_at_five_per_source_path(self) -> None:
         """Compact output shows at most 5 entities for a single source file."""
@@ -2760,11 +2756,12 @@ class TestCompactPerPathCap:
 
         # Only 5 bullets for pkg/big_module.py should appear in the output
         visible_lines = [
-            line for line in markdown.splitlines()
+            line
+            for line in markdown.splitlines()
             if line.startswith("- `pkg.func") and "big_module.py" in line
         ]
         assert len(visible_lines) == 5, (
-            f"Expected 5 visible entities for big_module.py, got {len(visible_lines)}: {visible_lines}"
+            f"Expected 5 visible entities for big_module.py, got {len(visible_lines)}"
         )
 
     def test_selected_entities_unchanged_after_compact_render(self) -> None:
@@ -2809,8 +2806,16 @@ class TestCompactPerPathCap:
         pack = _make_direct_pack(entities_a + entities_b)
         markdown = render_context_pack_markdown(pack)
 
-        lines_a = [l for l in markdown.splitlines() if "a_func" in l and l.startswith("- `pkg.")]
-        lines_b = [l for l in markdown.splitlines() if "b_func" in l and l.startswith("- `pkg.")]
+        lines_a = [
+            line
+            for line in markdown.splitlines()
+            if "a_func" in line and line.startswith("- `pkg.")
+        ]
+        lines_b = [
+            line
+            for line in markdown.splitlines()
+            if "b_func" in line and line.startswith("- `pkg.")
+        ]
         # file_a.py has 7 → capped to 5; file_b.py has 3 → all 3 visible
         assert len(lines_a) == 5, f"file_a.py: expected 5 visible, got {len(lines_a)}"
         assert len(lines_b) == 3, f"file_b.py: expected 3 visible, got {len(lines_b)}"
@@ -2871,4 +2876,3 @@ class TestCompactPerPathCap:
         assert "more from" not in markdown, (
             "No hidden-count indicator should appear when entity count == cap"
         )
-

@@ -586,11 +586,9 @@ def _score_entity(
     exact_hits = sum(
         1
         for token in task_tokens
-        if token == source_path or token == entity_id
-        or (
-            token == name
-            and (not requires_path_coherence or token in source_path_segments)
-        )
+        if token == source_path
+        or token == entity_id
+        or (token == name and (not requires_path_coherence or token in source_path_segments))
         or (
             token == qualified_name
             and (not requires_path_coherence or token in source_path_segments)
@@ -822,16 +820,19 @@ def _score_entity(
 
 
 def _source_path_segments(source_path: str) -> tuple[str, ...]:
-    """Return the individual path segments (directory names and bare filename stem) for *source_path*.
+    """Return the path segments (directory names and bare filename stem) for *source_path*.
 
     Used for path-subsystem coherence checks: a token must appear in these segments
     to earn the exact-match boost on attribute-level entities.
 
     Examples::
 
-        _source_path_segments("django/urls/resolvers.py")  -> ("django", "urls", "resolvers")
-        _source_path_segments("lib/ansible/plugins/loader.py")  -> ("lib", "ansible", "plugins", "loader")
-        _source_path_segments("django/core/files/storage.py")  -> ("django", "core", "files", "storage")
+        _source_path_segments("django/urls/resolvers.py")
+        -> ("django", "urls", "resolvers")
+        _source_path_segments("lib/ansible/plugins/loader.py")
+        -> ("lib", "ansible", "plugins", "loader")
+        _source_path_segments("django/core/files/storage.py")
+        -> ("django", "core", "files", "storage")
     """
     normalized = source_path.replace("\\", "/").strip("/")
     parts = normalized.split("/")

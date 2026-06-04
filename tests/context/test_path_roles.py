@@ -449,7 +449,7 @@ class TestPathPriorMultiplier:
     # --- docs_examples intent guard (58.7C) ---
 
     def test_docs_src_tutorial_penalized_for_neutral_query(self) -> None:
-        """docs_src/ tutorial files must be penalized even without an explicit 'implementation' token."""
+        """docs_src/ tutorial files are penalized without an explicit 'implementation' token."""
         intent = _intent("Find how Typer callback command processing works")
         assert "docs_examples" not in intent.intents
         delta = path_prior_multiplier("docs_src/commands/callback/tutorial001.py", intent)

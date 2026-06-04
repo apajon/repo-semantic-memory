@@ -460,7 +460,7 @@ class TestExcludeDocsExamples:
         assert doc.id.value not in _ids(result)
 
     def test_docs_src_allowed_with_docs_examples_intent(self) -> None:
-        """docs_src/ paths are included when the query explicitly requests tutorial/example content."""
+        """docs_src/ paths are included when the query explicitly requests tutorials."""
         resolver = _entity("pkg/urls/resolvers.py")
         doc = _entity("docs_src/commands/tutorial001.py")
         intent = parse_query_intent("Show tutorial examples for URL resolver usage")
