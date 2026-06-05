@@ -1,0 +1,172 @@
+# Manual external benchmark cases (59.0 harness schema).
+#
+# Migrated from docs/reviews/ranking_v2_regression_eval.md (58.6 report).
+# All cases use mode: manual_external and require pre-built indexes from
+# external public repositories.  No automatic cloning or downloading.
+#
+# Each case maps to a specific task in the 58.6 regression evaluation.
+# Expected/forbidden files trace to explicit table rows in that report.
+#
+# Fixture labels match repo names in benchmarks/public_repos.yaml:
+#   django, ansible, httpx, typer
+
+tasks:
+  # -----------------------------------------------------------------------
+  # Task 1 — Django URL resolution
+  # Source: 58.6 report §Task 1 tables
+  # Score: central 4/5, support 3/5, tests 3/5, noise 2/5, overall 3/5
+  # -----------------------------------------------------------------------
+  - id: django_url_resolution
+    fixture: django
+    mode: manual_external
+    query: "Find how Django resolves URL patterns into view execution, including resolver implementation files and relevant tests."
+    expected:
+      central_files:
+        - django/urls/resolvers.py
+        - django/urls/conf.py
+        - django/core/handlers/base.py
+      support_files:
+        - django/urls/base.py
+        - django/urls/exceptions.py
+        - django/core/checks/urls.py
+      test_files:
+        - tests/urlpatterns/test_resolvers.py
+      forbidden_files:
+        - django/db/backends/base/features.py
+        - django/contrib/staticfiles/utils.py
+        - django/template/defaultfilters.py
+        - django/template/defaulttags.py
+        - django/contrib/admin/checks.py
+        - django/contrib/admin/options.py
+        - django/contrib/staticfiles/storage.py
+        - django/core/files/storage/base.py
+        - django/core/files/storage/memory.py
+        - django/core/files/storage/filesystem.py
+        - django/db/models/fields/files.py
+        - django/utils/feedgenerator.py
+        - django/templatetags/static.py
+        - django/contrib/auth/middleware.py
+        - django/contrib/auth/views.py
+        - django/core/management/utils.py
+    tags:
+      - ranking_v2
+      - regression
+      - public_repo_manual
+      - "58.6_migration"
+    notes: >
+      Migrated from docs/reviews/ranking_v2_regression_eval.md Task 1.
+      58.6: central 4/5 (resolvers.py correct; conf.py and handlers/base.py
+      absent). support 3/5 (exceptions.py, base.py present; many noisy .url
+      method files). tests 3/5. noise 2/5 (12+ .url entities). overall 3/5.
+      58.7 cleanup (7B–7E) partially addressed .url noise and compact preview
+      caps.
+
+  # -----------------------------------------------------------------------
+  # Task 2 — Ansible plugin/module discovery
+  # Source: 58.6 report §Task 2 tables
+  # Score: central 5/5, support 4/5, tests 1/5, noise 3/5, overall 3/5
+  # -----------------------------------------------------------------------
+  - id: ansible_loader_discovery
+    fixture: ansible
+    mode: manual_external
+    query: "Find how Ansible discovers and loads modules/plugins, including loader implementation files and relevant tests."
+    expected:
+      central_files:
+        - lib/ansible/plugins/loader.py
+        - lib/ansible/utils/collection_loader/_collection_finder.py
+      support_files:
+        - lib/ansible/_internal/_yaml/_loader.py
+        - lib/ansible/module_utils/_internal/_ansiballz/_loader.py
+      test_files:
+        - test/units/plugins/test_plugins.py
+      forbidden_files:
+        - test/lib/ansible_test/_internal/cgroup.py
+        - lib/ansible/playbook/block.py
+        - lib/ansible/playbook/task.py
+        - lib/ansible/playbook/role/__init__.py
+    tags:
+      - ranking_v2
+      - regression
+      - public_repo_manual
+      - "58.6_migration"
+    notes: >
+      Migrated from docs/reviews/ranking_v2_regression_eval.md Task 2.
+      58.6: central 5/5 (loader.py and _collection_finder.py top-ranked).
+      support 4/5 (internal loaders present; playbook set_loader marginal).
+      tests 1/5 (test_plugins.py absent; cgroup FP only test-path entity).
+      noise 3/5 (cgroup FP significant but isolated). overall 3/5. 58.7D
+      added domain-stem fallback for test branch.
+
+  # -----------------------------------------------------------------------
+  # Task 3 — HTTPX public client API
+  # Source: 58.6 report §Task 3 tables
+  # Score: central 5/5, support 5/5, tests 1/5, noise 4/5, overall 4/5
+  # -----------------------------------------------------------------------
+  - id: httpx_public_client_api
+    fixture: httpx
+    mode: manual_external
+    query: "Find the public API for making HTTP requests with sync and async clients and where those clients are implemented."
+    expected:
+      central_files:
+        - httpx/__init__.py
+        - httpx/_api.py
+        - httpx/_client.py
+      support_files:
+        - httpx/_transports/default.py
+        - httpx/_transports/base.py
+        - httpx/_transports/__init__.py
+        - httpx/_exceptions.py
+        - httpx/_types.py
+      test_files:
+      forbidden_files:
+        - httpx/_main.py
+    tags:
+      - ranking_v2
+      - regression
+      - public_repo_manual
+      - "58.6_migration"
+    notes: >
+      Migrated from docs/reviews/ranking_v2_regression_eval.md Task 3.
+      58.6: central 5/5 (all public-facing files present). support 5/5
+      (exceptions, types, transports, docs correct). tests 1/5 (no test
+      files selected). noise 4/5 (only _main.py noise). overall 4/5 —
+      best result of the four. 58.7C reduced docs/tutorial noise for
+      implementation queries.
+
+  # -----------------------------------------------------------------------
+  # Task 4 — Typer command registration
+  # Source: 58.6 report §Task 4 tables
+  # Score: central 4/5, support 3/5, tests 1/5, noise 2/5, overall 3/5
+  # -----------------------------------------------------------------------
+  - id: typer_command_registration
+    fixture: typer
+    mode: manual_external
+    query: "Find how Typer turns @app.command() and @app.callback() declarations into executable Click commands, including the implementation files and core tests."
+    expected:
+      central_files:
+        - typer/core.py
+        - typer/main.py
+      support_files:
+        - typer/_click/core.py
+      test_files:
+        - tests/test_core.py
+      forbidden_files:
+        - docs_src/commands/callback/tutorial002_py310.py
+        - docs_src/commands/callback/tutorial003_py310.py
+        - docs_src/commands/callback/tutorial004_py310.py
+        - docs_src/commands/one_or_multiple/tutorial001_py310.py
+        - docs_src/commands/one_or_multiple/tutorial002_py310.py
+        - typer/cli.py
+    tags:
+      - ranking_v2
+      - regression
+      - public_repo_manual
+      - "58.6_migration"
+    notes: >
+      Migrated from docs/reviews/ranking_v2_regression_eval.md Task 4.
+      58.6: central 4/5 (core.py and _click/core.py correct; main.py at
+      rank 36). support 3/5 (cli.py marginal; vendor file dominates compact
+      preview). tests 1/5 (no test files; Typer tests not indexed).
+      noise 2/5 (5 docs_src/ tutorial files in top 40; vendor file crowds
+      view). overall 3/5. 58.7C reduced docs_src/ noise; 58.7E capped
+      per-file entities in compact preview.

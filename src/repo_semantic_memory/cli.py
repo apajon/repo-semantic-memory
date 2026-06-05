@@ -25,9 +25,12 @@ from repo_semantic_memory.eval import (
     render_compact_table,
     render_compare_compact_table,
     run_baseline_comparison,
+    run_benchmark,
     run_retrieval_benchmark,
+    to_bench_json_payload,
     to_compare_json_payload,
     to_json_payload,
+    write_benchmark_markdown_report,
     write_compare_markdown_report,
     write_markdown_report,
 )
@@ -419,6 +422,58 @@ def build_parser() -> argparse.ArgumentParser:
         "--markdown-report",
         help="Write a Markdown comparison report to this path.",
     )
+    eval_bench_parser = eval_subparsers.add_parser(
+        "bench",
+        help="Run deterministic benchmark harness over context-pack selection quality.",
+    )
+    eval_bench_parser.add_argument(
+        "--dataset",
+        required=True,
+        help="YAML benchmark dataset file path.",
+    )
+    eval_bench_parser.add_argument(
+        "--db",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
+    )
+    eval_bench_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit benchmark result as deterministic JSON.",
+    )
+    eval_bench_parser.add_argument(
+        "--case",
+        action="append",
+        default=None,
+        dest="cases",
+        metavar="ID",
+        help="Run only the named benchmark case(s). May be repeated.",
+    )
+    eval_bench_parser.add_argument(
+        "--mode",
+        choices=("ci", "manual"),
+        default="ci",
+        help="Benchmark mode: ci (ci_fixture cases) or manual (manual_external cases).",
+    )
+    eval_bench_parser.add_argument(
+        "--budget",
+        type=int,
+        default=32000,
+        help="Approximate character budget for context packs.",
+    )
+    eval_bench_parser.add_argument(
+        "--profile",
+        choices=available_profile_names(),
+        default="agent_standard",
+        help="Compression profile controlling deterministic context noise filtering.",
+    )
+    eval_bench_parser.add_argument(
+        "--markdown-report",
+        help="Write a Markdown benchmark report to this path.",
+    )
     export_ai_parser = subparsers.add_parser(
         "export-ai",
         help="Export semantic memory as a portable .ai/ directory.",
@@ -732,6 +787,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 dataset=args.dataset,
                 budget=args.budget,
                 emit_json=args.json,
+                markdown_report=args.markdown_report,
+            )
+        if args.eval_target == "bench":
+            return _run_eval_bench_command(
+                db=_resolve_reader_db(args.db),
+                dataset=args.dataset,
+                mode=args.mode,
+                case_filter=tuple(args.cases) if args.cases else (),
+                emit_json=args.json,
+                budget=args.budget,
+                profile=args.profile,
                 markdown_report=args.markdown_report,
             )
         parser.print_help()
@@ -1393,6 +1459,77 @@ def _run_eval_compare_command(
         return 0
     print(render_compare_compact_table(result))
     return 0
+
+
+def _run_eval_bench_command(
+    *,
+    db: str,
+    dataset: str,
+    mode: str,
+    case_filter: tuple[str, ...],
+    emit_json: bool,
+    budget: int,
+    profile: str,
+    markdown_report: str | None,
+) -> int:
+    try:
+        result = run_benchmark(
+            db_path=db,
+            dataset_path=dataset,
+            mode=mode,
+            case_filter=case_filter,
+            budget_chars=budget,
+            profile=profile,
+        )
+    except (ValueError, FileNotFoundError, OSError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    if markdown_report:
+        try:
+            write_benchmark_markdown_report(markdown_report, result, dataset=dataset, mode=mode)
+        except OSError as exc:
+            print(f"error: could not write report to {markdown_report!r}: {exc}", file=sys.stderr)
+            return 2
+
+    if emit_json:
+        payload = to_bench_json_payload(result, mode=mode, case_filter=case_filter)
+        print(json.dumps(payload, separators=(",", ":")))
+        return 0
+
+    _render_bench_text(result, dataset=dataset, mode=mode)
+    return 0
+
+
+def _render_bench_text(result: object, *, dataset: str, mode: str) -> None:
+    """Render a human-readable benchmark summary."""
+    from repo_semantic_memory.eval.runner import BenchmarkRunResult
+
+    assert isinstance(result, BenchmarkRunResult)
+    agg = result.aggregate
+    print(f"# benchmark: {dataset}")
+    print(f"# mode: {mode}")
+    print(f"# cases: {len(result.outcomes)}")
+    print()
+    print("aggregate:")
+    print(f"  central_file_found: {agg.central_file_found:.3f}")
+    print(f"  support_files_found: {agg.support_files_found:.3f}")
+    print(f"  tests_found: {agg.tests_found:.3f}")
+    print(f"  noise_reduced: {agg.noise_reduced:.3f}")
+    print(f"  overall: {agg.overall:.3f}")
+    print()
+    for outcome in result.outcomes:
+        print(f"## {outcome.case.id} (fixture={outcome.case.fixture})")
+        print(f"  overall: {outcome.metrics.overall:.3f}")
+        if outcome.missing_central_files:
+            print(f"  missing_central: {', '.join(outcome.missing_central_files)}")
+        if outcome.missing_support_files:
+            print(f"  missing_support: {', '.join(outcome.missing_support_files)}")
+        if outcome.missing_test_files:
+            print(f"  missing_tests: {', '.join(outcome.missing_test_files)}")
+        if outcome.forbidden_files_found:
+            print(f"  forbidden_found: {', '.join(outcome.forbidden_files_found)}")
+        print()
 
 
 def _run_pack_command(

@@ -16,7 +16,11 @@ from repo_semantic_memory.eval.report_data import (
     build_retrieval_category_payload,
     build_savings_aggregate_payload,
 )
-from repo_semantic_memory.eval.runner import BaselineComparisonResult, RetrievalBenchmarkResult
+from repo_semantic_memory.eval.runner import (
+    BaselineComparisonResult,
+    BenchmarkRunResult,
+    RetrievalBenchmarkResult,
+)
 
 
 def to_json_payload(result: RetrievalBenchmarkResult) -> dict[str, object]:
@@ -573,3 +577,106 @@ def _format_string_list_or_dash(value: object) -> str:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         return "-"
     return ", ".join(value) or "-"
+
+
+# ---------------------------------------------------------------------------
+# 59.5 — Benchmark harness markdown report
+# ---------------------------------------------------------------------------
+
+
+def render_benchmark_markdown_report(
+    result: BenchmarkRunResult,
+    *,
+    dataset: str,
+    mode: str,
+) -> str:
+    """Render a deterministic Markdown benchmark report for the 59.0 harness."""
+    agg = result.aggregate
+    lines: list[str] = [
+        "# RSM Benchmark Report",
+        "",
+        f"- Dataset: `{dataset}`",
+        f"- Mode: `{mode}`",
+        f"- Cases run: `{len(result.outcomes)}`",
+        "",
+        "## Aggregate Metrics",
+        "",
+        "| Metric | Score |",
+        "|---|---|",
+        f"| central_file_found | {agg.central_file_found:.3f} |",
+        f"| support_files_found | {agg.support_files_found:.3f} |",
+        f"| tests_found | {agg.tests_found:.3f} |",
+        f"| noise_reduced | {agg.noise_reduced:.3f} |",
+        f"| overall | {agg.overall:.3f} |",
+        "",
+        "## Cases",
+        "",
+        "| Case ID | Overall | Central | Support | Tests | Noise |",
+        "|---|---|---|---|---|---|",
+    ]
+    for o in result.outcomes:
+        m = o.metrics
+        lines.append(
+            f"| {o.case.id} | {m.overall:.3f} | {m.central_file_found:.3f} | "
+            f"{m.support_files_found:.3f} | {m.tests_found:.3f} | "
+            f"{m.noise_reduced:.3f} |"
+        )
+    lines.append("")
+
+    # Per-case details
+    for o in result.outcomes:
+        lines.append(f"## {o.case.id}")
+        lines.append("")
+        lines.append(f"- fixture: `{o.case.fixture}`")
+        lines.append(f"- overall: `{o.metrics.overall:.3f}`")
+        lines.append("")
+
+        lines.append("### Selected files")
+        if o.selected_files:
+            for f in o.selected_files:
+                lines.append(f"- `{f}`")
+        else:
+            lines.append("- *(none)*")
+        lines.append("")
+
+        if o.missing_central_files:
+            lines.append("### Missing central files")
+            for f in o.missing_central_files:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+        if o.missing_support_files:
+            lines.append("### Missing support files")
+            for f in o.missing_support_files:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+        if o.missing_test_files:
+            lines.append("### Missing test files")
+            for f in o.missing_test_files:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+        if o.forbidden_files_found:
+            lines.append("### Forbidden files found")
+            for f in o.forbidden_files_found:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_benchmark_markdown_report(
+    path: Path | str,
+    result: BenchmarkRunResult,
+    *,
+    dataset: str,
+    mode: str,
+) -> None:
+    """Write benchmark harness markdown report to disk."""
+    report_path = Path(path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        render_benchmark_markdown_report(result, dataset=dataset, mode=mode),
+        encoding="utf-8",
+    )

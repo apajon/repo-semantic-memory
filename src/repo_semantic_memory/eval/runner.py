@@ -8,15 +8,27 @@ Retrieval benchmark matching policy in this MVP:
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
 
+from repo_semantic_memory.context.compression import resolve_profile
+from repo_semantic_memory.context.context_pack import ContextPack
+from repo_semantic_memory.context.pack_builder import build_context_pack
 from repo_semantic_memory.eval.baselines import TaskBaselineComparison, evaluate_task_baselines
-from repo_semantic_memory.eval.datasets import RetrievalTask, load_retrieval_dataset
+from repo_semantic_memory.eval.datasets import (
+    BenchmarkCase,
+    RetrievalTask,
+    load_benchmark_dataset,
+    load_retrieval_dataset,
+)
 from repo_semantic_memory.eval.metrics import (
+    BenchmarkCaseMetrics,
     BenchmarkMetrics,
     RetrievalOutcome,
+    compute_aggregate_benchmark_case_metrics,
+    compute_benchmark_case_metrics,
     compute_benchmark_metrics,
 )
 from repo_semantic_memory.model import Entity, Relation
@@ -333,3 +345,194 @@ def _estimate_context_characters(
 ) -> int:
     """Return a simple newline-joined character estimate for baseline context size."""
     return len("\n".join([*ranked_files, *ranked_symbols]))
+
+
+# ---------------------------------------------------------------------------
+# 59.2 — Benchmark harness runner
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class BenchmarkCaseOutcome:
+    """Outcome of evaluating a single BenchmarkCase against a ContextPack."""
+
+    case: BenchmarkCase
+    selected_files: tuple[str, ...]
+    missing_central_files: tuple[str, ...]
+    missing_support_files: tuple[str, ...]
+    missing_test_files: tuple[str, ...]
+    forbidden_files_found: tuple[str, ...]
+    metrics: BenchmarkCaseMetrics
+
+
+@dataclass(frozen=True)
+class BenchmarkRunResult:
+    """Aggregate result of running multiple benchmark cases."""
+
+    outcomes: tuple[BenchmarkCaseOutcome, ...]
+    aggregate: BenchmarkCaseMetrics
+
+
+def extract_selected_files(pack: ContextPack) -> tuple[str, ...]:
+    """Extract selected file paths from a ContextPack deterministically.
+
+    Priority order:
+    1. ``suggested_files_to_inspect`` if present and non-empty.
+    2. ``source_range.path`` from ``selected_entities`` as fallback.
+    3. Deterministic deduplication preserving first occurrence.
+    """
+    if pack.suggested_files_to_inspect:
+        candidates: list[str] = list(pack.suggested_files_to_inspect)
+    else:
+        candidates = [entity.source_range.path for entity in pack.selected_entities]
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for path in candidates:
+        if path not in seen:
+            seen.add(path)
+            deduped.append(path)
+    return tuple(deduped)
+
+
+def run_benchmark_cases(
+    *,
+    cases: Sequence[BenchmarkCase],
+    build_pack: Callable[[BenchmarkCase], ContextPack],
+) -> BenchmarkRunResult:
+    """Evaluate benchmark cases using a caller-supplied context-pack builder.
+
+    ``build_pack`` is called once per case and must return a ``ContextPack``.
+    This keeps the runner testable without CLI, indexing, or external repos.
+    """
+    outcomes: list[BenchmarkCaseOutcome] = []
+    for case in cases:
+        pack = build_pack(case)
+        selected = extract_selected_files(pack)
+        expected = case.expected
+        selected_set = frozenset(selected)
+
+        missing_central = tuple(sorted(f for f in expected.central_files if f not in selected_set))
+        missing_support = tuple(sorted(f for f in expected.support_files if f not in selected_set))
+        missing_tests = tuple(sorted(f for f in expected.test_files if f not in selected_set))
+        forbidden_found = tuple(sorted(f for f in expected.forbidden_files if f in selected_set))
+
+        metrics = compute_benchmark_case_metrics(
+            selected_files=selected,
+            expected_central=expected.central_files,
+            expected_support=expected.support_files,
+            expected_tests=expected.test_files,
+            forbidden_files=expected.forbidden_files,
+        )
+        outcomes.append(
+            BenchmarkCaseOutcome(
+                case=case,
+                selected_files=selected,
+                missing_central_files=missing_central,
+                missing_support_files=missing_support,
+                missing_test_files=missing_tests,
+                forbidden_files_found=forbidden_found,
+                metrics=metrics,
+            )
+        )
+
+    aggregate = compute_aggregate_benchmark_case_metrics(
+        per_case=tuple(o.metrics for o in outcomes)
+    )
+    return BenchmarkRunResult(outcomes=tuple(outcomes), aggregate=aggregate)
+
+
+def run_benchmark(
+    *,
+    db_path: str,
+    dataset_path: str,
+    mode: str = "ci",
+    case_filter: tuple[str, ...] = (),
+    budget_chars: int = 32000,
+    profile: str = "agent_standard",
+) -> BenchmarkRunResult:
+    """Load benchmark cases, filter by mode/case, build context packs, and evaluate.
+
+    This is the DB-backed entry point used by the CLI.  It loads entities and
+    relations from *db_path*, builds a ``ContextPack`` per case via
+    ``build_context_pack``, and delegates to ``run_benchmark_cases``.
+    """
+    dataset = load_benchmark_dataset(dataset_path)
+
+    # Filter by mode
+    target_mode = "ci_fixture" if mode == "ci" else "manual_external"
+    candidates = [c for c in dataset.cases if c.mode == target_mode]
+
+    # Filter by case id
+    if case_filter:
+        case_set = frozenset(case_filter)
+        candidates = [c for c in candidates if c.id in case_set]
+        found_ids = {c.id for c in candidates}
+        missing = case_set - found_ids
+        if missing:
+            raise ValueError(f"Case id(s) not found in dataset: {', '.join(sorted(missing))}")
+
+    if not candidates:
+        raise ValueError(
+            f"No benchmark cases match mode={mode!r}"
+            + (f" case_filter={list(case_filter)!r}" if case_filter else "")
+        )
+
+    store = SQLiteStore(db_path)
+    try:
+        store.initialize()
+        entities = tuple(store.list_entities())
+        relations = tuple(store.list_relations())
+    finally:
+        store.close()
+
+    def _build(case: BenchmarkCase) -> ContextPack:
+        return build_context_pack(
+            task=case.query,
+            entities=entities,
+            relations=relations,
+            budget_chars=budget_chars,
+            profile=resolve_profile(profile),
+        )
+
+    return run_benchmark_cases(cases=candidates, build_pack=_build)
+
+
+def to_bench_json_payload(
+    result: BenchmarkRunResult,
+    *,
+    mode: str,
+    case_filter: tuple[str, ...],
+) -> dict[str, object]:
+    """Convert a ``BenchmarkRunResult`` to a deterministic JSON payload."""
+    aggregate = result.aggregate
+    return {
+        "mode": mode,
+        "case_filter": list(case_filter),
+        "aggregate": {
+            "central_file_found": aggregate.central_file_found,
+            "support_files_found": aggregate.support_files_found,
+            "tests_found": aggregate.tests_found,
+            "noise_reduced": aggregate.noise_reduced,
+            "overall": aggregate.overall,
+        },
+        "outcomes": [
+            {
+                "case_id": o.case.id,
+                "fixture": o.case.fixture,
+                "selected_files": list(o.selected_files),
+                "missing_central_files": list(o.missing_central_files),
+                "missing_support_files": list(o.missing_support_files),
+                "missing_test_files": list(o.missing_test_files),
+                "forbidden_files_found": list(o.forbidden_files_found),
+                "metrics": {
+                    "central_file_found": o.metrics.central_file_found,
+                    "support_files_found": o.metrics.support_files_found,
+                    "tests_found": o.metrics.tests_found,
+                    "noise_reduced": o.metrics.noise_reduced,
+                    "overall": o.metrics.overall,
+                },
+            }
+            for o in result.outcomes
+        ],
+    }
