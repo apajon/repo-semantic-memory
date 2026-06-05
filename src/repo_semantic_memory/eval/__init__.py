@@ -1,12 +1,23 @@
 """Retrieval benchmark harness exports."""
 
 from repo_semantic_memory.eval.baselines import BaselineTaskResult, TaskBaselineComparison
-from repo_semantic_memory.eval.datasets import GoldTargets, RetrievalDataset, RetrievalTask
+from repo_semantic_memory.eval.datasets import (
+    BenchmarkCase,
+    BenchmarkDataset,
+    BenchmarkExpected,
+    GoldTargets,
+    RetrievalDataset,
+    RetrievalTask,
+    load_benchmark_dataset,
+)
 from repo_semantic_memory.eval.metrics import (
     AggregateMetrics,
+    BenchmarkCaseMetrics,
     BenchmarkMetrics,
     RetrievalOutcome,
     TaskMetrics,
+    compute_aggregate_benchmark_case_metrics,
+    compute_benchmark_case_metrics,
 )
 from repo_semantic_memory.eval.reports import (
     render_compact_table,
@@ -20,17 +31,29 @@ from repo_semantic_memory.eval.reports import (
 )
 from repo_semantic_memory.eval.runner import (
     BaselineComparisonResult,
+    BenchmarkCaseOutcome,
+    BenchmarkRunResult,
     CompareAggregate,
     RetrievalBenchmarkResult,
+    extract_selected_files,
     run_baseline_comparison,
+    run_benchmark,
+    run_benchmark_cases,
     run_retrieval_benchmark,
+    to_bench_json_payload,
 )
 
 __all__ = [
     "AggregateMetrics",
     "BaselineComparisonResult",
     "BaselineTaskResult",
+    "BenchmarkCase",
+    "BenchmarkCaseMetrics",
+    "BenchmarkCaseOutcome",
+    "BenchmarkDataset",
+    "BenchmarkExpected",
     "BenchmarkMetrics",
+    "BenchmarkRunResult",
     "CompareAggregate",
     "GoldTargets",
     "RetrievalBenchmarkResult",
@@ -39,12 +62,19 @@ __all__ = [
     "RetrievalTask",
     "TaskBaselineComparison",
     "TaskMetrics",
+    "compute_aggregate_benchmark_case_metrics",
+    "compute_benchmark_case_metrics",
+    "extract_selected_files",
+    "load_benchmark_dataset",
     "render_compact_table",
     "render_compare_compact_table",
     "render_compare_markdown_report",
     "render_markdown_report",
     "run_baseline_comparison",
+    "run_benchmark",
+    "run_benchmark_cases",
     "run_retrieval_benchmark",
+    "to_bench_json_payload",
     "to_compare_json_payload",
     "to_json_payload",
     "write_compare_markdown_report",
