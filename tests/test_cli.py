@@ -1339,3 +1339,460 @@ def test_index_multiple_includes(tmp_path: Path) -> None:
     # config/ should NOT be indexed (not in either include pattern)
     config_names = {n for n in names if n.startswith("config/")}
     assert not config_names, f"Expected no config/ entities, got: {config_names}"
+
+
+# ---------------------------------------------------------------------------
+# 59.3 — eval bench CLI tests
+# ---------------------------------------------------------------------------
+
+
+def _write_bench_dataset(path: Path, tasks: str) -> None:
+    path.write_text(f"tasks:\n{tasks}\n", encoding="utf-8")
+
+
+def test_eval_bench_command_json_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_001\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--json",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "ci"
+    assert payload["case_filter"] == []
+    assert "aggregate" in payload
+    agg = payload["aggregate"]
+    assert "central_file_found" in agg
+    assert "support_files_found" in agg
+    assert "tests_found" in agg
+    assert "noise_reduced" in agg
+    assert "overall" in agg
+    assert len(payload["outcomes"]) == 1
+    o = payload["outcomes"][0]
+    assert o["case_id"] == "bench_001"
+    assert "selected_files" in o
+    assert "missing_central_files" in o
+    assert "missing_support_files" in o
+    assert "missing_test_files" in o
+    assert "forbidden_files_found" in o
+    assert "metrics" in o
+
+
+def test_eval_bench_command_text_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_001\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+        ]
+    )
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "# benchmark:" in out
+    assert "aggregate:" in out
+    assert "overall:" in out
+    assert "## bench_001" in out
+
+
+def test_eval_bench_command_case_filter(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_a\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+            "  - id: bench_b\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Find the module."\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--case",
+            "bench_a",
+            "--json",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["outcomes"]) == 1
+    assert payload["outcomes"][0]["case_id"] == "bench_a"
+    assert payload["case_filter"] == ["bench_a"]
+
+
+def test_eval_bench_unknown_case_fails(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_001\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--case",
+            "nonexistent",
+        ]
+    )
+    assert exit_code == 2
+    assert "nonexistent" in capsys.readouterr().err
+
+
+def test_eval_bench_mode_ci_includes_only_ci_fixture(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_ci\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "ci case"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+            "  - id: bench_manual\n"
+            "    fixture: simple_repo\n"
+            "    mode: manual_external\n"
+            '    query: "manual case"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    # --mode ci (default)
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--mode",
+            "ci",
+            "--json",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["outcomes"]) == 1
+    assert payload["outcomes"][0]["case_id"] == "bench_ci"
+
+
+def test_eval_bench_mode_manual_includes_only_manual_external(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_ci\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "ci case"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+            "  - id: bench_manual\n"
+            "    fixture: simple_repo\n"
+            "    mode: manual_external\n"
+            '    query: "manual case"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--mode",
+            "manual",
+            "--json",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert len(payload["outcomes"]) == 1
+    assert payload["outcomes"][0]["case_id"] == "bench_manual"
+
+
+def test_eval_bench_no_cases_after_filter_fails(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_ci\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "ci case"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--mode",
+            "manual",
+        ]
+    )
+    assert exit_code == 2
+    assert "No benchmark cases match" in capsys.readouterr().err
+
+
+def test_eval_bench_missing_dataset_fails(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(tmp_path / "nonexistent.sqlite"),
+            "--dataset",
+            str(tmp_path / "nonexistent.yaml"),
+        ]
+    )
+    assert exit_code == 2
+
+
+def test_eval_bench_existing_commands_still_work(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify that eval retrieval and eval compare still work after adding bench."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: smoke_001",
+                "    category: code_localization",
+                '    prompt: "Where is DerivedThing defined?"',
+                "    gold:",
+                "      files:",
+                "        - src/python_symbols.py",
+                "      symbols:",
+                "        - python_symbols.DerivedThing",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    # eval retrieval still works
+    assert (
+        main(
+            [
+                "eval",
+                "retrieval",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(dataset_path),
+                "--json",
+            ]
+        )
+        == 0
+    )
+
+    # eval compare still works
+    assert (
+        main(
+            [
+                "eval",
+                "compare",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(dataset_path),
+                "--budget",
+                "4000",
+                "--json",
+            ]
+        )
+        == 0
+    )
