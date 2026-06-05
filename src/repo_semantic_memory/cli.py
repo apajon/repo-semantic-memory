@@ -30,6 +30,7 @@ from repo_semantic_memory.eval import (
     to_bench_json_payload,
     to_compare_json_payload,
     to_json_payload,
+    write_benchmark_markdown_report,
     write_compare_markdown_report,
     write_markdown_report,
 )
@@ -469,6 +470,10 @@ def build_parser() -> argparse.ArgumentParser:
         default="agent_standard",
         help="Compression profile controlling deterministic context noise filtering.",
     )
+    eval_bench_parser.add_argument(
+        "--markdown-report",
+        help="Write a Markdown benchmark report to this path.",
+    )
     export_ai_parser = subparsers.add_parser(
         "export-ai",
         help="Export semantic memory as a portable .ai/ directory.",
@@ -793,6 +798,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 emit_json=args.json,
                 budget=args.budget,
                 profile=args.profile,
+                markdown_report=args.markdown_report,
             )
         parser.print_help()
         return 2
@@ -1464,6 +1470,7 @@ def _run_eval_bench_command(
     emit_json: bool,
     budget: int,
     profile: str,
+    markdown_report: str | None,
 ) -> int:
     try:
         result = run_benchmark(
@@ -1477,6 +1484,13 @@ def _run_eval_bench_command(
     except (ValueError, FileNotFoundError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+
+    if markdown_report:
+        try:
+            write_benchmark_markdown_report(markdown_report, result, dataset=dataset, mode=mode)
+        except OSError as exc:
+            print(f"error: could not write report to {markdown_report!r}: {exc}", file=sys.stderr)
+            return 2
 
     if emit_json:
         payload = to_bench_json_payload(result, mode=mode, case_filter=case_filter)

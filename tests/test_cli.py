@@ -1971,3 +1971,198 @@ class TestCIBenchmarkCases:
         assert exit_code == 0
         payload = json.loads(capsys.readouterr().out)
         assert len(payload["outcomes"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# 59.5 — Markdown report for eval bench
+# ---------------------------------------------------------------------------
+
+
+def test_eval_bench_markdown_report_writes_file(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    report_path = tmp_path / "bench_report.md"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_001\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--markdown-report",
+            str(report_path),
+        ]
+    )
+    assert exit_code == 0
+    assert report_path.exists()
+    content = report_path.read_text(encoding="utf-8")
+    assert "# RSM Benchmark Report" in content
+    assert "## Aggregate Metrics" in content
+    assert "## Cases" in content
+    assert "bench_001" in content
+
+
+def test_eval_bench_json_and_markdown_together(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    report_path = tmp_path / "bench_report.md"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_001\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--json",
+            "--markdown-report",
+            str(report_path),
+        ]
+    )
+    assert exit_code == 0
+    # stdout is JSON
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mode"] == "ci"
+    assert len(payload["outcomes"]) == 1
+    # markdown report also written
+    assert report_path.exists()
+    content = report_path.read_text(encoding="utf-8")
+    assert "# RSM Benchmark Report" in content
+
+
+def test_eval_bench_markdown_creates_parent_dir(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "bench_tasks.yaml"
+    report_path = tmp_path / "subdir" / "nested" / "bench.md"
+    _write_bench_dataset(
+        dataset_path,
+        (
+            "  - id: bench_001\n"
+            "    fixture: simple_repo\n"
+            "    mode: ci_fixture\n"
+            '    query: "Where is DerivedThing defined?"\n'
+            "    expected:\n"
+            "      central_files:\n"
+            "        - src/python_symbols.py\n"
+            "      support_files:\n"
+            "      test_files:\n"
+            "      forbidden_files:\n"
+            "    tags:\n"
+            '    notes: ""\n'
+        ),
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    exit_code = main(
+        [
+            "eval",
+            "bench",
+            "--db",
+            str(db_path),
+            "--dataset",
+            str(dataset_path),
+            "--markdown-report",
+            str(report_path),
+        ]
+    )
+    assert exit_code == 0
+    assert report_path.exists()
+
+
+def test_eval_bench_existing_commands_still_pass_with_markdown(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Verify eval retrieval still works after adding --markdown-report."""
+    fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+    db_path = tmp_path / ".rsm" / "index.sqlite"
+    dataset_path = tmp_path / "tasks.yaml"
+    dataset_path.write_text(
+        "\n".join(
+            [
+                "tasks:",
+                "  - id: smoke_001",
+                "    category: code_localization",
+                '    prompt: "Where is DerivedThing defined?"',
+                "    gold:",
+                "      files:",
+                "        - src/python_symbols.py",
+                "      symbols:",
+                "        - python_symbols.DerivedThing",
+                "      invariants:",
+                "        - none",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "eval",
+                "retrieval",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(dataset_path),
+                "--json",
+            ]
+        )
+        == 0
+    )

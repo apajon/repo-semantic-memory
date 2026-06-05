@@ -20,12 +20,14 @@ from repo_semantic_memory.eval.metrics import (
     compute_benchmark_case_metrics,
 )
 from repo_semantic_memory.eval.reports import (
+    render_benchmark_markdown_report,
     render_compact_table,
     render_compare_compact_table,
     render_compare_markdown_report,
     render_markdown_report,
     to_compare_json_payload,
     to_json_payload,
+    write_benchmark_markdown_report,
     write_compare_markdown_report,
     write_markdown_report,
 )
@@ -66,6 +68,7 @@ __all__ = [
     "compute_benchmark_case_metrics",
     "extract_selected_files",
     "load_benchmark_dataset",
+    "render_benchmark_markdown_report",
     "render_compact_table",
     "render_compare_compact_table",
     "render_compare_markdown_report",
@@ -77,6 +80,7 @@ __all__ = [
     "to_bench_json_payload",
     "to_compare_json_payload",
     "to_json_payload",
+    "write_benchmark_markdown_report",
     "write_compare_markdown_report",
     "write_markdown_report",
 ]

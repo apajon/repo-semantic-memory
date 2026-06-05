@@ -182,3 +182,108 @@ def test_compare_reports_are_deterministic_and_markdown_is_written(tmp_path: Pat
     write_compare_markdown_report(output_path, result)
     assert output_path.exists()
     assert output_path.read_text(encoding="utf-8") == markdown_one
+
+
+# ---------------------------------------------------------------------------
+# 59.5 — Benchmark harness markdown report tests
+# ---------------------------------------------------------------------------
+
+
+def _make_bench_result():
+    from repo_semantic_memory.eval.datasets import BenchmarkCase, BenchmarkExpected
+    from repo_semantic_memory.eval.metrics import BenchmarkCaseMetrics
+    from repo_semantic_memory.eval.runner import BenchmarkCaseOutcome, BenchmarkRunResult
+
+    case_a = BenchmarkCase(
+        id="case_a",
+        fixture="test_fixture",
+        query="find central",
+        expected=BenchmarkExpected(
+            central_files=("src/central.py",),
+            support_files=("src/support.py",),
+            test_files=("tests/test_central.py",),
+            forbidden_files=("src/noise.py",),
+        ),
+        tags=("ci", "regression"),
+        notes="Test case.",
+        mode="ci_fixture",
+    )
+    outcome_a = BenchmarkCaseOutcome(
+        case=case_a,
+        selected_files=("src/central.py", "src/support.py", "src/noise.py"),
+        missing_central_files=(),
+        missing_support_files=(),
+        missing_test_files=("tests/test_central.py",),
+        forbidden_files_found=("src/noise.py",),
+        metrics=BenchmarkCaseMetrics(
+            central_file_found=1.0,
+            support_files_found=1.0,
+            tests_found=0.0,
+            noise_reduced=1.0 - 1.0 / 3.0,
+            overall=0.35 + 0.25 + 0.0 + 0.20 * (1.0 - 1.0 / 3.0),
+        ),
+    )
+    return BenchmarkRunResult(
+        outcomes=(outcome_a,),
+        aggregate=BenchmarkCaseMetrics(
+            central_file_found=1.0,
+            support_files_found=1.0,
+            tests_found=0.0,
+            noise_reduced=1.0 - 1.0 / 3.0,
+            overall=0.35 + 0.25 + 0.0 + 0.20 * (1.0 - 1.0 / 3.0),
+        ),
+    )
+
+
+class TestBenchmarkMarkdownReport:
+    """Tests for render_benchmark_markdown_report (59.5)."""
+
+    def test_includes_aggregate_metrics(self) -> None:
+        from repo_semantic_memory.eval.reports import render_benchmark_markdown_report
+
+        result = _make_bench_result()
+        md = render_benchmark_markdown_report(result, dataset="d.yaml", mode="ci")
+        assert "# RSM Benchmark Report" in md
+        assert "## Aggregate Metrics" in md
+        assert "central_file_found" in md
+        assert "support_files_found" in md
+        assert "tests_found" in md
+        assert "noise_reduced" in md
+        assert "overall" in md
+
+    def test_includes_per_case_table(self) -> None:
+        from repo_semantic_memory.eval.reports import render_benchmark_markdown_report
+
+        result = _make_bench_result()
+        md = render_benchmark_markdown_report(result, dataset="d.yaml", mode="ci")
+        assert "## Cases" in md
+        assert "| Case ID | Overall | Central | Support | Tests | Noise |" in md
+        assert "case_a" in md
+
+    def test_includes_missing_and_forbidden_files(self) -> None:
+        from repo_semantic_memory.eval.reports import render_benchmark_markdown_report
+
+        result = _make_bench_result()
+        md = render_benchmark_markdown_report(result, dataset="d.yaml", mode="ci")
+        assert "### Missing test files" in md
+        assert "tests/test_central.py" in md
+        assert "### Forbidden files found" in md
+        assert "src/noise.py" in md
+
+    def test_output_is_deterministic(self) -> None:
+        from repo_semantic_memory.eval.reports import render_benchmark_markdown_report
+
+        result = _make_bench_result()
+        md1 = render_benchmark_markdown_report(result, dataset="d.yaml", mode="ci")
+        md2 = render_benchmark_markdown_report(result, dataset="d.yaml", mode="ci")
+        assert md1 == md2
+
+    def test_write_report_creates_file(self, tmp_path: Path) -> None:
+        from repo_semantic_memory.eval.reports import write_benchmark_markdown_report
+
+        result = _make_bench_result()
+        output_path = tmp_path / "subdir" / "bench.md"
+        write_benchmark_markdown_report(output_path, result, dataset="d.yaml", mode="ci")
+        assert output_path.exists()
+        content = output_path.read_text(encoding="utf-8")
+        assert "# RSM Benchmark Report" in content
