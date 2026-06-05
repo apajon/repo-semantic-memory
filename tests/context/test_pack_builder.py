@@ -12,7 +12,7 @@ from repo_semantic_memory.context.compression import (
     filter_related_relations,
     resolve_profile,
 )
-from repo_semantic_memory.context.context_pack import relation_key
+from repo_semantic_memory.context.context_pack import ContextPack, relation_key
 from repo_semantic_memory.context.import_scoring import build_import_scoring_context
 from repo_semantic_memory.context.pack_builder import (
     _PACK_FIXED_OVERHEAD_CHARS,
@@ -883,7 +883,7 @@ def test_hint_driven_breakdowns_include_path_role_and_task_intent() -> None:
         for reason in breakdown.reasons
     )
     assert any(
-        'test task hint -> boosted "tests/"' in reason.message
+        "test task hint -> boosted test root" in reason.message
         for breakdown in test_pack.ranking_breakdowns.values()
         for reason in breakdown.reasons
     )
@@ -2362,3 +2362,517 @@ def test_realistic_fixture_favors_local_helper_import_over_dependency_noise(
         "python:src/pkg/helper.py:function:pkg.helper.assist"
     ]
     assert any("imports/local_package" in reason.message for reason in helper_breakdown.reasons)
+
+
+# ---------------------------------------------------------------------------
+# 58.7B regression tests: exact-name boost path-coherence guard
+# ---------------------------------------------------------------------------
+
+
+def _make_method_entity(
+    eid: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+) -> Entity:
+    return Entity(
+        id=StableId(eid),
+        kind="method",
+        name=name,
+        qualified_name=qualified_name,
+        source_range=SourceRange(path=source_path, start_line=1, end_line=5),
+    )
+
+
+def _make_module_entity(
+    eid: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+) -> Entity:
+    return Entity(
+        id=StableId(eid),
+        kind="module",
+        name=name,
+        qualified_name=qualified_name,
+        source_range=SourceRange(path=source_path, start_line=1, end_line=100),
+    )
+
+
+def _make_class_entity(
+    eid: str,
+    name: str,
+    qualified_name: str,
+    source_path: str,
+) -> Entity:
+    return Entity(
+        id=StableId(eid),
+        kind="class",
+        name=name,
+        qualified_name=qualified_name,
+        source_range=SourceRange(path=source_path, start_line=1, end_line=50),
+    )
+
+
+def _build_pack(entities: list[Entity], task: str, budget: int = 8000) -> ContextPack:
+    return build_context_pack(task=task, entities=entities, relations=[], budget_chars=budget)
+
+
+def test_url_routing_module_outranks_unrelated_url_method(tmp_path: Path) -> None:
+    """A url-routing module (path-coherent) must rank ahead of a bare .url attribute
+    on an unrelated class that only matches via name equality.
+
+    Regression for: Storage.url, FieldFile.url, StaticNode.url, Stylesheet.url,
+    HashedFilesMixin.url getting the full exact-match boost for a URL-routing query.
+    """
+    # Routing module: "url" appears in source_path ("django/urls/resolvers.py")
+    routing_module = _make_module_entity(
+        eid="python:django/urls/resolvers.py:module:django.urls.resolvers",
+        name="resolvers",
+        qualified_name="django.urls.resolvers",
+        source_path="django/urls/resolvers.py",
+    )
+    routing_class = _make_class_entity(
+        eid="python:django/urls/resolvers.py:class:django.urls.resolvers.URLResolver",
+        name="URLResolver",
+        qualified_name="django.urls.resolvers.URLResolver",
+        source_path="django/urls/resolvers.py",
+    )
+    # Unrelated storage method named "url": source_path does NOT contain "url" segment.
+    storage_url_method = _make_method_entity(
+        eid="python:django/core/files/storage.py:method:django.core.files.storage.Storage.url",
+        name="url",
+        qualified_name="django.core.files.storage.Storage.url",
+        source_path="django/core/files/storage.py",
+    )
+    fieldfile_url_method = _make_method_entity(
+        eid="python:django/db/models/fields/files.py:method:django.db.models.fields.files.FieldFile.url",
+        name="url",
+        qualified_name="django.db.models.fields.files.FieldFile.url",
+        source_path="django/db/models/fields/files.py",
+    )
+    # Filler entities to give BM25 IDF realistic corpus diversity.
+    filler = [
+        _make_module_entity(
+            f"filler:{i}",
+            f"module{i}",
+            f"pkg.module{i}",
+            f"pkg/module{i}.py",
+        )
+        for i in range(20)
+    ]
+
+    entities = [routing_module, routing_class, storage_url_method, fieldfile_url_method, *filler]
+    task = "Find how URL routing resolver implementation works"
+    pack = _build_pack(entities, task)
+
+    selected_ids = [e.id.value for e in pack.selected_entities]
+    routing_index = next(
+        (i for i, e in enumerate(pack.selected_entities) if "resolvers" in e.source_range.path),
+        None,
+    )
+    storage_index = next(
+        (
+            i
+            for i, e in enumerate(pack.selected_entities)
+            if e.qualified_name == "django.core.files.storage.Storage.url"
+        ),
+        len(selected_ids),  # not selected = effectively last
+    )
+    fieldfile_index = next(
+        (
+            i
+            for i, e in enumerate(pack.selected_entities)
+            if e.qualified_name == "django.db.models.fields.files.FieldFile.url"
+        ),
+        len(selected_ids),
+    )
+
+    assert routing_index is not None, (
+        "django.urls.resolvers module/class must be selected for a URL-routing query"
+    )
+    assert routing_index < storage_index, (
+        f"routing module (rank {routing_index}) must precede Storage.url (rank {storage_index})"
+    )
+    assert routing_index < fieldfile_index, (
+        f"routing module (rank {routing_index}) must precede FieldFile.url (rank {fieldfile_index})"
+    )
+
+
+def test_url_method_in_urls_path_retains_selection() -> None:
+    """A .url method whose source_path contains 'url' as a segment is still eligible for selection.
+
+    This ensures the path-coherence guard does not suppress legitimate URL-subsystem entities.
+    """
+    urls_url_method = _make_method_entity(
+        eid="python:django/urls/resolvers.py:method:django.urls.resolvers.ResolverMatch.url",
+        name="url",
+        qualified_name="django.urls.resolvers.ResolverMatch.url",
+        source_path="django/urls/resolvers.py",
+    )
+    unrelated_url_method = _make_method_entity(
+        eid="python:django/core/files/storage.py:method:django.core.files.storage.Storage.url",
+        name="url",
+        qualified_name="django.core.files.storage.Storage.url",
+        source_path="django/core/files/storage.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+
+    task = "Find how URL routing resolver implementation works"
+    pack = _build_pack([urls_url_method, unrelated_url_method, *filler], task)
+
+    selected_names = [e.qualified_name for e in pack.selected_entities]
+    urls_index = next(
+        (i for i, n in enumerate(selected_names) if "ResolverMatch.url" in n),
+        None,
+    )
+    unrelated_index = next(
+        (i for i, n in enumerate(selected_names) if "Storage.url" in n),
+        len(selected_names),
+    )
+    # The urls-subsystem method must be selected and rank ahead of the unrelated one.
+    assert urls_index is not None, "url method in urls/ path must be selected"
+    assert urls_index < unrelated_index, (
+        f"url method in urls/ ({urls_index}) must rank before unrelated Storage.url "
+        f"({unrelated_index})"
+    )
+
+
+def test_ansible_plugin_loader_outranks_cgroup_loads_method() -> None:
+    """Ansible plugin loader module must outrank unrelated .loads methods in cgroup code.
+
+    Regression for: MountEntry.loads and CGroupEntry.loads winning over
+    lib/ansible/plugins/loader.py for an Ansible plugin-loading query.
+    """
+    loader_module = _make_module_entity(
+        eid="python:lib/ansible/plugins/loader.py:module:ansible.plugins.loader",
+        name="loader",
+        qualified_name="ansible.plugins.loader",
+        source_path="lib/ansible/plugins/loader.py",
+    )
+    cgroup_loads_method = _make_method_entity(
+        eid="python:test/lib/ansible_test/_internal/cgroup.py:method:cgroup.CGroupEntry.loads",
+        name="loads",
+        qualified_name="cgroup.CGroupEntry.loads",
+        source_path="test/lib/ansible_test/_internal/cgroup.py",
+    )
+    mount_loads_method = _make_method_entity(
+        eid="python:test/lib/ansible_test/_internal/cgroup.py:method:cgroup.MountEntry.loads",
+        name="loads",
+        qualified_name="cgroup.MountEntry.loads",
+        source_path="test/lib/ansible_test/_internal/cgroup.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+
+    entities = [loader_module, cgroup_loads_method, mount_loads_method, *filler]
+    task = "Find how Ansible plugin loading works"
+    pack = _build_pack(entities, task)
+
+    selected_names = [e.qualified_name for e in pack.selected_entities]
+    loader_index = next(
+        (i for i, n in enumerate(selected_names) if "ansible.plugins.loader" in n),
+        None,
+    )
+    cgroup_index = next(
+        (i for i, n in enumerate(selected_names) if "CGroupEntry.loads" in n),
+        len(selected_names),
+    )
+    mount_index = next(
+        (i for i, n in enumerate(selected_names) if "MountEntry.loads" in n),
+        len(selected_names),
+    )
+
+    assert loader_index is not None, (
+        "ansible.plugins.loader must be selected for a plugin-loading query"
+    )
+    assert loader_index < cgroup_index, (
+        f"ansible loader (rank {loader_index}) must precede CGroupEntry.loads (rank {cgroup_index})"
+    )
+    assert loader_index < mount_index, (
+        f"ansible loader (rank {loader_index}) must precede MountEntry.loads (rank {mount_index})"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 58.7C regression tests: docs/tutorial/example path noise suppression
+# ---------------------------------------------------------------------------
+
+
+def test_implementation_file_outranks_docs_src_tutorial_for_neutral_query() -> None:
+    """docs_src/ tutorial files must not outrank source impl files for code-search queries.
+
+    Regression for: Typer docs_src/commands/callback/tutorial001.py ranking ahead of
+    typer/core.py when querying "Find how Typer callback command processing works".
+    """
+    tutorial = _make_module_entity(
+        eid="python:docs_src/commands/callback/tutorial001.py:module:tutorial001",
+        name="tutorial001",
+        qualified_name="tutorial001",
+        source_path="docs_src/commands/callback/tutorial001.py",
+    )
+    impl = _make_module_entity(
+        eid="python:typer/core.py:module:typer.core",
+        name="core",
+        qualified_name="typer.core",
+        source_path="typer/core.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+    task = "Find how Typer callback command processing works"
+    pack = _build_pack([tutorial, impl, *filler], task)
+
+    selected_qnames = [e.qualified_name for e in pack.selected_entities]
+    impl_index = next(
+        (i for i, q in enumerate(selected_qnames) if q == "typer.core"),
+        None,
+    )
+    tutorial_index = next(
+        (i for i, q in enumerate(selected_qnames) if "tutorial001" in q),
+        len(selected_qnames),
+    )
+    assert impl_index is not None, (
+        "typer.core implementation module must be selected for a callback-processing query"
+    )
+    assert impl_index < tutorial_index, (
+        f"typer.core (rank {impl_index}) must rank ahead of docs_src tutorial "
+        f"(rank {tutorial_index})"
+    )
+
+
+def test_tutorials_path_does_not_outrank_source_for_neutral_query() -> None:
+    """tutorials/ paths must be penalized for neutral code-search queries."""
+    tutorial = _make_module_entity(
+        eid="python:tutorials/getting_started.py:module:getting_started",
+        name="getting_started",
+        qualified_name="getting_started",
+        source_path="tutorials/getting_started.py",
+    )
+    impl = _make_module_entity(
+        eid="python:src/mypackage/core.py:module:mypackage.core",
+        name="core",
+        qualified_name="mypackage.core",
+        source_path="src/mypackage/core.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+    task = "How does core processing work in mypackage"
+    pack = _build_pack([tutorial, impl, *filler], task)
+
+    selected_qnames = [e.qualified_name for e in pack.selected_entities]
+    impl_index = next(
+        (i for i, q in enumerate(selected_qnames) if q == "mypackage.core"),
+        None,
+    )
+    tutorial_index = next(
+        (i for i, q in enumerate(selected_qnames) if q == "getting_started"),
+        len(selected_qnames),
+    )
+    assert impl_index is not None, "mypackage.core must be selected for an implementation query"
+    assert impl_index < tutorial_index, (
+        f"source impl (rank {impl_index}) must rank ahead of tutorials/ path "
+        f"(rank {tutorial_index})"
+    )
+
+
+def test_docs_tutorial_selectable_when_query_explicitly_requests_tutorial() -> None:
+    """docs_src/ tutorial files stay selectable when the query explicitly asks for tutorials.
+
+    This verifies the docs_examples intent gate: penalty is skipped for documentation queries.
+    """
+    tutorial = _make_module_entity(
+        eid="python:docs_src/commands/callback/tutorial001.py:module:tutorial001",
+        name="tutorial001",
+        qualified_name="tutorial001",
+        source_path="docs_src/commands/callback/tutorial001.py",
+    )
+    impl = _make_module_entity(
+        eid="python:typer/core.py:module:typer.core",
+        name="core",
+        qualified_name="typer.core",
+        source_path="typer/core.py",
+    )
+    filler = [
+        _make_module_entity(f"filler:{i}", f"module{i}", f"pkg.module{i}", f"pkg/module{i}.py")
+        for i in range(20)
+    ]
+    # Explicit tutorial/example request → docs_examples intent fires → no penalty
+    task = "Show me the tutorial examples for callback commands"
+    pack = _build_pack([tutorial, impl, *filler], task)
+
+    selected_qnames = [e.qualified_name for e in pack.selected_entities]
+    assert "tutorial001" in selected_qnames, (
+        "docs_src tutorial must stay selectable when query explicitly asks for tutorials"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 58.7E — compact preview per-file cap
+# ---------------------------------------------------------------------------
+
+
+def _make_direct_pack(entities: list[Entity], budget: int = 8000) -> ContextPack:
+    """Build a minimal ContextPack for render-layer tests; bypasses ranking."""
+    return ContextPack(
+        task="test task",
+        budget=budget,
+        selected_entities=tuple(entities),
+        selected_relations=(),
+        source_citations=(),
+        why_selected={},
+        ranking_breakdowns={},
+        semantic_components=(),
+        uncertainties=(),
+        suggested_files_to_inspect=(),
+        forbidden_assumptions=(),
+    )
+
+
+class TestCompactPerPathCap:
+    """Compact rendering shows ≤5 entities per source_path; selected_entities unchanged."""
+
+    def test_compact_capped_at_five_per_source_path(self) -> None:
+        """Compact output shows at most 5 entities for a single source file."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        # Only 5 bullets for pkg/big_module.py should appear in the output
+        visible_lines = [
+            line
+            for line in markdown.splitlines()
+            if line.startswith("- `pkg.func") and "big_module.py" in line
+        ]
+        assert len(visible_lines) == 5, (
+            f"Expected 5 visible entities for big_module.py, got {len(visible_lines)}"
+        )
+
+    def test_selected_entities_unchanged_after_compact_render(self) -> None:
+        """Rendering must not touch selected_entities — internal state is always complete."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        _ = render_context_pack_markdown(pack)
+
+        # All 8 entities must still be present in the pack
+        assert len(pack.selected_entities) == 8, (
+            "selected_entities must remain unmodified after compact rendering"
+        )
+
+    def test_cap_is_per_source_path_not_global(self) -> None:
+        """Cap applies independently per source file; entities from other files are not affected."""
+        entities_a = [
+            _make_module_entity(
+                eid=f"python:pkg/file_a.py:function:pkg.a_func{i}",
+                name=f"a_func{i}",
+                qualified_name=f"pkg.a_func{i}",
+                source_path="pkg/file_a.py",
+            )
+            for i in range(7)
+        ]
+        entities_b = [
+            _make_module_entity(
+                eid=f"python:pkg/file_b.py:function:pkg.b_func{i}",
+                name=f"b_func{i}",
+                qualified_name=f"pkg.b_func{i}",
+                source_path="pkg/file_b.py",
+            )
+            for i in range(3)
+        ]
+        pack = _make_direct_pack(entities_a + entities_b)
+        markdown = render_context_pack_markdown(pack)
+
+        lines_a = [
+            line
+            for line in markdown.splitlines()
+            if "a_func" in line and line.startswith("- `pkg.")
+        ]
+        lines_b = [
+            line
+            for line in markdown.splitlines()
+            if "b_func" in line and line.startswith("- `pkg.")
+        ]
+        # file_a.py has 7 → capped to 5; file_b.py has 3 → all 3 visible
+        assert len(lines_a) == 5, f"file_a.py: expected 5 visible, got {len(lines_a)}"
+        assert len(lines_b) == 3, f"file_b.py: expected 3 visible, got {len(lines_b)}"
+
+    def test_hidden_count_indicator_emitted(self) -> None:
+        """Compact output must emit a '... (N more from path)' indicator for capped paths."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        # 8 - 5 = 3 hidden; indicator line must mention 3 and the path
+        assert "3 more from" in markdown and "big_module.py" in markdown, (
+            f"Expected hidden-count indicator '3 more from ... big_module.py' in:\n{markdown}"
+        )
+
+    def test_compact_deterministic_ordering_respects_input_order(self) -> None:
+        """First 5 entities in iteration order must be the visible ones (stable, deterministic)."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/big_module.py:function:pkg.func{i}",
+                name=f"func{i}",
+                qualified_name=f"pkg.func{i}",
+                source_path="pkg/big_module.py",
+            )
+            for i in range(8)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        # func0..func4 should appear; func5..func7 should not
+        for i in range(5):
+            assert f"`pkg.func{i}`" in markdown, f"pkg.func{i} must be visible"
+        for i in range(5, 8):
+            assert f"`pkg.func{i}` " not in markdown, f"pkg.func{i} must be hidden (capped)"
+
+    def test_no_indicator_when_under_cap(self) -> None:
+        """No hidden-count indicator when entity count is at or below the cap."""
+        entities = [
+            _make_module_entity(
+                eid=f"python:pkg/small_module.py:function:pkg.sfunc{i}",
+                name=f"sfunc{i}",
+                qualified_name=f"pkg.sfunc{i}",
+                source_path="pkg/small_module.py",
+            )
+            for i in range(5)
+        ]
+        pack = _make_direct_pack(entities)
+        markdown = render_context_pack_markdown(pack)
+
+        assert "more from" not in markdown, (
+            "No hidden-count indicator should appear when entity count == cap"
+        )

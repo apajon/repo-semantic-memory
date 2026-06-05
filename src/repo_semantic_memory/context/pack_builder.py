@@ -28,11 +28,14 @@ from repo_semantic_memory.context.import_scoring import (
 from repo_semantic_memory.context.path_roles import (
     DOC_ROLE,
     SOURCE_ROLE,
+    TEST_ROLE,
     TOOL_ROLE,
     classify_path_role,
     infer_source_roots,
     is_generated_artifact_path,
+    path_prior_multiplier,
 )
+from repo_semantic_memory.context.query_intent import QueryIntent, parse_query_intent
 from repo_semantic_memory.context.ranking import (
     RankingBreakdown,
     RankingCategory,
@@ -41,6 +44,9 @@ from repo_semantic_memory.context.ranking import (
     build_breakdown,
     dedupe_stable,
 )
+from repo_semantic_memory.context.selection_reasons import build_selection_reasons
+from repo_semantic_memory.context.support_expansion import select_support_files
+from repo_semantic_memory.context.test_branch import select_test_branch
 from repo_semantic_memory.memory import compact_component_labels, infer_semantic_components
 from repo_semantic_memory.model import Entity, JsonValue, Relation, SemanticComponent
 
@@ -87,6 +93,13 @@ _FORBIDDEN_ASSUMPTIONS = (
 _PACK_FIXED_OVERHEAD_CHARS = 300
 _CODE_PATH_SUFFIXES = (".py",)
 _EXACT_FIELD_MATCH_BOOST = 6.0
+# Kinds for which a bare name-equality hit must also be supported by the entity's
+# source path to earn the full exact-match boost.  Short attribute names (``url``,
+# ``loads``, …) are common across many unrelated subsystems; awarding the full
+# boost solely because the method name matches a task token over-selects unrelated
+# attribute entities.  Requiring path support filters these out without affecting
+# module/class-level matches, where the name is already distinctive.
+_PATH_COHERENCE_REQUIRED_KINDS: frozenset[str] = frozenset({"method", "field"})
 # Scoring weights — all scoring/penalty constants remain here because they are
 # ranking concerns specific to pack_builder, not path classification concerns.
 _SOURCE_CITATION_BONUS = 2
@@ -164,6 +177,12 @@ def build_context_pack(
     )
     entity_by_id = {entity.id.value: entity for entity in normalized_entities}
     task_tokens = _tokenize(task)
+    # Parse query intent: separates generic task-phrasing tokens from meaningful
+    # domain tokens.  Intent detection uses the full raw token set; BM25 lexical
+    # scoring uses only the filtered lexical_tokens so generic words like "find",
+    # "files", "how" cannot boost unrelated files via source_path field matching.
+    query_intent = parse_query_intent(task)
+    lexical_tokens = query_intent.lexical_tokens
     is_code_task = _is_code_task(task_tokens)
     task_hints = _task_hints(task_tokens)
     inferred_components = infer_semantic_components(
@@ -192,9 +211,10 @@ def build_context_pack(
         entities=normalized_entities,
         relations=normalized_relations,
         inferred_components=inferred_components,
-        task_tokens=task_tokens,
+        task_tokens=lexical_tokens,
         is_code_task=is_code_task,
         task_hints=task_hints,
+        query_intent=query_intent,
         public_api_entity_ids=public_api_entity_ids,
         export_source_entity_ids=export_source_entity_ids,
         export_target_entity_ids=export_target_entity_ids,
@@ -299,6 +319,64 @@ def build_context_pack(
                     reasons=dedupe_stable_reasons(existing_reason_tuples + reason_tuples),
                 )
 
+    # Support-file expansion (Ranking v2 — Prompt 58.4).
+    # Runs AFTER graph expansion, BEFORE the test branch.
+    # Selects adjacent implementation files around the already-selected entities
+    # using import/export/inherits relations, same-package proximity, and lexical
+    # token overlap.  Test files are intentionally excluded (handled below by the
+    # test branch).
+    support_file_results = select_support_files(
+        selected_entities=[entity_by_id[eid] for eid in selected_entity_ids if eid in entity_by_id],
+        all_entities=normalized_entities,
+        relations=normalized_relations,
+        query_intent=query_intent,
+        source_roots=source_roots,
+    )
+    for support_entity_id, support_reason in support_file_results:
+        is_new = _add_entity(support_entity_id, selected_entity_ids, selected_entity_set)
+        reasons_by_key[support_entity_id].append(support_reason)
+        if is_new and (explain_ranking or resolved_profile.include_ranking_breakdown):
+            ranking_breakdowns_by_id[support_entity_id] = build_breakdown(
+                lexical=0,
+                path_role=0,
+                task_intent=0,
+                component=0,
+                graph=0,
+                penalty=0,
+                matched_terms=(),
+                matched_fields=(),
+                reasons=dedupe_stable_reasons((("task_intent", support_reason, 0.0),)),
+            )
+
+    # Test-file retrieval branch (Ranking v2 — Prompt 58.3).
+    # Runs AFTER graph expansion so test entities can be selected independently
+    # of the main ranking pool.  Only active when the ``tests`` intent is detected.
+    # Test branch entities are appended to the selection after graph neighbors,
+    # so they are lower-priority for budget truncation but still included when
+    # budget allows.
+    test_branch_results = select_test_branch(
+        entities=normalized_entities,
+        relations=normalized_relations,
+        query_intent=query_intent,
+        seed_entity_ids=frozenset(selected_entity_ids),
+        source_roots=source_roots,
+    )
+    for test_entity_id, test_reason in test_branch_results:
+        is_new = _add_entity(test_entity_id, selected_entity_ids, selected_entity_set)
+        reasons_by_key[test_entity_id].append(test_reason)
+        if is_new and (explain_ranking or resolved_profile.include_ranking_breakdown):
+            ranking_breakdowns_by_id[test_entity_id] = build_breakdown(
+                lexical=0,
+                path_role=0,
+                task_intent=0,
+                component=0,
+                graph=0,
+                penalty=0,
+                matched_terms=(),
+                matched_fields=(),
+                reasons=dedupe_stable_reasons((("task_intent", test_reason, 0.0),)),
+            )
+
     # Collect all relations incident to any selected entity.
     relations_by_entity_id = _relations_by_entity_id(normalized_relations)
     selected_relations: list[Relation] = []
@@ -373,17 +451,26 @@ def build_context_pack(
         profile=resolved_profile,
     )
     include_compact_reasons = explain_ranking or resolved_profile.include_compact_score_reasons
+    included_keys = {
+        *(entity.id.value for entity in budgeted_entities),
+        *(relation_key(relation) for relation in budgeted_relations),
+    }
     why_selected = {}
     if include_compact_reasons:
-        included_reason_keys = {
-            *(entity.id.value for entity in budgeted_entities),
-            *(relation_key(relation) for relation in budgeted_relations),
-        }
-        for key in sorted(included_reason_keys):
+        for key in sorted(included_keys):
             reasons = score_capped_reasons_by_key.get(key, ())
             if not reasons:
                 continue
             why_selected[key] = reasons
+    # Always compute structured machine-readable selection reasons for all
+    # included entities and relations (Ranking v2 — Prompt 58.5).
+    selection_reasons = build_selection_reasons(
+        {
+            key: score_capped_reasons_by_key[key]
+            for key in sorted(included_keys)
+            if score_capped_reasons_by_key.get(key)
+        }
+    )
     include_ranking_breakdown = explain_ranking or resolved_profile.include_ranking_breakdown
     budgeted_breakdowns = _select_ranking_breakdowns(
         budgeted_entities=budgeted_entities,
@@ -405,6 +492,7 @@ def build_context_pack(
         suggested_files_to_inspect=tuple(suggested_files),
         forbidden_assumptions=_FORBIDDEN_ASSUMPTIONS,
         truncated=truncated,
+        selection_reasons=selection_reasons,
     )
 
 
@@ -416,6 +504,7 @@ def _rank_entities(
     task_tokens: tuple[str, ...],
     is_code_task: bool,
     task_hints: set[str],
+    query_intent: QueryIntent | None = None,
     public_api_entity_ids: set[str],
     export_source_entity_ids: set[str],
     export_target_entity_ids: set[str],
@@ -437,6 +526,7 @@ def _rank_entities(
             bm25_index=bm25_index,
             is_code_task=is_code_task,
             task_hints=task_hints,
+            query_intent=query_intent,
             public_api_entity_ids=public_api_entity_ids,
             export_source_entity_ids=export_source_entity_ids,
             export_target_entity_ids=export_target_entity_ids,
@@ -455,6 +545,7 @@ def _score_entity(
     bm25_index: FieldedBM25Index,
     is_code_task: bool,
     task_hints: set[str],
+    query_intent: QueryIntent | None = None,
     public_api_entity_ids: set[str],
     export_source_entity_ids: set[str],
     export_target_entity_ids: set[str],
@@ -479,10 +570,29 @@ def _score_entity(
             )
         )
 
+    # For attribute-level entities (method, field), a bare name-equality hit only
+    # earns the exact-match boost when the token also appears as a path segment of
+    # the entity's source file (path-subsystem coherence).  This prevents short
+    # attribute names such as ``url``, ``loads``, or ``loader`` from outranking
+    # module/class entities whose source path directly contains the token.
+    # Module and class-level entities are never restricted: their names are
+    # distinctive enough that exact matches are always meaningful.
+    # The same guard applies to qualified_name hits for method/field: the terminal
+    # name component (after the last dot) must have path support, otherwise a
+    # qualified_name like ``Storage.url`` would still earn the boost via the
+    # qualified_name field despite the name guard.
+    source_path_segments = frozenset(_source_path_segments(source_path))
+    requires_path_coherence = entity.kind in _PATH_COHERENCE_REQUIRED_KINDS
     exact_hits = sum(
         1
         for token in task_tokens
-        if token == name or token == qualified_name or token == source_path or token == entity_id
+        if token == source_path
+        or token == entity_id
+        or (token == name and (not requires_path_coherence or token in source_path_segments))
+        or (
+            token == qualified_name
+            and (not requires_path_coherence or token in source_path_segments)
+        )
     )
     lexical_score += exact_hits * _EXACT_FIELD_MATCH_BOOST
     if entity.source_range.path:
@@ -508,7 +618,7 @@ def _score_entity(
             )
         )
 
-    path_role_score = 0
+    path_role_score: float = 0
     task_intent_score = 0
     if "implementation" in task_hints and path_role == SOURCE_ROLE:
         path_role_score += _IMPLEMENTATION_PATH_ROLE_BONUS
@@ -543,14 +653,14 @@ def _score_entity(
             )
         )
 
-    if "tests" in task_hints and source_path.startswith("tests/"):
+    if "tests" in task_hints and path_role == TEST_ROLE:
         if "implementation" in task_hints:
             path_role_score += _IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS
             task_intent_score += _IMPLEMENTATION_TEST_SUPPORT_TASK_INTENT_BONUS
             reasons.append(
                 (
                     "path_role",
-                    'implementation + test task hints -> kept "tests/" as supporting context',
+                    "implementation + test task hints -> kept test root as supporting context",
                     _IMPLEMENTATION_TEST_SUPPORT_PATH_BONUS,
                 )
             )
@@ -565,7 +675,7 @@ def _score_entity(
             path_role_score += _TEST_PATH_ROLE_BONUS
             task_intent_score += _TEST_TASK_INTENT_BONUS
             reasons.append(
-                ("path_role", 'test task hint -> boosted "tests/"', _TEST_PATH_ROLE_BONUS)
+                ("path_role", "test task hint -> boosted test root", _TEST_PATH_ROLE_BONUS)
             )
             reasons.append(("task_intent", "test-like task intent boost", _TEST_TASK_INTENT_BONUS))
 
@@ -677,6 +787,17 @@ def _score_entity(
     if lexical_score > 0:
         reasons.append(("lexical", "lexical baseline relevance", float(lexical_score)))
 
+    # Apply intent-conditioned path prior (Ranking v2 — Prompt 58.2).
+    # The prior is an additive delta that adjusts for path-role/intent mismatch without
+    # overwhelming strong lexical/semantic scores.  It is only applied when a QueryIntent
+    # is available (i.e. from the full build_context_pack path; test callers may omit it).
+    if query_intent is not None:
+        prior_delta = path_prior_multiplier(source_path, query_intent)
+        if prior_delta != 0.0:
+            path_role_score += prior_delta
+            category: RankingCategory = "path_role" if prior_delta > 0 else "penalty"
+            reasons.append((category, f"path prior ({prior_delta:+.1f})", prior_delta))
+
     graph_score = 0
     normalized_reasons = dedupe_stable_reasons(tuple(reasons))
     if not normalized_reasons and (
@@ -696,6 +817,31 @@ def _score_entity(
         matched_fields=dedupe_stable(tuple(matched_fields)),
         reasons=normalized_reasons,
     )
+
+
+def _source_path_segments(source_path: str) -> tuple[str, ...]:
+    """Return the path segments (directory names and bare filename stem) for *source_path*.
+
+    Used for path-subsystem coherence checks: a token must appear in these segments
+    to earn the exact-match boost on attribute-level entities.
+
+    Examples::
+
+        _source_path_segments("django/urls/resolvers.py")
+        -> ("django", "urls", "resolvers")
+        _source_path_segments("lib/ansible/plugins/loader.py")
+        -> ("lib", "ansible", "plugins", "loader")
+        _source_path_segments("django/core/files/storage.py")
+        -> ("django", "core", "files", "storage")
+    """
+    normalized = source_path.replace("\\", "/").strip("/")
+    parts = normalized.split("/")
+    segments: list[str] = []
+    for part in parts:
+        # Strip file extension from the last component to expose the stem.
+        stem = part.rsplit(".", 1)[0] if "." in part else part
+        segments.append(stem)
+    return tuple(segments)
 
 
 def _tokenize(text: str) -> tuple[str, ...]:
