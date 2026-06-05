@@ -182,3 +182,66 @@ Every case in `manual_external_benchmark_cases.yaml` is tagged `58.6_migration`.
 Expected and forbidden files trace back to explicit rows in
 `docs/reviews/ranking_v2_regression_eval.md`. The `notes` field on each case
 preserves the original 58.6 score summary and root-cause diagnosis.
+
+## Benchmark workflow
+
+### CI (local fixtures, no external repos)
+
+```bash
+rsm index tests/fixtures/ranking_repo --db .rsm/ci_index.sqlite
+
+# Text output
+rsm eval bench --dataset benchmarks/ci_benchmark_cases.yaml --db .rsm/ci_index.sqlite
+
+# JSON output
+rsm eval bench --dataset benchmarks/ci_benchmark_cases.yaml --db .rsm/ci_index.sqlite --json
+
+# Markdown report
+rsm eval bench \
+  --dataset benchmarks/ci_benchmark_cases.yaml \
+  --db .rsm/ci_index.sqlite \
+  --markdown-report /tmp/rsm-ci-bench.md
+```
+
+### Manual (external repos, opt-in)
+
+```bash
+# Prepare: clone and index once per repository
+rsm index /path/to/django --db /tmp/rsm-django.sqlite
+
+# Run a single case
+rsm eval bench \
+  --dataset benchmarks/manual_external_benchmark_cases.yaml \
+  --mode manual \
+  --case django_url_resolution \
+  --db /tmp/rsm-django.sqlite \
+  --markdown-report /tmp/rsm-django-bench.md
+```
+
+See [`docs/eval/ranking_v2_benchmark_migration.md`](ranking_v2_benchmark_migration.md)
+for the full migration mapping and execution guide.
+
+## 59.x benchmark harness — final status
+
+**Completed.** The 59.0–59.6 sequence delivered:
+
+| Capability | Status |
+|-----------|--------|
+| Schema-validated benchmark cases | ✅ |
+| Deterministic metrics (central/support/tests/noise/overall) | ✅ |
+| CLI execution (`rsm eval bench`) | ✅ |
+| CI fixture dataset (6 cases, `ci_fixture`) | ✅ |
+| Manual external dataset (4 cases, `manual_external`) | ✅ |
+| JSON output (`--json`) | ✅ |
+| Markdown report output (`--markdown-report`) | ✅ |
+| Mode filtering (`--mode ci|manual`) | ✅ |
+| Case filtering (`--case ID`) | ✅ |
+
+**Not included in 59.x:**
+
+- Ranking retune
+- Chunks
+- Embeddings
+- Semble backend
+- CodeGraph backend
+- Context graph export

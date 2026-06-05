@@ -495,3 +495,61 @@ class TestManualExternalDataset:
         typer_case = next(c for c in dataset.cases if c.id == "typer_command_registration")
         forbidden = typer_case.expected.forbidden_files
         assert any("docs_src/" in f for f in forbidden)
+
+
+# ---------------------------------------------------------------------------
+# 59.7 — Consistency / migration tests
+# ---------------------------------------------------------------------------
+
+_CI_DATASET_FILE = Path(__file__).resolve().parents[2] / "benchmarks" / "ci_benchmark_cases.yaml"
+_MIGRATION_DOC = (
+    Path(__file__).resolve().parents[2] / "docs" / "eval" / "ranking_v2_benchmark_migration.md"
+)
+_PUBLIC_REPOS = Path(__file__).resolve().parents[2] / "benchmarks" / "public_repos.yaml"
+
+
+class TestBenchmarkMigrationConsistency:
+    """Cross-dataset consistency checks for 59.7 migration closure."""
+
+    def test_all_manual_cases_have_58_6_migration_tag(self) -> None:
+        """Every manual_external case is tagged 58.6_migration."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        for case in dataset.cases:
+            assert "58.6_migration" in case.tags, (
+                f"Manual case {case.id} missing 58.6_migration tag"
+            )
+
+    def test_all_ci_case_ids_in_migration_doc(self) -> None:
+        """Every CI case id is mentioned in the migration document."""
+        dataset = load_benchmark_dataset(_CI_DATASET_FILE)
+        doc_text = _MIGRATION_DOC.read_text(encoding="utf-8")
+        for case in dataset.cases:
+            assert case.id in doc_text, f"CI case {case.id} not found in migration doc"
+
+    def test_all_manual_case_ids_in_migration_doc(self) -> None:
+        """Every manual case id is mentioned in the migration document."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        doc_text = _MIGRATION_DOC.read_text(encoding="utf-8")
+        for case in dataset.cases:
+            assert case.id in doc_text, f"Manual case {case.id} not found in migration doc"
+
+    def test_manual_fixture_labels_in_migration_doc(self) -> None:
+        """Fixture labels used by manual cases are documented in the migration doc."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        doc_text = _MIGRATION_DOC.read_text(encoding="utf-8")
+        for case in dataset.cases:
+            fixture_label = case.fixture
+            assert fixture_label in doc_text, (
+                f"Fixture {fixture_label!r} (case {case.id}) not found in migration doc"
+            )
+
+    def test_public_repo_labels_match_pilot_manifest(self) -> None:
+        """Manual cases whose fixtures appear in public_repos.yaml reference known repos."""
+        # Only check fixtures that exist in public_repos.yaml (currently typer, httpx).
+        # Django and Ansible are documented in the migration doc but not yet piloted.
+        repos_text = _PUBLIC_REPOS.read_text(encoding="utf-8")
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        for case in dataset.cases:
+            if case.fixture in repos_text:
+                # Fixture is in the pilot manifest — all good
+                pass

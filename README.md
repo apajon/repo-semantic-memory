@@ -27,7 +27,10 @@ uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
 uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
 uv run rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --json
 uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 --json
+uv run rsm eval bench --dataset benchmarks/ci_benchmark_cases.yaml --json
 ```
+
+See [`docs/eval/benchmarks.md`](docs/eval/benchmarks.md) for benchmark workflows.
 
 For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quickstart.md`](docs/quickstart.md).
 
@@ -45,6 +48,7 @@ RSM is organized around one practical workflow: index the repository once, then 
 - deterministic compression profiles
 - approximate token-savings metrics
 - benchmark/eval commands
+- benchmark harness with CI and manual external datasets
 - `.ai/` export
 - JSONL import/export
 - minimal local stdio MCP-compatible JSON-RPC prototype for read-only local dogfooding, not yet externally conformance-tested
