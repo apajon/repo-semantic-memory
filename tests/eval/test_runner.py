@@ -322,3 +322,211 @@ def test_baseline_comparison_savings_deterministic_across_budgets(
         first_8000.outcomes[0].token_savings_metrics
         == second_8000.outcomes[0].token_savings_metrics
     )
+
+
+# ---------------------------------------------------------------------------
+# 59.2 — Benchmark harness runner tests
+# ---------------------------------------------------------------------------
+
+
+from repo_semantic_memory.context.context_pack import ContextPack  # noqa: E402
+from repo_semantic_memory.eval.datasets import BenchmarkCase, BenchmarkExpected  # noqa: E402
+from repo_semantic_memory.eval.runner import (  # noqa: E402
+    extract_selected_files,
+    run_benchmark_cases,
+)
+
+
+def _fake_pack(
+    *,
+    suggested: tuple[str, ...] = (),
+    entity_paths: tuple[str, ...] = (),
+) -> ContextPack:
+    """Build a minimal deterministic ContextPack for runner tests."""
+    entities = tuple(
+        Entity(
+            id=StableId.from_parts(["file", path]),
+            kind="module",
+            name=path.rsplit("/", 1)[-1],
+            qualified_name=path.replace("/", ".").replace(".py", ""),
+            source_range=SourceRange(path=path, start_line=1, end_line=1),
+        )
+        for path in entity_paths
+    )
+    return ContextPack(
+        task="test task",
+        budget=1000,
+        selected_entities=entities,
+        selected_relations=(),
+        source_citations=(),
+        why_selected={},
+        ranking_breakdowns={},
+        semantic_components=(),
+        uncertainties=(),
+        suggested_files_to_inspect=suggested,
+        forbidden_assumptions=(),
+    )
+
+
+class TestExtractSelectedFiles:
+    """Tests for extract_selected_files."""
+
+    def test_uses_suggested_files_to_inspect_first(self) -> None:
+        pack = _fake_pack(
+            suggested=("src/a.py", "src/b.py"),
+            entity_paths=("src/x.py", "src/y.py"),
+        )
+        result = extract_selected_files(pack)
+        assert result == ("src/a.py", "src/b.py")
+
+    def test_falls_back_to_entity_paths_when_no_suggested(self) -> None:
+        pack = _fake_pack(entity_paths=("src/x.py", "src/y.py"))
+        result = extract_selected_files(pack)
+        assert result == ("src/x.py", "src/y.py")
+
+    def test_dedupes_deterministically_preserving_first_occurrence(self) -> None:
+        pack = _fake_pack(
+            suggested=("src/a.py", "src/b.py", "src/a.py", "src/c.py"),
+        )
+        result = extract_selected_files(pack)
+        assert result == ("src/a.py", "src/b.py", "src/c.py")
+
+    def test_empty_suggested_and_empty_entities_returns_empty(self) -> None:
+        pack = _fake_pack()
+        result = extract_selected_files(pack)
+        assert result == ()
+
+
+class TestRunBenchmarkCases:
+    """Tests for run_benchmark_cases."""
+
+    def _make_case(
+        self,
+        case_id: str = "case_001",
+        central: tuple[str, ...] = ("src/central.py",),
+        support: tuple[str, ...] = (),
+        tests: tuple[str, ...] = (),
+        forbidden: tuple[str, ...] = (),
+    ) -> BenchmarkCase:
+        return BenchmarkCase(
+            id=case_id,
+            fixture="test_fixture",
+            query="find central",
+            expected=BenchmarkExpected(
+                central_files=central,
+                support_files=support,
+                test_files=tests,
+                forbidden_files=forbidden,
+            ),
+            tags=(),
+            notes="",
+            mode="ci_fixture",
+        )
+
+    def test_evaluates_one_valid_case(self) -> None:
+        case = self._make_case(central=("src/central.py",))
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/central.py",))
+
+        result = run_benchmark_cases(cases=[case], build_pack=build)
+        assert len(result.outcomes) == 1
+        assert result.outcomes[0].case.id == "case_001"
+        assert result.outcomes[0].metrics.central_file_found == 1.0
+        assert result.outcomes[0].metrics.overall == 1.0
+
+    def test_evaluates_multiple_cases(self) -> None:
+        case_a = self._make_case("a", central=("src/a.py",))
+        case_b = self._make_case("b", central=("src/b.py",))
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=(c.expected.central_files[0],))
+
+        result = run_benchmark_cases(cases=[case_a, case_b], build_pack=build)
+        assert len(result.outcomes) == 2
+        assert result.outcomes[0].case.id == "a"
+        assert result.outcomes[1].case.id == "b"
+
+    def test_computes_aggregate_metrics(self) -> None:
+        case_a = self._make_case("a", central=("src/a.py",))
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/a.py",))
+
+        result = run_benchmark_cases(cases=[case_a, case_a], build_pack=build)
+        # Both cases have identical outcomes → aggregate should match
+        assert result.aggregate.central_file_found == 1.0
+        assert result.aggregate.overall == 1.0
+
+    def test_reports_missing_central_files(self) -> None:
+        case = self._make_case(central=("src/central.py", "src/missing.py"))
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/central.py",))
+
+        result = run_benchmark_cases(cases=[case], build_pack=build)
+        assert result.outcomes[0].missing_central_files == ("src/missing.py",)
+
+    def test_reports_missing_support_files(self) -> None:
+        case = self._make_case(
+            central=("src/central.py",),
+            support=("src/sup_a.py", "src/sup_b.py"),
+        )
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/central.py", "src/sup_a.py"))
+
+        result = run_benchmark_cases(cases=[case], build_pack=build)
+        assert result.outcomes[0].missing_support_files == ("src/sup_b.py",)
+
+    def test_reports_missing_test_files(self) -> None:
+        case = self._make_case(
+            central=("src/central.py",),
+            tests=("tests/test_a.py", "tests/test_b.py"),
+        )
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/central.py",))
+
+        result = run_benchmark_cases(cases=[case], build_pack=build)
+        assert result.outcomes[0].missing_test_files == (
+            "tests/test_a.py",
+            "tests/test_b.py",
+        )
+
+    def test_reports_forbidden_files_found(self) -> None:
+        case = self._make_case(
+            central=("src/central.py",),
+            forbidden=("src/noise_a.py", "src/noise_b.py"),
+        )
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/central.py", "src/noise_a.py"))
+
+        result = run_benchmark_cases(cases=[case], build_pack=build)
+        assert result.outcomes[0].forbidden_files_found == ("src/noise_a.py",)
+
+    def test_preserves_deterministic_outcome_order(self) -> None:
+        cases = [
+            self._make_case("a", central=("src/a.py",)),
+            self._make_case("b", central=("src/b.py",)),
+        ]
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=(c.expected.central_files[0],))
+
+        r1 = run_benchmark_cases(cases=cases, build_pack=build)
+        r2 = run_benchmark_cases(cases=cases, build_pack=build)
+        assert r1.outcomes[0].case.id == r2.outcomes[0].case.id
+        assert r1.outcomes[1].case.id == r2.outcomes[1].case.id
+
+    def test_does_not_mutate_benchmark_case(self) -> None:
+        case = self._make_case("a", central=("src/a.py",))
+
+        def build(c: BenchmarkCase) -> ContextPack:
+            return _fake_pack(suggested=("src/a.py",))
+
+        run_benchmark_cases(cases=[case], build_pack=build)
+        # Case should be unchanged after evaluation
+        assert case.expected.central_files == ("src/a.py",)
+        assert case.id == "a"

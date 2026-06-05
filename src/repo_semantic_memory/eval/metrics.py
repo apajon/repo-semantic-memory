@@ -231,3 +231,105 @@ def _coverage_per_1k_tokens(
     if estimated_tokens <= 0.0:
         return 0.0
     return ((gold_file_coverage + gold_symbol_coverage) / estimated_tokens) * 1000.0
+
+
+# ---------------------------------------------------------------------------
+# 59.2 — Benchmark harness metrics
+# ---------------------------------------------------------------------------
+
+_BENCHMARK_WEIGHTS = {
+    "central": 0.35,
+    "support": 0.25,
+    "tests": 0.20,
+    "noise": 0.20,
+}
+
+
+@dataclass(frozen=True)
+class BenchmarkCaseMetrics:
+    """Per-case metrics for the 59.0 benchmark harness.
+
+    All scores are in [0.0, 1.0].  ``central_file_found`` is binary; the other
+    three are continuous ratios.  ``overall`` is the weighted aggregate.
+    """
+
+    central_file_found: float
+    support_files_found: float
+    tests_found: float
+    noise_reduced: float
+    overall: float
+
+
+def compute_benchmark_case_metrics(
+    *,
+    selected_files: tuple[str, ...],
+    expected_central: tuple[str, ...],
+    expected_support: tuple[str, ...],
+    expected_tests: tuple[str, ...],
+    forbidden_files: tuple[str, ...],
+) -> BenchmarkCaseMetrics:
+    """Compute 59.0 harness metrics for a single benchmark case."""
+    selected_set = frozenset(selected_files)
+    central_set = frozenset(expected_central)
+
+    # central_file_found: binary
+    central_found = 1.0 if selected_set & central_set else 0.0
+
+    # support_files_found
+    if not expected_support:
+        support_found = 1.0
+    else:
+        support_hits = sum(1 for f in expected_support if f in selected_set)
+        support_found = support_hits / len(expected_support)
+
+    # tests_found
+    if not expected_tests:
+        tests_found = 1.0
+    else:
+        test_hits = sum(1 for f in expected_tests if f in selected_set)
+        tests_found = test_hits / len(expected_tests)
+
+    # noise_reduced
+    if not forbidden_files:
+        noise_reduced = 1.0
+    else:
+        forbidden_hits = sum(1 for f in forbidden_files if f in selected_set)
+        noise_ratio = forbidden_hits / max(1, len(selected_set))
+        noise_reduced = 1.0 - min(1.0, noise_ratio)
+
+    # overall weighted aggregate
+    overall = (
+        _BENCHMARK_WEIGHTS["central"] * central_found
+        + _BENCHMARK_WEIGHTS["support"] * support_found
+        + _BENCHMARK_WEIGHTS["tests"] * tests_found
+        + _BENCHMARK_WEIGHTS["noise"] * noise_reduced
+    )
+
+    return BenchmarkCaseMetrics(
+        central_file_found=central_found,
+        support_files_found=support_found,
+        tests_found=tests_found,
+        noise_reduced=noise_reduced,
+        overall=overall,
+    )
+
+
+def compute_aggregate_benchmark_case_metrics(
+    per_case: tuple[BenchmarkCaseMetrics, ...],
+) -> BenchmarkCaseMetrics:
+    """Compute aggregate metrics as the mean of per-case metrics."""
+    if not per_case:
+        return BenchmarkCaseMetrics(
+            central_file_found=0.0,
+            support_files_found=0.0,
+            tests_found=0.0,
+            noise_reduced=0.0,
+            overall=0.0,
+        )
+    return BenchmarkCaseMetrics(
+        central_file_found=mean(m.central_file_found for m in per_case),
+        support_files_found=mean(m.support_files_found for m in per_case),
+        tests_found=mean(m.tests_found for m in per_case),
+        noise_reduced=mean(m.noise_reduced for m in per_case),
+        overall=mean(m.overall for m in per_case),
+    )
