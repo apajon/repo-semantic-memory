@@ -1,0 +1,136 @@
+# CI benchmark cases (59.0 harness schema).
+#
+# All cases use mode: ci_fixture and run against local checked-in fixtures.
+# External repos are not required.
+#
+# Fixture: ranking_repo  (tests/fixtures/ranking_repo/)
+#   A multi-package repo with src/lifecore_ros2/, lifecore_state/,
+#   tests/, docs/, examples/, and generated _build/ artifacts.
+
+tasks:
+  # -----------------------------------------------------------------------
+  # Central file retrieval
+  # -----------------------------------------------------------------------
+  - id: ci_lifecycle_component_impl
+    fixture: ranking_repo
+    mode: ci_fixture
+    query: "Find where LifecycleComponent class is implemented."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_component.py
+      support_files:
+      test_files:
+      forbidden_files:
+    tags:
+      - central_retrieval
+      - ci
+    notes: >
+      Basic central-file retrieval. LifecycleComponent is defined in
+      lifecycle_component.py and exported from __init__.py.
+
+  - id: ci_state_component_impl
+    fixture: ranking_repo
+    mode: ci_fixture
+    query: "Find where StateComponent is implemented."
+    expected:
+      central_files:
+        - lifecore_state/state_component.py
+      support_files:
+        - lifecore_state/__init__.py
+      test_files:
+      forbidden_files:
+    tags:
+      - central_retrieval
+      - support_retrieval
+      - ci
+    notes: >
+      StateComponent lives in lifecore_state/state_component.py and is
+      re-exported from lifecore_state/__init__.py. The __init__.py is
+      expected as a support file through export adjacency.
+
+  # -----------------------------------------------------------------------
+  # Public API + support files
+  # -----------------------------------------------------------------------
+  - id: ci_public_api_imports_and_exports
+    fixture: ranking_repo
+    mode: ci_fixture
+    query: "Find the public package exports and imports of LifecycleComponent."
+    expected:
+      central_files:
+        - src/lifecore_ros2/__init__.py
+      support_files:
+        - src/lifecore_ros2/components/lifecycle_component.py
+      test_files:
+      forbidden_files:
+    tags:
+      - public_api
+      - support_retrieval
+      - ci
+    notes: >
+      __init__.py exports LifecycleComponent from lifecycle_component.py.
+      The component module should appear as a support file via export/import
+      adjacency.
+
+  # -----------------------------------------------------------------------
+  # Test file retrieval
+  # -----------------------------------------------------------------------
+  - id: ci_lifecycle_tests
+    fixture: ranking_repo
+    mode: ci_fixture
+    query: "Find tests for lifecycle components and their public API surface."
+    expected:
+      central_files:
+        - tests/test_lifecycle.py
+        - tests/public_api_checks.py
+      support_files:
+      test_files:
+      forbidden_files:
+    tags:
+      - test_retrieval
+      - ci
+    notes: >
+      Both test files exercise lifecycle components. test_lifecycle.py
+      imports build_component; public_api_checks.py imports LifecycleComponent
+      from the public surface.
+
+  # -----------------------------------------------------------------------
+  # Forbidden / generated artifact suppression
+  # -----------------------------------------------------------------------
+  - id: ci_generated_artifact_forbidden
+    fixture: ranking_repo
+    mode: ci_fixture
+    query: "Find where LifecycleComponent is implemented."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_component.py
+      support_files:
+      test_files:
+      forbidden_files:
+        - docs/_build/generated_api.py
+    tags:
+      - noise_suppression
+      - ci
+    notes: >
+      docs/_build/generated_api.py is a generated artifact and must not be
+      selected for an implementation query. The 58.7C cleanup classifies
+      _build/ paths as generated artifacts.
+
+  - id: ci_example_not_selected_for_impl
+    fixture: ranking_repo
+    mode: ci_fixture
+    query: "Find the LifecycleComponent class implementation."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_component.py
+      support_files:
+      test_files:
+      forbidden_files:
+        - examples/example_usage.py
+    tags:
+      - noise_suppression
+      - ci
+    notes: >
+      examples/example_usage.py imports LifecycleComponent but is a usage
+      example, not the implementation. Implementation queries should not
+      select example files. The 58.7C cleanup penalizes docs/example paths
+      for implementation queries.
