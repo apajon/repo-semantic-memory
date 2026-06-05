@@ -436,3 +436,62 @@ class TestLoadBenchmarkDataset:
         _write_benchmark_yaml(tmp_path / "tasks.yaml", "")
         with pytest.raises(ValueError, match="contains no cases"):
             load_benchmark_dataset(tmp_path / "tasks.yaml")
+
+
+# ---------------------------------------------------------------------------
+# 59.6 — Manual external dataset tests
+# ---------------------------------------------------------------------------
+
+_MANUAL_DATASET = (
+    Path(__file__).resolve().parents[2] / "benchmarks" / "manual_external_benchmark_cases.yaml"
+)
+
+
+class TestManualExternalDataset:
+    """Tests for benchmarks/manual_external_benchmark_cases.yaml."""
+
+    def test_dataset_loads(self) -> None:
+        """Manual external dataset loads with load_benchmark_dataset()."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        assert len(dataset.cases) == 4
+        for case in dataset.cases:
+            assert case.mode == "manual_external"
+            assert case.expected.central_files
+
+    def test_fixture_labels_match_known_repos(self) -> None:
+        """Fixture labels correspond to known public repo names."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        fixtures = {case.fixture for case in dataset.cases}
+        assert fixtures == {"django", "ansible", "httpx", "typer"}
+
+    def test_all_cases_have_58_6_migration_tag(self) -> None:
+        """Every case is tagged 58.6_migration for provenance."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        for case in dataset.cases:
+            assert "58.6_migration" in case.tags, f"Case {case.id} missing 58.6_migration tag"
+
+    def test_django_case_has_forbidden_files(self) -> None:
+        """Django case includes the 12+ .url method noise files."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        django_case = next(c for c in dataset.cases if c.id == "django_url_resolution")
+        assert len(django_case.expected.forbidden_files) >= 12
+        assert "django/core/files/storage/base.py" in django_case.expected.forbidden_files
+
+    def test_ansible_case_has_test_files(self) -> None:
+        """Ansible case expects test_plugins.py as a test file."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        ansible_case = next(c for c in dataset.cases if c.id == "ansible_loader_discovery")
+        assert "test/units/plugins/test_plugins.py" in ansible_case.expected.test_files
+
+    def test_httpx_case_has_empty_test_files(self) -> None:
+        """HTTPX case has no expected test files (not indexed in 58.6)."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        httpx_case = next(c for c in dataset.cases if c.id == "httpx_public_client_api")
+        assert httpx_case.expected.test_files == ()
+
+    def test_typer_case_has_docs_src_forbidden(self) -> None:
+        """Typer case forbids docs_src/ tutorial files."""
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        typer_case = next(c for c in dataset.cases if c.id == "typer_command_registration")
+        forbidden = typer_case.expected.forbidden_files
+        assert any("docs_src/" in f for f in forbidden)

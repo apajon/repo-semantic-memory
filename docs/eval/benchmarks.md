@@ -100,3 +100,85 @@ Next dataset candidates after this expansion:
 - invariant and claim lookup tasks backed by authored evidence
 - cross-repository or public benchmark datasets once internal coverage stabilizes
 - patch-context sufficiency tasks aligned with future coding-agent workflows
+
+## 59.0 Benchmark harness datasets
+
+The 59.0 benchmark harness supports two dataset schemas:
+
+### CI benchmark cases (`benchmarks/ci_benchmark_cases.yaml`)
+
+Local deterministic cases running against checked-in fixtures (`tests/fixtures/ranking_repo/`).
+These run with `--mode ci` (the default) and require no external repositories.
+
+```bash
+rsm index tests/fixtures/ranking_repo --db .rsm/ci_index.sqlite
+rsm eval bench --dataset benchmarks/ci_benchmark_cases.yaml --db .rsm/ci_index.sqlite
+```
+
+### Manual external benchmark cases (`benchmarks/manual_external_benchmark_cases.yaml`)
+
+Opt-in cases migrated from the Ranking v2 regression evaluation (58.6 report).
+These target public repositories — Django, Ansible, HTTPX, Typer — and use `mode: manual_external`.
+
+**Manual external benchmarks are opt-in.** External repos are:
+- **Not cloned automatically.** You must check out each repo at the pinned revision
+  listed in `benchmarks/public_repos.yaml`.
+- **Not required for CI.** `--mode ci` (the default) silently skips all
+  `manual_external` cases.
+- **Not indexed automatically.** You must run `rsm index` once per external repo.
+
+#### Manual execution walkthrough
+
+Prerequisites: a local checkout and a pre-built RSM index for each repository.
+
+```bash
+# Clone once (example: Typer at pinned revision)
+git clone https://github.com/fastapi/typer /tmp/typer-bench
+cd /tmp/typer-bench && git checkout 8c70d4987284a37ca6c418297af0210dc01ed5ac
+
+# Index once
+rsm index /tmp/typer-bench --db /tmp/rsm-typer.sqlite
+
+# Run a single case
+rsm eval bench \
+  --dataset benchmarks/manual_external_benchmark_cases.yaml \
+  --mode manual \
+  --case typer_command_registration \
+  --db /tmp/rsm-typer.sqlite
+
+# Run all manual cases for one repo
+rsm eval bench \
+  --dataset benchmarks/manual_external_benchmark_cases.yaml \
+  --mode manual \
+  --db /tmp/rsm-typer.sqlite
+
+# JSON output
+rsm eval bench \
+  --dataset benchmarks/manual_external_benchmark_cases.yaml \
+  --mode manual \
+  --db /tmp/rsm-typer.sqlite \
+  --json
+
+# Markdown report
+rsm eval bench \
+  --dataset benchmarks/manual_external_benchmark_cases.yaml \
+  --mode manual \
+  --db /tmp/rsm-typer.sqlite \
+  --markdown-report /tmp/bench-report.md
+```
+
+#### Filtering by mode
+
+- `--mode ci` (default): runs only `ci_fixture` cases, skips `manual_external`.
+- `--mode manual`: runs only `manual_external` cases, skips `ci_fixture`.
+
+If no cases match the selected mode, the command exits with code 2 and a clear
+message on stderr. This is expected when running `--mode manual` against a CI-only
+dataset or vice versa.
+
+#### Dataset migration provenance
+
+Every case in `manual_external_benchmark_cases.yaml` is tagged `58.6_migration`.
+Expected and forbidden files trace back to explicit rows in
+`docs/reviews/ranking_v2_regression_eval.md`. The `notes` field on each case
+preserves the original 58.6 score summary and root-cause diagnosis.

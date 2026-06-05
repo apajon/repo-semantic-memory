@@ -1799,6 +1799,132 @@ def test_eval_bench_existing_commands_still_work(
 
 
 # ---------------------------------------------------------------------------
+# 59.6 — Manual external benchmark mode filtering
+# ---------------------------------------------------------------------------
+
+_MANUAL_DATASET = (
+    Path(__file__).resolve().parents[1] / "benchmarks" / "manual_external_benchmark_cases.yaml"
+)
+
+
+class TestManualExternalBenchmarkFiltering:
+    """CLI tests for manual_external benchmark mode filtering."""
+
+    def test_manual_dataset_loads_with_loader(self) -> None:
+        from repo_semantic_memory.eval.datasets import load_benchmark_dataset
+
+        dataset = load_benchmark_dataset(_MANUAL_DATASET)
+        assert len(dataset.cases) == 4
+        for case in dataset.cases:
+            assert case.mode == "manual_external"
+
+    def test_mode_ci_excludes_manual_external(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+        db_path = tmp_path / ".rsm" / "index.sqlite"
+        assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+        capsys.readouterr()
+
+        exit_code = main(
+            [
+                "eval",
+                "bench",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(_MANUAL_DATASET),
+                "--mode",
+                "ci",
+            ]
+        )
+        assert exit_code == 2
+        assert "No benchmark cases match" in capsys.readouterr().err
+
+    def test_mode_manual_selects_manual_external(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+        db_path = tmp_path / ".rsm" / "index.sqlite"
+        assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+        capsys.readouterr()
+
+        exit_code = main(
+            [
+                "eval",
+                "bench",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(_MANUAL_DATASET),
+                "--mode",
+                "manual",
+                "--json",
+            ]
+        )
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["mode"] == "manual"
+        assert len(payload["outcomes"]) == 4
+        for o in payload["outcomes"]:
+            assert o["metrics"]["central_file_found"] == 0.0
+
+    def test_mode_manual_with_case_filter(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        fixture_root = Path(__file__).resolve().parent / "fixtures" / "simple_repo"
+        db_path = tmp_path / ".rsm" / "index.sqlite"
+        assert main(["index", str(fixture_root), "--db", str(db_path)]) == 0
+        capsys.readouterr()
+
+        exit_code = main(
+            [
+                "eval",
+                "bench",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(_MANUAL_DATASET),
+                "--mode",
+                "manual",
+                "--case",
+                "typer_command_registration",
+                "--json",
+            ]
+        )
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["outcomes"]) == 1
+        assert payload["outcomes"][0]["case_id"] == "typer_command_registration"
+
+    def test_ci_dataset_unaffected_by_manual_dataset(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        _RANKING_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "ranking_repo"
+        _CI_DATASET = Path(__file__).resolve().parents[1] / "benchmarks" / "ci_benchmark_cases.yaml"
+        db_path = tmp_path / ".rsm" / "index.sqlite"
+        assert main(["index", str(_RANKING_FIXTURE), "--db", str(db_path)]) == 0
+        capsys.readouterr()
+
+        exit_code = main(
+            [
+                "eval",
+                "bench",
+                "--db",
+                str(db_path),
+                "--dataset",
+                str(_CI_DATASET),
+                "--mode",
+                "ci",
+                "--json",
+            ]
+        )
+        assert exit_code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert len(payload["outcomes"]) == 6
+
+
+# ---------------------------------------------------------------------------
 # 59.4 — CI benchmark cases
 # ---------------------------------------------------------------------------
 
