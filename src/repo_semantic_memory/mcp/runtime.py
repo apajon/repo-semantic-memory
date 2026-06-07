@@ -667,8 +667,8 @@ def _tool_get_context_page(
                     "code": "result_set_unknown",
                     "message": (
                         f"result_set_id {result_set_id!r} is unknown or has expired in "
-                        "this MCP session; call rsm_prepare_context again to mint a "
-                        "fresh result set."
+                        "this MCP session; call rsm_prepare_context (or rsm_build_context_pack) "
+                        "to mint a fresh result set."
                     ),
                     "recoverable": True,
                     "subject_id": result_set_id,

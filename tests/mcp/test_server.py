@@ -712,6 +712,65 @@ def test_get_context_page_unknown_id_returns_recoverable_uncertainty(
         if entry["code"] == "result_set_unknown":
             assert entry["recoverable"] is True
             assert entry["subject_id"] == "pack_deadbeef00"
+            # Error message should reference both new and old tool names.
+            assert "rsm_prepare_context" in entry["message"]
+            assert "rsm_build_context_pack" in entry["message"]
+
+
+def test_get_context_page_for_build_context_pack_works_after_prepare_context(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_get_context_page continues to work with rsm_build_context_pack
+    result sets after rsm_prepare_context was added to the registry."""
+    from repo_semantic_memory.mcp.session import ResultStore
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    store = ResultStore()
+    pack = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+        result_store=store,
+    )
+    result_set_id = pack["result_set_id"]
+    page = invoke_tool(
+        "rsm_get_context_page",
+        {"result_set_id": result_set_id, "stream": "files", "offset": 0, "limit": 5},
+        session,
+        result_store=store,
+    )
+    assert page["result_set_id"] == result_set_id
+    assert page["stream"] == "files"
+    assert page["uncertainties"] == []
+
+
+def test_get_context_page_empty_result_set_id_is_error(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Empty result_set_id should be rejected as a tool-call error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    with pytest.raises(ToolInvocationError, match="result_set_id"):
+        invoke_tool(
+            "rsm_get_context_page",
+            {"result_set_id": "", "stream": "entities"},
+            session,
+        )
+
+
+def test_get_context_page_negative_offset_is_error(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Negative offset should be rejected as a tool-call error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    with pytest.raises(ToolInvocationError, match="offset"):
+        invoke_tool(
+            "rsm_get_context_page",
+            {"result_set_id": "pack_abc", "stream": "entities", "offset": -1},
+            session,
+        )
 
 
 def test_get_context_page_rejects_malformed_args(indexed_repo: tuple[Path, Path]) -> None:
@@ -773,6 +832,10 @@ def test_stdio_get_context_page_unknown_id_is_recoverable(
     codes = {item["code"] for item in page["uncertainties"]}
     assert "result_set_unknown" in codes
     assert page["items"] == []
+    for entry in page["uncertainties"]:
+        if entry["code"] == "result_set_unknown":
+            assert "rsm_prepare_context" in entry["message"]
+            assert "rsm_build_context_pack" in entry["message"]
 
 
 def test_stdio_in_session_paging_is_live(indexed_repo: tuple[Path, Path]) -> None:
