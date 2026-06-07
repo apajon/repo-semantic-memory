@@ -47,6 +47,7 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_validate_patch_context",
     "rsm_get_git_summary",
     "rsm_prepare_context",
+    "rsm_search",
 )
 
 # Store-mode-only tool names exposed exclusively in ``--store`` sessions.
@@ -628,6 +629,78 @@ def _tool_prepare_context(
     return result
 
 
+def _tool_search(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Broad discovery across indexed files, symbols, docs and tests.
+
+    Wraps :func:`_tool_search_symbols` with a cleaned output shape,
+    deterministic per-result IDs, and ``active_repo`` metadata.
+    """
+
+    # Translate cleaned input names to the internal SearchSymbolsRequest shape.
+    # kind -> entity_kinds, path_role -> path_roles.
+    mapped_args = dict(args)
+    if "kind" in mapped_args and "entity_kinds" not in mapped_args:
+        mapped_args["entity_kinds"] = mapped_args.pop("kind")
+    else:
+        mapped_args.pop("kind", None)
+    if "path_role" in mapped_args and "path_roles" not in mapped_args:
+        mapped_args["path_roles"] = mapped_args.pop("path_role")
+    else:
+        mapped_args.pop("path_role", None)
+    # Remove any keys not handled by the internal handler.
+    for key in list(mapped_args.keys()):
+        if key not in ("query", "limit", "entity_kinds", "path_roles", "include_relations"):
+            mapped_args.pop(key, None)
+
+    raw = _tool_search_symbols(mapped_args, session, store)
+
+    # Build the cleaned output shape.
+    raw_results: list[dict[str, Any]] = (
+        raw.get("results")  # type: ignore[assignment]
+        if isinstance(raw.get("results"), list)
+        else []
+    )
+    results: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw_results, start=1):
+        source_range = (
+            item.get("source_range") if isinstance(item.get("source_range"), dict) else {}
+        )
+        results.append(
+            {
+                "result_id": f"search_{idx:04d}",
+                "entity_id": item.get("entity_id"),
+                "path": item.get("path"),
+                "kind": item.get("kind"),
+                "name": item.get("name"),
+                "qualified_name": item.get("qualified_name"),
+                "source_range": {
+                    "start_line": source_range.get("start_line"),
+                    "end_line": source_range.get("end_line"),
+                }
+                if source_range
+                else None,
+                "path_role": item.get("path_role"),
+                "score": item.get("score"),
+                "reasons": item.get("ranking_reasons"),
+            }
+        )
+
+    return {
+        "active_repo": {
+            "repo_root": session.repo_root.as_posix(),
+            "db_path": session.db_path.as_posix(),
+            "index_mode": session.index_mode,
+        },
+        "query": str(args.get("query", "")),
+        "results": results,
+        "count": len(results),
+        "uncertainties": list(raw.get("uncertainties", ())),
+        "warnings": [],
+    }
+
+
 def _tool_get_context_page(
     args: Mapping[str, Any], session: SessionConfig, store: ResultStore
 ) -> dict[str, Any]:
@@ -960,6 +1033,26 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                 ["task"],
             ),
             handler=_tool_prepare_context,
+        ),
+        ToolDescriptor(
+            name="rsm_search",
+            description=(
+                "Broad discovery across indexed files, symbols, docs and tests. "
+                "Returns compact, deterministic results with source paths, entity kinds, "
+                "and scoring reasons. Preferred high-level replacement for "
+                "rsm_search_symbols. Every response includes active_repo metadata. "
+                "Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1},
+                    "kind": {"type": "array", "items": {"type": "string"}},
+                    "path_role": {"type": "array", "items": {"type": "string"}},
+                },
+                ["query"],
+            ),
+            handler=_tool_search,
         ),
     ]
     registry = {descriptor.name: descriptor for descriptor in descriptors}

@@ -265,6 +265,7 @@ def test_tool_registry_names_match_phase1_contract() -> None:
         "rsm_validate_patch_context",
         "rsm_get_git_summary",
         "rsm_prepare_context",
+        "rsm_search",
     }
 
 
@@ -1428,3 +1429,146 @@ def test_prepare_context_stdio_tool_call(
     assert "selected_files" in payload
     assert "result_set_id" in payload
     assert payload["result_set_id"].startswith("pack_")
+
+
+# ---------------------------------------------------------------------------
+# rsm_search (61.5)
+# ---------------------------------------------------------------------------
+
+
+def test_invoke_search_returns_results_for_known_fixture(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_search returns results for the indexed fixture."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_search", {"query": "run"}, session)
+    assert "active_repo" in result
+    assert result["active_repo"]["repo_root"] == repo.resolve().as_posix()
+    assert result["active_repo"]["db_path"] == db.resolve().as_posix()
+    assert result["query"] == "run"
+    assert isinstance(result["results"], list)
+    assert len(result["results"]) > 0
+    assert isinstance(result["count"], int)
+    assert result["count"] == len(result["results"])
+
+
+def test_invoke_search_results_have_expected_fields(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Each rsm_search result has the expected compact fields."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_search", {"query": "run"}, session)
+    for item in result["results"]:
+        assert "result_id" in item
+        assert item["result_id"].startswith("search_")
+        assert "path" in item
+        assert "kind" in item
+        assert "name" in item
+        assert "score" in item
+        assert "reasons" in item
+        assert "entity_id" in item
+
+
+def test_invoke_search_result_ids_are_deterministic_within_response(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_search result IDs are sequential within a response."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_search", {"query": "run"}, session)
+    ids = [item["result_id"] for item in result["results"]]
+    assert ids == [f"search_{i:04d}" for i in range(1, len(ids) + 1)]
+
+
+def test_invoke_search_respects_limit(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_search respects the limit argument."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool("rsm_search", {"query": "run", "limit": 1}, session)
+    assert len(result["results"]) <= 1
+
+
+def test_invoke_search_missing_query_returns_error(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_search with missing query raises a tool-call error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    with pytest.raises(ToolInvocationError, match="query"):
+        invoke_tool("rsm_search", {}, session)
+
+
+def test_invoke_search_empty_query_returns_error(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_search with empty/whitespace query raises a tool-call error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    with pytest.raises(ToolInvocationError, match="query"):
+        invoke_tool("rsm_search", {"query": "   "}, session)
+
+
+def test_search_symbols_still_works_after_search_added(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_search_symbols is unchanged after adding rsm_search."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_search_symbols",
+        {"query": "run", "limit": 5},
+        session,
+    )
+    assert "matches" in result
+    assert "results" in result
+
+
+def test_stdio_tool_list_includes_both_search_and_search_symbols(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """MCP tools/list includes both rsm_search and rsm_search_symbols."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    assert responses[1]["id"] == 2
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    assert "rsm_search" in names
+    assert "rsm_search_symbols" in names
+
+
+def test_search_stdio_tool_call(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """MCP tools/call with rsm_search works via stdio."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 50,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_search",
+                    "arguments": {"query": "run"},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert "active_repo" in payload
+    assert "results" in payload
+    assert "count" in payload
