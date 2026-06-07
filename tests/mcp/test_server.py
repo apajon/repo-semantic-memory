@@ -266,6 +266,7 @@ def test_tool_registry_names_match_phase1_contract() -> None:
         "rsm_get_git_summary",
         "rsm_prepare_context",
         "rsm_search",
+        "rsm_find_related",
     }
 
 
@@ -1571,4 +1572,211 @@ def test_search_stdio_tool_call(
     payload = json.loads(responses[0]["result"]["content"][0]["text"])
     assert "active_repo" in payload
     assert "results" in payload
+    assert "count" in payload
+
+
+# ---------------------------------------------------------------------------
+# rsm_find_related (61.6)
+# ---------------------------------------------------------------------------
+
+
+def test_invoke_find_related_by_entity_id_returns_related(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_find_related with entity_id returns related entities."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {"entity_id": "python:function:src.core.run"},
+        session,
+    )
+    assert "active_repo" in result
+    assert result["active_repo"]["repo_root"] == repo.resolve().as_posix()
+    assert result["anchor"]["entity_id"] == "python:function:src.core.run"
+    assert isinstance(result["related"], list)
+    assert isinstance(result["count"], int)
+    assert "total" in result
+
+
+def test_invoke_find_related_by_qualified_name(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_find_related with qualified_name resolves correctly."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {"qualified_name": "src.core.run"},
+        session,
+    )
+    assert result["anchor"]["qualified_name"] == "src.core.run"
+    assert isinstance(result["related"], list)
+
+
+def test_invoke_find_related_by_source_path(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_find_related with source_path returns entities in that file."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {"source_path": "src/core.py"},
+        session,
+    )
+    assert result["anchor"]["source_path"] == "src/core.py"
+    assert isinstance(result["related"], list)
+
+
+def test_invoke_find_related_unknown_anchor_returns_uncertainty(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Unknown anchor returns recoverable uncertainty, not error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {"entity_id": "python:function:does.not.exist"},
+        session,
+    )
+    assert result["count"] == 0
+    assert result["related"] == []
+    codes = {u["code"] for u in result["uncertainties"]}
+    assert "anchor_not_found" in codes
+
+
+def test_invoke_find_related_entity_id_priority_over_qualified_name(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """When both entity_id and qualified_name are provided, entity_id wins."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {
+            "entity_id": "python:function:src.core.run",
+            "qualified_name": "src.core",
+        },
+        session,
+    )
+    assert result["anchor"]["entity_id"] == "python:function:src.core.run"
+
+
+def test_invoke_find_related_results_have_expected_fields(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Each related item has the expected fields."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {"entity_id": "python:function:src.core.run"},
+        session,
+    )
+    for item in result["related"]:
+        assert "entity_id" in item
+        assert "path" in item
+        assert "kind" in item
+        assert "name" in item
+        assert "relation_group" in item
+        assert "relation_strength" in item
+        assert item["relation_strength"] in ("strong", "medium", "weak")
+        assert "reasons" in item
+
+
+def test_invoke_find_related_respects_limit(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Limit is respected."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_find_related",
+        {"entity_id": "python:function:src.core.run", "limit": 1},
+        session,
+    )
+    assert len(result["related"]) <= 1
+
+
+def test_invoke_find_related_missing_anchor_returns_error(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """No anchor at all raises a tool-call error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    with pytest.raises(ToolInvocationError, match="provide at least one"):
+        invoke_tool("rsm_find_related", {}, session)
+
+
+def test_explain_entity_and_query_graph_still_work(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_explain_entity and rsm_query_graph are unchanged."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    explain_result = invoke_tool(
+        "rsm_explain_entity",
+        {"entity_id": "python:function:src.core.run"},
+        session,
+    )
+    assert "entity" in explain_result
+    assert "relations" in explain_result
+
+    graph_result = invoke_tool(
+        "rsm_query_graph",
+        {"entity_ids": ["python:function:src.core.run"]},
+        session,
+    )
+    assert "entities" in graph_result
+    assert "relations" in graph_result
+
+
+def test_stdio_tool_list_includes_find_related(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """MCP tools/list includes rsm_find_related plus old tools."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    assert responses[1]["id"] == 2
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    assert "rsm_find_related" in names
+    assert "rsm_explain_entity" in names
+    assert "rsm_query_graph" in names
+    assert names == list(PHASE1_TOOL_NAMES)
+
+
+def test_find_related_stdio_tool_call(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """MCP tools/call with rsm_find_related works via stdio."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 60,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_find_related",
+                    "arguments": {"entity_id": "python:function:src.core.run"},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert "active_repo" in payload
+    assert "anchor" in payload
+    assert "related" in payload
     assert "count" in payload

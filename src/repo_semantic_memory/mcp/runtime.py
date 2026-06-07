@@ -48,6 +48,7 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_get_git_summary",
     "rsm_prepare_context",
     "rsm_search",
+    "rsm_find_related",
 )
 
 # Store-mode-only tool names exposed exclusively in ``--store`` sessions.
@@ -701,6 +702,219 @@ def _tool_search(
     }
 
 
+def _tool_find_related(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Anchor-based expansion around a known file, entity, or qualified name.
+
+    Resolves the anchor using priority:
+    ``entity_id`` > ``qualified_name`` > ``source_path``.
+    Loads the index, gathers relations for the anchor entity, and returns
+    compact related items with relation group and strength classification.
+    """
+
+    del store
+
+    # --- Resolve anchor -------------------------------------------------------
+
+    entity_id_arg = args.get("entity_id")
+    qualified_name_arg = args.get("qualified_name")
+    source_path_arg = args.get("source_path")
+
+    if not any(
+        isinstance(v, str) and v.strip()
+        for v in (entity_id_arg, qualified_name_arg, source_path_arg)
+    ):
+        raise ToolInvocationError(
+            "provide at least one of: entity_id, qualified_name, or source_path"
+        )
+
+    limit = _optional_int(args, "limit", 10)
+    if limit < 1 or limit > 50:
+        raise ToolInvocationError("argument 'limit' must be between 1 and 50")
+
+    # Load index
+    from repo_semantic_memory.store import SQLiteStore  # noqa: PLC0415
+
+    sqlite_store = SQLiteStore(session.db_path)
+    try:
+        sqlite_store.initialize()
+        entities = sqlite_store.list_entities()
+        relations = sqlite_store.list_relations()
+    finally:
+        sqlite_store.close()
+
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    entities_by_qname: dict[str, list[str]] = {}
+    entities_by_path: dict[str, list[str]] = {}
+    for entity in entities:
+        entities_by_qname.setdefault(entity.qualified_name, []).append(entity.id.value)
+        entities_by_path.setdefault(entity.source_range.path, []).append(entity.id.value)
+
+    uncertainties: list[dict[str, Any]] = []
+    active_repo = {
+        "repo_root": session.repo_root.as_posix(),
+        "db_path": session.db_path.as_posix(),
+        "index_mode": session.index_mode,
+    }
+
+    def _not_found(key_name: str, val: str) -> dict[str, Any]:
+        return {
+            "active_repo": active_repo,
+            "anchor": {key_name: val},
+            "related": [],
+            "count": 0,
+            "uncertainties": [
+                {
+                    "code": "anchor_not_found",
+                    "message": f"{key_name} {val!r} not found in the index.",
+                    "recoverable": True,
+                }
+            ],
+            "warnings": [],
+        }
+
+    # Resolve anchor entity IDs
+    anchor_entity_ids: list[str] = []
+    anchor_desc: dict[str, Any] = {}
+
+    if isinstance(entity_id_arg, str) and entity_id_arg.strip():
+        eid = entity_id_arg.strip()
+        if eid not in entity_by_id:
+            return _not_found("entity_id", eid)
+        anchor_entity_ids = [eid]
+        anchor_desc = {
+            "entity_id": eid,
+            "kind": entity_by_id[eid].kind,
+            "name": entity_by_id[eid].name,
+            "path": entity_by_id[eid].source_range.path,
+        }
+    elif isinstance(qualified_name_arg, str) and qualified_name_arg.strip():
+        qname = qualified_name_arg.strip()
+        matched = entities_by_qname.get(qname, [])
+        if not matched:
+            return _not_found("qualified_name", qname)
+        anchor_entity_ids = matched
+        if len(matched) > 1:
+            uncertainties.append(
+                {
+                    "code": "ambiguous_qualified_name",
+                    "message": (
+                        f"qualified_name {qname!r} matches {len(matched)} entities; "
+                        "returning all matches."
+                    ),
+                    "recoverable": True,
+                }
+            )
+        anchor_desc = {"qualified_name": qname, "entity_ids": matched}
+    elif isinstance(source_path_arg, str) and source_path_arg.strip():
+        spath = source_path_arg.strip()
+        matched = entities_by_path.get(spath, [])
+        if not matched:
+            return _not_found("source_path", spath)
+        anchor_entity_ids = matched
+        anchor_desc = {"source_path": spath, "entity_ids": matched}
+
+    # --- Gather relations -----------------------------------------------------
+
+    anchor_set = frozenset(anchor_entity_ids)
+    relation_set: dict[str, dict[str, Any]] = {}
+
+    for relation in relations:
+        source = relation.source_entity_id.value
+        target = relation.target_entity_id.value
+        if source in anchor_set and target not in anchor_set:
+            entry = relation_set.setdefault(
+                target,
+                {
+                    "entity_id": target,
+                    "relation_kinds": [],
+                    "direction": "outgoing",
+                },
+            )
+            entry["relation_kinds"].append(relation.kind)
+        elif target in anchor_set and source not in anchor_set:
+            entry = relation_set.setdefault(
+                source,
+                {
+                    "entity_id": source,
+                    "relation_kinds": [],
+                    "direction": "incoming",
+                },
+            )
+            entry["relation_kinds"].append(relation.kind)
+
+    # --- Build output ---------------------------------------------------------
+
+    kind_to_group: dict[str, str] = {
+        "tests": "tests",
+        "imports": "imports",
+        "exports": "exports",
+        "inherits": "inherits",
+        "contains": "implementation_support",
+        "calls": "implementation_support",
+        "references": "implementation_support",
+    }
+    strong_kinds = frozenset({"tests", "imports", "exports", "inherits"})
+    medium_kinds = frozenset({"contains", "calls"})
+    strength_order = {"strong": 0, "medium": 1, "weak": 2}
+
+    related: list[dict[str, Any]] = []
+    for related_eid, rel_data in relation_set.items():
+        if related_eid not in entity_by_id:
+            continue
+        ent = entity_by_id[related_eid]
+        kinds = rel_data["relation_kinds"]
+        # Classify into groups
+        groups: dict[str, bool] = {}
+        for k in kinds:
+            groups[kind_to_group.get(k, "other")] = True
+        sorted_groups = sorted(groups.keys())
+        # Classify strength
+        if any(k in strong_kinds for k in kinds):
+            strength = "strong"
+        elif any(k in medium_kinds for k in kinds):
+            strength = "medium"
+        else:
+            strength = "weak"
+        related.append(
+            {
+                "entity_id": related_eid,
+                "path": ent.source_range.path,
+                "kind": ent.kind,
+                "name": ent.name,
+                "qualified_name": ent.qualified_name,
+                "source_range": {
+                    "start_line": ent.source_range.start_line,
+                    "end_line": ent.source_range.end_line,
+                },
+                "relation_group": sorted_groups[0] if sorted_groups else "other",
+                "relation_groups": sorted_groups,
+                "relation_kinds": kinds,
+                "relation_strength": strength,
+                "direction": rel_data["direction"],
+                "reasons": [f"relation={','.join(kinds)}"],
+            }
+        )
+
+    related.sort(
+        key=lambda r: (
+            strength_order.get(r["relation_strength"], 3),
+            r["path"],
+        )
+    )
+
+    return {
+        "active_repo": active_repo,
+        "anchor": anchor_desc,
+        "related": related[:limit],
+        "count": min(len(related), limit),
+        "total": len(related),
+        "uncertainties": uncertainties,
+        "warnings": [],
+    }
+
+
 def _tool_get_context_page(
     args: Mapping[str, Any], session: SessionConfig, store: ResultStore
 ) -> dict[str, Any]:
@@ -1053,6 +1267,28 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                 ["query"],
             ),
             handler=_tool_search,
+        ),
+        ToolDescriptor(
+            name="rsm_find_related",
+            description=(
+                "Anchor-based expansion around a known file, entity, or qualified name. "
+                "Resolves anchor via entity_id, qualified_name, or source_path (priority: "
+                "entity_id > qualified_name > source_path). Returns compact related items "
+                "classified by relation group (tests, imports, exports, inherits, "
+                "implementation_support) and strength (strong/medium/weak). "
+                "Preferred high-level replacement for rsm_explain_entity and rsm_query_graph. "
+                "Every response includes active_repo metadata. Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "entity_id": {"type": "string"},
+                    "qualified_name": {"type": "string"},
+                    "source_path": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                },
+                [],
+            ),
+            handler=_tool_find_related,
         ),
     ]
     registry = {descriptor.name: descriptor for descriptor in descriptors}
