@@ -1064,8 +1064,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_status",
             description=(
-                "Return read-only session status: configured --repo and --db, package/schema "
-                "versions, and indexed entity/relation counts."
+                "[INTERNAL/DEBUG] Return read-only session status: configured --repo and --db, "
+                "package/schema versions, and indexed entity/relation counts."
             ),
             input_schema=_input_schema({}, []),
             handler=_tool_status,
@@ -1073,7 +1073,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_search_symbols",
             description=(
-                "Search indexed entities by lexical query using the bundled BM25 index. Read-only."
+                "[DEPRECATED - use rsm_search] Search indexed entities by lexical query "
+                "using the bundled BM25 index. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -1090,8 +1091,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_explain_entity",
             description=(
-                "Resolve one entity with structural context, semantic components, and "
-                "citations. Read-only."
+                "[DEPRECATED - use rsm_find_related] Resolve one entity with structural "
+                "context, semantic components, and citations. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -1108,7 +1109,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_build_context_pack",
             description=(
-                "Build a deterministic, source-cited, budget-bounded context pack for a task. "
+                "[DEPRECATED - use rsm_prepare_context] Build a deterministic, source-cited, "
+                "budget-bounded context pack for a task. "
                 "Returns a brief first-page preview by default (5 files, 5 entities, 3 relations, "
                 "0 citations) plus a session-scoped result_set_id; use rsm_get_context_page to "
                 "page over omitted items. Pass detail_level='compact' for the larger one-shot "
@@ -1170,8 +1172,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_query_graph",
             description=(
-                "Bounded traversal of the structural relation graph from seed entity IDs. "
-                "Read-only."
+                "[DEPRECATED - use rsm_find_related] Bounded traversal of the structural "
+                "relation graph from seed entity IDs. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -1191,8 +1193,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_validate_patch_context",
             description=(
-                "Check whether a candidate patch's touched paths and referenced entities are "
-                "covered by the local index. Read-only."
+                "[INTERNAL/DEBUG] Check whether a candidate patch's touched paths and "
+                "referenced entities are covered by the local index. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -1207,7 +1209,9 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ),
         ToolDescriptor(
             name="rsm_get_git_summary",
-            description="Return minimal local Git repository summary for a bounded path.",
+            description=(
+                "[INTERNAL/DEBUG] Return minimal local Git repository summary for a bounded path."
+            ),
             input_schema=_input_schema(
                 {"path": {"type": "string"}},
                 [],
@@ -1513,7 +1517,8 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_list_indexes",
             description=(
-                "List all repositories registered in the RSM Index Store. "
+                "[INTERNAL/DEBUG - store mode] List all repositories registered in the "
+                "RSM Index Store. "
                 "Returns repo_id, name, repo_root, db_path, and best-effort status "
                 "for each registered index. Use this first to discover available "
                 "repositories, then call rsm_select_index to activate one. Read-only."
@@ -1524,7 +1529,8 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_select_index",
             description=(
-                "Select the active repository index for this MCP session. "
+                "[INTERNAL/DEBUG - store mode] Select the active repository index "
+                "for this MCP session. "
                 "Accepts repo_id (preferred), repo_root (absolute path), or name "
                 "(basename of repo_root; rejected if ambiguous). Validates that the "
                 "selected DB exists. Active selection is session-scoped: it is lost "
@@ -1543,7 +1549,8 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_current_index",
             description=(
-                "Return the currently active repository index for this MCP session. "
+                "[INTERNAL/DEBUG - store mode] Return the currently active repository "
+                "index for this MCP session. "
                 "If no index has been selected, returns active_repo: null and a "
                 "recoverable no_active_index uncertainty. Read-only."
             ),

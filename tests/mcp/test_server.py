@@ -1780,3 +1780,86 @@ def test_find_related_stdio_tool_call(
     assert "anchor" in payload
     assert "related" in payload
     assert "count" in payload
+
+
+# ---------------------------------------------------------------------------
+# Deprecation markers (61.7)
+# ---------------------------------------------------------------------------
+
+
+def test_tool_descriptions_have_correct_deprecation_markers() -> None:
+    """Deprecated tools have the correct [DEPRECATED] prefix with target."""
+    registry = build_tool_registry()
+    assert registry["rsm_search_symbols"].description.startswith("[DEPRECATED - use rsm_search]")
+    assert registry["rsm_explain_entity"].description.startswith(
+        "[DEPRECATED - use rsm_find_related]"
+    )
+    assert registry["rsm_build_context_pack"].description.startswith(
+        "[DEPRECATED - use rsm_prepare_context]"
+    )
+    assert registry["rsm_query_graph"].description.startswith("[DEPRECATED - use rsm_find_related]")
+
+
+def test_tool_descriptions_have_correct_internal_markers() -> None:
+    """Internal/debug tools have [INTERNAL/DEBUG] prefix."""
+    registry = build_tool_registry()
+    assert registry["rsm_status"].description.startswith("[INTERNAL/DEBUG]")
+    assert registry["rsm_validate_patch_context"].description.startswith("[INTERNAL/DEBUG]")
+    assert registry["rsm_get_git_summary"].description.startswith("[INTERNAL/DEBUG]")
+
+
+def test_public_tools_have_no_deprecation_markers() -> None:
+    """The 4 public tools should NOT have any deprecation/internal markers."""
+    registry = build_tool_registry()
+    public_tools = [
+        "rsm_get_context_page",
+        "rsm_prepare_context",
+        "rsm_search",
+        "rsm_find_related",
+    ]
+    for name in public_tools:
+        desc = registry[name].description
+        assert not desc.startswith("[DEPRECATED"), f"{name} should not be deprecated"
+        assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
+
+
+def test_store_tools_have_internal_markers() -> None:
+    """Store-mode tools have [INTERNAL/DEBUG - store mode] prefix."""
+    from repo_semantic_memory.mcp import build_store_tool_registry
+
+    registry = build_store_tool_registry()
+    assert registry["rsm_list_indexes"].description.startswith("[INTERNAL/DEBUG - store mode]")
+    assert registry["rsm_select_index"].description.startswith("[INTERNAL/DEBUG - store mode]")
+    assert registry["rsm_current_index"].description.startswith("[INTERNAL/DEBUG - store mode]")
+
+
+def test_deprecated_tools_still_invocable(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Deprecated tools are still callable and return results."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    # rsm_search_symbols
+    result = invoke_tool("rsm_search_symbols", {"query": "run", "limit": 1}, session)
+    assert "results" in result
+    # rsm_explain_entity
+    result = invoke_tool(
+        "rsm_explain_entity",
+        {"entity_id": "python:function:src.core.run"},
+        session,
+    )
+    assert "entity" in result
+    # rsm_build_context_pack
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    assert "result_set_id" in result
+    # rsm_query_graph
+    result = invoke_tool(
+        "rsm_query_graph",
+        {"entity_ids": ["python:function:src.core.run"]},
+        session,
+    )
+    assert "entities" in result
