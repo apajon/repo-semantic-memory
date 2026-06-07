@@ -82,7 +82,8 @@ def _initialize_result(session: SessionConfig | StoreSessionState) -> dict[str, 
     else:
         instructions = (
             "Read-only local RSM tools. The configured --repo and --db are fixed for "
-            "this session. Call rsm_status to inspect them."
+            "this session. Call rsm_status to inspect them. "
+            "Use rsm_prepare_context to build task-centered context packs."
         )
     return {
         "protocolVersion": PROTOCOL_VERSION,

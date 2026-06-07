@@ -46,6 +46,7 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_query_graph",
     "rsm_validate_patch_context",
     "rsm_get_git_summary",
+    "rsm_prepare_context",
 )
 
 # Store-mode-only tool names exposed exclusively in ``--store`` sessions.
@@ -609,6 +610,24 @@ def _short_id_stream(prefix: str, items: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _tool_prepare_context(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Preferred wrapper for building a task-centered ContextPack.
+
+    Delegates to :func:`_tool_build_context_pack` so the output is identical.
+    Adds ``active_repo`` metadata to every response.
+    """
+
+    result = _tool_build_context_pack(args, session, store)
+    result["active_repo"] = {
+        "repo_root": session.repo_root.as_posix(),
+        "db_path": session.db_path.as_posix(),
+        "index_mode": session.index_mode,
+    }
+    return result
+
+
 def _tool_get_context_page(
     args: Mapping[str, Any], session: SessionConfig, store: ResultStore
 ) -> dict[str, Any]:
@@ -648,7 +667,7 @@ def _tool_get_context_page(
                     "code": "result_set_unknown",
                     "message": (
                         f"result_set_id {result_set_id!r} is unknown or has expired in "
-                        "this MCP session; call rsm_build_context_pack again to mint a "
+                        "this MCP session; call rsm_prepare_context again to mint a "
                         "fresh result set."
                     ),
                     "recoverable": True,
@@ -907,6 +926,40 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
                 [],
             ),
             handler=_tool_get_git_summary,
+        ),
+        ToolDescriptor(
+            name="rsm_prepare_context",
+            description=(
+                "Prepare a task-centered ContextPack for a coding agent. "
+                "Preferred high-level replacement for rsm_build_context_pack. "
+                "Returns a brief first-page preview by default (5 files, 5 entities, 3 relations, "
+                "0 citations) plus a session-scoped result_set_id; use rsm_get_context_page to "
+                "page over omitted items. Every response includes active_repo metadata. "
+                "Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "task": {"type": "string"},
+                    "budget_chars": {"type": "integer", "minimum": 1},
+                    "format": {"type": "string", "enum": ["markdown", "yaml"]},
+                    "profile": {"type": "string"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": sorted(_DETAIL_LEVEL_DEFAULTS),
+                    },
+                    "explain_ranking": {"type": "boolean"},
+                    "include_semantic_components": {"type": "boolean"},
+                    "include_rendered": {"type": "boolean"},
+                    "include_payload": {"type": "boolean"},
+                    "include_ranking_breakdowns": {"type": "boolean"},
+                    "max_files": {"type": "integer", "minimum": 0},
+                    "max_entities": {"type": "integer", "minimum": 0},
+                    "max_relations": {"type": "integer", "minimum": 0},
+                    "max_citations": {"type": "integer", "minimum": 0},
+                },
+                ["task"],
+            ),
+            handler=_tool_prepare_context,
         ),
     ]
     registry = {descriptor.name: descriptor for descriptor in descriptors}

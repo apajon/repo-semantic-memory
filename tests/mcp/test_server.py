@@ -264,6 +264,7 @@ def test_tool_registry_names_match_phase1_contract() -> None:
         "rsm_query_graph",
         "rsm_validate_patch_context",
         "rsm_get_git_summary",
+        "rsm_prepare_context",
     }
 
 
@@ -1184,3 +1185,183 @@ def test_rsm_build_context_pack_no_scope_warning_full(indexed_repo: tuple[Path, 
     # For full indexes, scope_warning should be absent
     assert "scope_warning" not in result
     assert result.get("index_scope") == "full"
+
+
+# ---------------------------------------------------------------------------
+# rsm_prepare_context (61.3)
+# ---------------------------------------------------------------------------
+
+
+def test_invoke_prepare_context_is_equivalent_to_build_context_pack(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_prepare_context returns the same core output as rsm_build_context_pack."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    args = {"task": "Improve run()", "budget_chars": 8000}
+    prepare_result = invoke_tool("rsm_prepare_context", args, session)
+    build_result = invoke_tool("rsm_build_context_pack", args, session)
+
+    # Core fields match (everything except active_repo, which is prepare_context-only,
+    # and result_set_id which is a random per-call token)
+    for key in (
+        "rendered",
+        "payload",
+        "selected_entity_ids",
+        "selected_relation_keys",
+        "selected_files",
+        "selected_entities",
+        "selected_relations",
+        "citations",
+        "uncertainties",
+        "budget",
+        "agent_instructions",
+        "truncated",
+        "omitted_sections",
+        "how_to_get_more",
+        "counts",
+        "detail_level",
+    ):
+        assert prepare_result[key] == build_result[key], f"Field {key!r} differs"
+
+    # Both return valid result_set_id but they differ per call
+    assert prepare_result["result_set_id"].startswith("pack_")
+    assert build_result["result_set_id"].startswith("pack_")
+
+    # prepare_context adds active_repo that build_context_pack does not have
+    assert "active_repo" in prepare_result
+    assert "active_repo" not in build_result
+
+
+def test_prepare_context_includes_active_repo(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_prepare_context response includes active_repo metadata."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_prepare_context",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    assert "active_repo" in result
+    assert result["active_repo"]["repo_root"] == repo.resolve().as_posix()
+    assert result["active_repo"]["db_path"] == db.resolve().as_posix()
+    assert result["active_repo"]["index_mode"] == "explicit_db"
+
+
+def test_prepare_context_returns_result_set_id(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_prepare_context returns a result_set_id for progressive retrieval."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_prepare_context",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    assert isinstance(result.get("result_set_id"), str)
+    assert result["result_set_id"].startswith("pack_")
+    counts = result.get("counts")
+    assert isinstance(counts, dict)
+    for stream_name in ("files", "entities", "relations", "citations"):
+        assert stream_name in counts
+
+
+def test_prepare_context_paginates_with_get_context_page(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_get_context_page can page over rsm_prepare_context result sets."""
+    from repo_semantic_memory.mcp.session import ResultStore
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    store = ResultStore()
+    pack = invoke_tool(
+        "rsm_prepare_context",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+        result_store=store,
+    )
+    result_set_id = pack["result_set_id"]
+    page = invoke_tool(
+        "rsm_get_context_page",
+        {"result_set_id": result_set_id, "stream": "entities", "offset": 0, "limit": 2},
+        session,
+        result_store=store,
+    )
+    assert page["result_set_id"] == result_set_id
+    assert page["stream"] == "entities"
+    assert page["total"] == pack["counts"]["entities"]
+    assert isinstance(page["items"], list)
+    assert page["uncertainties"] == []
+
+
+def test_build_context_pack_still_works_after_prepare_context_added(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """rsm_build_context_pack is unchanged after adding rsm_prepare_context."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    result = invoke_tool(
+        "rsm_build_context_pack",
+        {"task": "Improve run()", "budget_chars": 8000},
+        session,
+    )
+    assert "selected_files" in result
+    assert "selected_entities" in result
+    assert "result_set_id" in result
+    assert result["result_set_id"].startswith("pack_")
+    # build_context_pack does NOT include active_repo
+    assert "active_repo" not in result
+
+
+def test_stdio_tool_list_includes_prepare_context(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """MCP tools/list includes rsm_prepare_context."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    assert responses[1]["id"] == 2
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    assert "rsm_prepare_context" in names
+    assert "rsm_build_context_pack" in names
+    # names must match PHASE1_TOOL_NAMES (auto-updated via the tuple)
+    assert names == list(PHASE1_TOOL_NAMES)
+
+
+def test_prepare_context_stdio_tool_call(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """MCP tools/call with rsm_prepare_context works via stdio."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 99,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_prepare_context",
+                    "arguments": {"task": "Improve run()", "budget_chars": 8000},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+    payload = json.loads(responses[0]["result"]["content"][0]["text"])
+    assert "active_repo" in payload
+    assert "selected_files" in payload
+    assert "result_set_id" in payload
+    assert payload["result_set_id"].startswith("pack_")
