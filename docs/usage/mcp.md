@@ -1,8 +1,8 @@
 # RSM MCP Usage
 
-> **Status:** Migration in progress (61.x series).  
-> **Last updated:** 2026-06-07 (61.8).  
-> **Next step:** 61.9 — Default tool surface reduction.
+> **Status:** Default 4-tool surface active (61.9).  
+> **Last updated:** 2026-06-08 (61.11).  
+> **Next step:** 61.12 — MCP test cleanup and consolidation.
 
 ## 1. Purpose
 
@@ -15,15 +15,16 @@ RSM's intended public MCP workflow is centered on **four tools**:
 | `rsm_search` | Broad discovery across indexed files, symbols, docs and tests |
 | `rsm_find_related` | Anchor-based expansion around a known file, entity, or qualified name |
 
-These four tools replace an earlier 11-tool surface. The migration is gradual:
+These four tools replace an earlier 11-tool surface. The migration is complete:
 
 - ✅ The four new tools are implemented (61.3–61.6).
 - ✅ Old tools are marked `[DEPRECATED]` or `[INTERNAL/DEBUG]` in their MCP descriptions (61.7).
-- ❌ Default public tool filtering is **not implemented yet** (61.9).
-- ❌ `tools/list` still shows all 15 tools (11 old + 4 new).
+- ✅ Default public tool filtering is **active** — `tools/list` returns only the 4 public tools (61.9).
+- ✅ `--expose-all-tools` flag enables the full legacy surface for debugging (61.9).
+- ✅ Compatibility tests validate both modes (61.10).
 
-**At the end of 61.8, MCP `tools/list` returns 15 tools, not 4.** The 4-tool
-default surface is not complete until 61.9 and will be validated in 61.10.
+**Default `tools/list` returns 4 tools.** Legacy/internal tools require
+`rsm mcp serve --expose-all-tools`.
 
 ## 2. Recommended Agent Workflow
 
@@ -254,8 +255,19 @@ want to find related tests, imports, exports, or dependencies.
 
 ## 4. Migration From Legacy Tools
 
-Legacy tools still work, are still listed in `tools/list`, and are not
-removed. They are expected to move behind a debug/compatibility mode in 61.9.
+Legacy tools still work and are not removed, but they are **hidden by default**.
+They require `--expose-all-tools` on `rsm mcp serve` to be visible and
+invocable.
+
+### Enabling debug/compat mode
+
+```bash
+rsm mcp serve --repo /path/to/repo --db /path/to/repo/.rsm/index.sqlite --expose-all-tools
+```
+
+With `--expose-all-tools`, `tools/list` returns all 14 tools (4 public + 10 legacy),
+and all tools are invocable. This is intended for debugging and migration
+compatibility only.
 
 ### Deprecated tools
 
@@ -382,10 +394,13 @@ one MCP server config. The current state:
 
 - Store-mode tools (`rsm_list_indexes`, `rsm_select_index`,
   `rsm_current_index`) are marked `[INTERNAL/DEBUG - store mode]`.
+- Store-mode tools are **hidden by default**. They are visible only
+  with `--expose-all-tools`.
 - `active_repo` is included in every repo-scoped response from the 4 public
   tools (where implemented).
 - Per-call `repo` parameter is **deferred** (not yet implemented).
-- Default tool filtering does not apply to store-mode tools yet (61.9).
+- When running in store mode with `--expose-all-tools`, the full 17-tool
+  surface is available (4 public + 3 store + 10 repo).
 
 For `--store` CLI usage, prerequisites, and configuration, see the original
 phase 1 documentation preserved at the end of this document.
@@ -394,16 +409,13 @@ phase 1 documentation preserved at the end of this document.
 
 ## 8. Compatibility Notes
 
-- **Old tools still work.** `rsm_build_context_pack`, `rsm_search_symbols`,
-  `rsm_explain_entity`, `rsm_query_graph`, and all internal tools are fully
-  functional.
-- **Old tools are not removed.** They remain in the registry.
-- **Old tools are not hidden yet.** `tools/list` returns all 15 tools.
+- **Old tools are hidden by default.** `tools/list` returns only 4 public tools.
+- **Old tools are not removed.** They are available via `--expose-all-tools`.
 - **Deprecation is description-based.** `[DEPRECATED]` and `[INTERNAL/DEBUG]`
-  prefixes in tool descriptions are the only indication.
-- **Migration is gradual.** The default 4-tool surface will land in 61.9.
-- **Compatibility may change after 61.9.** Internal tools may require an
-  explicit debug flag to be visible.
+  prefixes in tool descriptions are visible in expose-all mode.
+- **Compatibility mode is explicit.** `--expose-all-tools` enables the full
+  14-tool surface.
+- **Migration is complete.** The default 4-tool surface is stable.
 
 ---
 
@@ -425,22 +437,20 @@ phase 1 documentation preserved at the end of this document.
 
 | Task | Description |
 |---|---|
-| **61.9** | MCP default tool surface reduction — `tools/list` returns only 4 public tools by default |
-| **61.10** | MCP public/debug compatibility tests — validate both modes |
-| **61.11** | MCP documentation cleanup after surface reduction |
+| **61.9** | ✅ MCP default tool surface reduction — `tools/list` returns 4 public tools by default |
+| **61.10** | ✅ MCP public/debug compatibility tests — validate both modes |
+| **61.11** | ✅ MCP documentation cleanup after surface reduction |
 | **61.12** | MCP test cleanup and consolidation |
 | **61.13** | Final 61.x MCP surface report |
 
-The real 4-tool default surface is not complete until 61.9 and validated in 61.10.
+The 4-tool default surface is active and validated.
 
 ---
 
 ## 11. Future Direction
 
-- **Default `tools/list`** should eventually expose only 4 public tools
-  (61.9–61.10).
-- **Legacy/internal tools** should move behind an explicit debug/compatibility
-  mode (e.g. `--expose-all-tools` or `RSM_MCP_DEBUG=1`).
+- **Default `tools/list`** exposes only 4 public tools.
+- **Legacy/internal tools** are available behind `--expose-all-tools`.
 - **Search/find_related benchmarks** are planned to complement the existing
   ContextPack benchmark harness.
 - **ContextPack v2** may refine output shape after the MCP surface is stable.

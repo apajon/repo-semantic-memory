@@ -228,7 +228,14 @@ These are available in both `--repo` and `--store` sessions.
 | **Documentation change** | `docs/usage/mcp.md`, `AGENTS.md`, `README.md` updated to show 4-tool workflow |
 | **Rollback** | Revert documentation. No functional change |
 
-### Phase D — Hide old tools from default surface (future)
+### Phase D — Hide old tools from default surface ✅ IMPLEMENTED (61.9)
+
+**Implemented in 61.9 via `--expose-all-tools`.** The design described below
+was accurate and was followed cleanly. The implementation uses a
+`public_only=True` parameter on `build_tool_registry()` and
+`build_store_tool_registry()`, a `SessionConfig.expose_all_tools` flag, and
+invocation-level rejection in `_dispatch`. Documentation was cleaned up in
+61.11.
 
 | Aspect | Detail |
 |---|---|
