@@ -249,11 +249,11 @@ def test_cli_mcp_serve_db_optional_default_is_none() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tool surface
+# Tool surface — registry-level assertions
 # ---------------------------------------------------------------------------
 
 
-def test_tool_registry_names_match_phase1_contract() -> None:
+def test_tool_registry_names_match_full_surface() -> None:
     registry = build_tool_registry()
     assert tuple(registry.keys()) == PHASE1_TOOL_NAMES
     assert set(registry.keys()) == {
@@ -318,7 +318,11 @@ def test_tool_descriptors_have_schemas() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Wrapper behavior
+# invoke_tool — handler-level tests (bypass MCP surface filtering)
+#
+# These tests call handlers directly via invoke_tool(), which does not
+# enforce the default/public tool surface. They validate handler behavior,
+# not MCP visibility. Surface filtering is tested in the stdio sections below.
 # ---------------------------------------------------------------------------
 
 
@@ -450,7 +454,8 @@ def _drive(session, messages: list[dict]) -> list[dict]:
     return [json.loads(line) for line in lines]
 
 
-def test_stdio_initialize_and_tools_list(indexed_repo: tuple[Path, Path]) -> None:
+def test_stdio_initialize_and_tools_list_default(indexed_repo: tuple[Path, Path]) -> None:
+    """Default tools/list exposes exactly the 4 public tools."""
     repo, db = indexed_repo
     from repo_semantic_memory.mcp.runtime import PUBLIC_TOOL_NAMES
 
@@ -472,7 +477,7 @@ def test_stdio_initialize_and_tools_list(indexed_repo: tuple[Path, Path]) -> Non
 
 
 def test_stdio_initialize_and_tools_list_expose_all(indexed_repo: tuple[Path, Path]) -> None:
-    """tools/list returns all tools when expose_all_tools=True."""
+    """With expose_all_tools=True, tools/list returns the full registry."""
     repo, db = indexed_repo
     session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
@@ -670,7 +675,7 @@ def test_stdio_build_context_pack_include_rendered_true(
 
 
 # ---------------------------------------------------------------------------
-# Progressive context retrieval (Prompt 46.3)
+# Stdio — progressive context retrieval
 # ---------------------------------------------------------------------------
 
 
@@ -1971,10 +1976,15 @@ def test_stdio_default_accepts_public_tool(
     assert responses[0]["result"]["isError"] is False
 
 
+# ---------------------------------------------------------------------------
+# Stdio — MCP protocol integration (expose-all / debug surface)
+# ---------------------------------------------------------------------------
+
+
 def test_stdio_expose_all_tools_lists_all_tools(
     indexed_repo: tuple[Path, Path],
 ) -> None:
-    """With expose_all_tools, tools/list returns all tools."""
+    """With expose_all_tools, tools/list returns the full registry."""
     repo, db = indexed_repo
     session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
