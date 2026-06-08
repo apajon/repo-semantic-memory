@@ -1990,3 +1990,46 @@ def test_stdio_expose_all_tools_lists_all_tools(
     assert names == list(PHASE1_TOOL_NAMES)
     assert "rsm_build_context_pack" in names
     assert "rsm_status" in names
+
+
+def test_stdio_expose_all_legacy_tool_is_callable(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Legacy tools are callable in expose-all mode via stdio."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db, expose_all_tools=True)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_build_context_pack",
+                    "arguments": {"task": "test", "budget_chars": 8000},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+
+
+def test_stdio_default_rejects_store_like_legacy(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Default mode rejects rsm_status (internal tool) at invocation."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_status", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is True
