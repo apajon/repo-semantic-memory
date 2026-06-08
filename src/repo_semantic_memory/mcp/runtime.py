@@ -35,8 +35,26 @@ from repo_semantic_memory.mcp.tools import (
 from repo_semantic_memory.store import SQLiteStore
 from repo_semantic_memory.version import get_version_info
 
-# Phase 1 tool names. Kept in a tuple so the registry order and any test that
-# asserts the exposed surface remains stable and easy to audit.
+# Public tool names exposed by default in the minimised 4-tool surface.
+PUBLIC_TOOL_NAMES: tuple[str, ...] = (
+    "rsm_prepare_context",
+    "rsm_get_context_page",
+    "rsm_search",
+    "rsm_find_related",
+)
+
+# Legacy, internal, and deprecated tools available only with --expose-all-tools.
+LEGACY_TOOL_NAMES: tuple[str, ...] = (
+    "rsm_status",
+    "rsm_search_symbols",
+    "rsm_explain_entity",
+    "rsm_build_context_pack",
+    "rsm_query_graph",
+    "rsm_validate_patch_context",
+    "rsm_get_git_summary",
+)
+
+# Phase 1 tool names = all registered repo tools, in registration order.
 PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_status",
     "rsm_search_symbols",
@@ -114,10 +132,14 @@ class StoreSessionState:
     One instance lives for the lifetime of a single ``serve_stdio`` call.
     ``active_index`` starts as ``None`` and is updated by ``rsm_select_index``.
     No disk writes; no persistence across MCP restarts.
+
+    ``expose_all_tools`` controls whether legacy/internal/deprecated tools
+    are listed and invocable.
     """
 
     store_home: Path
     active_index: ActiveIndex | None = field(default=None)
+    expose_all_tools: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,6 +149,7 @@ class SessionConfig:
     repo_root: Path
     db_path: Path
     index_mode: Literal["explicit_db", "store"] = "explicit_db"
+    expose_all_tools: bool = False
 
 
 @dataclass(frozen=True)
@@ -158,6 +181,7 @@ def validate_session(
     *,
     require_db_inside_repo: bool = True,
     index_mode: Literal["explicit_db", "store"] = "explicit_db",
+    expose_all_tools: bool = False,
 ) -> SessionConfig:
     """Validate ``--repo`` and ``--db`` paths and return a session config.
 
@@ -194,7 +218,12 @@ def validate_session(
             raise ValueError(
                 f"--db path must be inside --repo (got db={resolved_db}, repo={resolved_repo})"
             ) from exc
-    return SessionConfig(repo_root=resolved_repo, db_path=resolved_db, index_mode=index_mode)
+    return SessionConfig(
+        repo_root=resolved_repo,
+        db_path=resolved_db,
+        index_mode=index_mode,
+        expose_all_tools=expose_all_tools,
+    )
 
 
 def to_jsonable(value: Any) -> Any:
@@ -1052,9 +1081,12 @@ def _input_schema(properties: dict[str, Any], required: list[str]) -> dict[str, 
     }
 
 
-def build_tool_registry() -> dict[str, ToolDescriptor]:
+def build_tool_registry(
+    public_only: bool = False,
+) -> dict[str, ToolDescriptor]:
     """Return the read-only MCP tool registry for phase 1.
 
+    When ``public_only`` is ``True``, only the 4 public tools are included.
     The registry never includes indexing, export, import, mutation, or arbitrary
     shell/test execution tools. See ``DEFERRED_TOOL_NAMES`` for the explicit
     deferral list used by safety regression tests.
@@ -1296,10 +1328,14 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ),
     ]
     registry = {descriptor.name: descriptor for descriptor in descriptors}
-    # Defensive assertion: registry surface must match the phase 1 contract.
-    if tuple(registry.keys()) != PHASE1_TOOL_NAMES:
+    # Filter to public tools only when requested.
+    if public_only:
+        registry = {name: registry[name] for name in PUBLIC_TOOL_NAMES if name in registry}
+    # Defensive assertion: registry surface must match the expected contract.
+    expected = PUBLIC_TOOL_NAMES if public_only else PHASE1_TOOL_NAMES
+    if tuple(registry.keys()) != expected:
         raise RuntimeError(
-            "MCP tool registry order does not match PHASE1_TOOL_NAMES; "
+            "MCP tool registry order does not match expected names; "
             "this is an internal invariant violation."
         )
     return registry
@@ -1505,12 +1541,16 @@ def _tool_current_index(
     }
 
 
-def build_store_tool_registry() -> dict[str, ToolDescriptor]:
-    """Return the full tool registry for ``--store`` mode.
+def build_store_tool_registry(
+    public_only: bool = False,
+) -> dict[str, ToolDescriptor]:
+    """Return the tool registry for ``--store`` mode.
 
     Includes the three store-management tools (``rsm_list_indexes``,
     ``rsm_select_index``, ``rsm_current_index``) followed by all
     :func:`build_tool_registry` phase-1 tools.
+
+    When ``public_only`` is ``True``, store-management tools are also excluded.
     """
 
     store_descriptors: list[ToolDescriptor] = [
@@ -1559,15 +1599,27 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ),
     ]
 
-    repo_registry = build_tool_registry()
+    repo_registry = build_tool_registry(public_only=public_only)
     combined = {d.name: d for d in store_descriptors}
+    if public_only:
+        # Also filter out store-management tools in public-only mode.
+        for name in list(combined.keys()):
+            if name in STORE_ONLY_TOOL_NAMES:
+                del combined[name]
     combined.update(repo_registry)
 
-    if tuple(combined.keys()) != STORE_TOOL_NAMES:
-        raise RuntimeError(
-            "Store tool registry order does not match STORE_TOOL_NAMES; "
-            "this is an internal invariant violation."
-        )
+    if public_only:
+        if tuple(combined.keys()) != PUBLIC_TOOL_NAMES:
+            raise RuntimeError(
+                "Store public-only tool registry does not match PUBLIC_TOOL_NAMES; "
+                "this is an internal invariant violation."
+            )
+    else:
+        if tuple(combined.keys()) != STORE_TOOL_NAMES:
+            raise RuntimeError(
+                "Store tool registry order does not match STORE_TOOL_NAMES; "
+                "this is an internal invariant violation."
+            )
     return combined
 
 

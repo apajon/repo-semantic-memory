@@ -13,6 +13,7 @@ from repo_semantic_memory.cli import main as cli_main
 from repo_semantic_memory.mcp import (
     DEFERRED_TOOL_NAMES,
     PHASE1_TOOL_NAMES,
+    PUBLIC_TOOL_NAMES,
     build_tool_registry,
     invoke_tool,
     validate_session,
@@ -270,6 +271,20 @@ def test_tool_registry_names_match_phase1_contract() -> None:
     }
 
 
+def test_tool_registry_public_only_returns_4_tools() -> None:
+    """build_tool_registry(public_only=True) returns exactly the 4 public tools."""
+    from repo_semantic_memory.mcp.runtime import PUBLIC_TOOL_NAMES
+
+    registry = build_tool_registry(public_only=True)
+    assert tuple(registry.keys()) == PUBLIC_TOOL_NAMES
+    assert set(registry.keys()) == {
+        "rsm_prepare_context",
+        "rsm_get_context_page",
+        "rsm_search",
+        "rsm_find_related",
+    }
+
+
 def test_tool_registry_does_not_expose_deferred_tools() -> None:
     registry = build_tool_registry()
     exposed = set(registry.keys())
@@ -437,6 +452,8 @@ def _drive(session, messages: list[dict]) -> list[dict]:
 
 def test_stdio_initialize_and_tools_list(indexed_repo: tuple[Path, Path]) -> None:
     repo, db = indexed_repo
+    from repo_semantic_memory.mcp.runtime import PUBLIC_TOOL_NAMES
+
     session = validate_session(repo, db)
     responses = _drive(
         session,
@@ -450,10 +467,28 @@ def test_stdio_initialize_and_tools_list(indexed_repo: tuple[Path, Path]) -> Non
     assert responses[0]["result"]["serverInfo"]["name"] == "repo-semantic-memory"
     assert responses[1]["id"] == 2
     names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    # Default mode: only 4 public tools.
+    assert names == list(PUBLIC_TOOL_NAMES)
+
+
+def test_stdio_initialize_and_tools_list_expose_all(indexed_repo: tuple[Path, Path]) -> None:
+    """tools/list returns all tools when expose_all_tools=True."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db, expose_all_tools=True)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
     assert names == list(PHASE1_TOOL_NAMES)
 
 
 def test_stdio_tool_call_status(indexed_repo: tuple[Path, Path]) -> None:
+    """rsm_status is NOT callable in default mode (not a public tool)."""
     repo, db = indexed_repo
     session = validate_session(repo, db)
     responses = _drive(
@@ -467,10 +502,8 @@ def test_stdio_tool_call_status(indexed_repo: tuple[Path, Path]) -> None:
             },
         ],
     )
-    assert responses[0]["id"] == 7
-    payload = json.loads(responses[0]["result"]["content"][0]["text"])
-    assert payload["entity_count"] == 2
-    assert responses[0]["result"]["isError"] is False
+    assert responses[0]["result"]["isError"] is True
+    assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
 
 
 def test_stdio_unknown_tool_returns_tool_error(indexed_repo: tuple[Path, Path]) -> None:
@@ -513,7 +546,7 @@ def test_stdio_unknown_method_returns_method_not_found(
 
 def test_stdio_search_symbols_ergonomics_fields(indexed_repo: tuple[Path, Path]) -> None:
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -540,7 +573,7 @@ def test_stdio_search_symbols_ergonomics_fields(indexed_repo: tuple[Path, Path])
 
 def test_stdio_build_context_pack_ergonomics_fields(indexed_repo: tuple[Path, Path]) -> None:
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -578,7 +611,7 @@ def test_stdio_build_context_pack_compact_default(indexed_repo: tuple[Path, Path
     """
 
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -611,7 +644,7 @@ def test_stdio_build_context_pack_include_rendered_true(
     """Explicitly requesting include_rendered=true returns non-empty rendered output."""
 
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -855,7 +888,7 @@ def test_stdio_in_session_paging_is_live(indexed_repo: tuple[Path, Path]) -> Non
     from repo_semantic_memory.mcp.server import serve_stdio
 
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
 
     # First run: capture the freshly minted result_set_id.
     build_msg = {
@@ -875,8 +908,8 @@ def test_stdio_in_session_paging_is_live(indexed_repo: tuple[Path, Path]) -> Non
     )
     result_set_id = first_payload["result_set_id"]
 
-    # Second run: same session, but a fresh ResultStore. The ID must now be
-    # unknown - this asserts result sets are scoped to a single MCP session.
+    # Second run: same session config (expose_all_tools not needed for
+    # rsm_get_context_page, but we reuse the same session for consistency).
     page_msg = {
         "jsonrpc": "2.0",
         "id": 71,
@@ -1385,9 +1418,9 @@ def test_build_context_pack_still_works_after_prepare_context_added(
 def test_stdio_tool_list_includes_prepare_context(
     indexed_repo: tuple[Path, Path],
 ) -> None:
-    """MCP tools/list includes rsm_prepare_context."""
+    """MCP tools/list with expose_all_tools includes all tools."""
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -1531,9 +1564,9 @@ def test_search_symbols_still_works_after_search_added(
 def test_stdio_tool_list_includes_both_search_and_search_symbols(
     indexed_repo: tuple[Path, Path],
 ) -> None:
-    """MCP tools/list includes both rsm_search and rsm_search_symbols."""
+    """With expose_all_tools, tools/list includes both old and new search tools."""
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -1735,9 +1768,9 @@ def test_explain_entity_and_query_graph_still_work(
 def test_stdio_tool_list_includes_find_related(
     indexed_repo: tuple[Path, Path],
 ) -> None:
-    """MCP tools/list includes rsm_find_related plus old tools."""
+    """With expose_all_tools, tools/list includes rsm_find_related plus old tools."""
     repo, db = indexed_repo
-    session = validate_session(repo, db)
+    session = validate_session(repo, db, expose_all_tools=True)
     responses = _drive(
         session,
         [
@@ -1863,3 +1896,97 @@ def test_deprecated_tools_still_invocable(
         session,
     )
     assert "entities" in result
+
+
+# ---------------------------------------------------------------------------
+# Default tool surface (61.9)
+# ---------------------------------------------------------------------------
+
+
+def test_stdio_default_tools_list_has_4_tools(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Default tools/list exposes exactly the 4 public tools."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    assert responses[1]["id"] == 2
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    assert names == list(PUBLIC_TOOL_NAMES)
+    assert "rsm_build_context_pack" not in names
+    assert "rsm_search_symbols" not in names
+    assert "rsm_status" not in names
+
+
+def test_stdio_default_rejects_legacy_tool(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Default mode rejects legacy tools with unknown tool error."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_build_context_pack",
+                    "arguments": {"task": "test"},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is True
+
+
+def test_stdio_default_accepts_public_tool(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Default mode accepts rsm_prepare_context."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_prepare_context",
+                    "arguments": {"task": "test", "budget_chars": 8000},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+
+
+def test_stdio_expose_all_tools_lists_all_tools(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """With expose_all_tools, tools/list returns all tools."""
+    repo, db = indexed_repo
+    session = validate_session(repo, db, expose_all_tools=True)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    assert responses[1]["id"] == 2
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    assert names == list(PHASE1_TOOL_NAMES)
+    assert "rsm_build_context_pack" in names
+    assert "rsm_status" in names

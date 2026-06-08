@@ -29,6 +29,7 @@ from typing import IO, Any
 
 from repo_semantic_memory.mcp.runtime import (
     PHASE1_TOOL_NAMES,
+    PUBLIC_TOOL_NAMES,
     STORE_TOOL_NAMES,
     SessionConfig,
     StoreSessionState,
@@ -98,9 +99,11 @@ def _initialize_result(session: SessionConfig | StoreSessionState) -> dict[str, 
 
 def _tools_list_result(session: SessionConfig | StoreSessionState) -> dict[str, Any]:
     if isinstance(session, StoreSessionState):
-        registry = build_store_tool_registry()
+        public_only = not session.expose_all_tools
+        registry = build_store_tool_registry(public_only=public_only)
     else:
-        registry = build_tool_registry()
+        public_only = not session.expose_all_tools
+        registry = build_tool_registry(public_only=public_only)
     tools = [
         {
             "name": descriptor.name,
@@ -168,8 +171,17 @@ def _dispatch(
         arguments_raw = params.get("arguments", {})
         if not isinstance(arguments_raw, Mapping):
             return _error(request_id, _INVALID_PARAMS, "tools/call 'arguments' must be an object")
-        # In store mode the allowed set is larger; in repo mode only PHASE1_TOOL_NAMES.
-        allowed = STORE_TOOL_NAMES if isinstance(session, StoreSessionState) else PHASE1_TOOL_NAMES
+        # Determine the allowed tool set based on mode and expose_all_tools.
+        if isinstance(session, StoreSessionState):
+            if session.expose_all_tools:
+                allowed = STORE_TOOL_NAMES
+            else:
+                allowed = PUBLIC_TOOL_NAMES
+        else:
+            if session.expose_all_tools:
+                allowed = PHASE1_TOOL_NAMES
+            else:
+                allowed = PUBLIC_TOOL_NAMES
         if name not in allowed:
             return _result(request_id, _tool_error_result(f"unknown tool: {name}"))
         try:
@@ -241,7 +253,7 @@ def serve_stdio(
     return 0
 
 
-def run_serve(repo: str, db: str | None) -> int:
+def run_serve(repo: str, db: str | None, *, expose_all_tools: bool = False) -> int:
     """CLI entry point for ``rsm mcp serve``.
 
     Validates the repo/db pair and starts the stdio loop. Returns a non-zero
@@ -250,6 +262,11 @@ def run_serve(repo: str, db: str | None) -> int:
     When ``db`` is ``None``, the RSM Index Store registry is consulted for a
     registered index for the given ``repo``.  If no entry is found the command
     exits with code 2 and a clear ``error:`` line on stderr.
+
+    ``expose_all_tools`` controls whether legacy/internal/deprecated tools are
+    listed and invocable.  When ``False`` (the default), only the 4 public
+    tools (rsm_search, rsm_find_related, rsm_prepare_context,
+    rsm_get_context_page) are exposed.
     """
     resolved_db = db
     db_from_registry = False
@@ -279,6 +296,7 @@ def run_serve(repo: str, db: str | None) -> int:
             resolved_db,
             require_db_inside_repo=not db_from_registry,
             index_mode="store" if db_from_registry else "explicit_db",
+            expose_all_tools=expose_all_tools,
         )
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -286,7 +304,7 @@ def run_serve(repo: str, db: str | None) -> int:
     return serve_stdio(session)
 
 
-def run_serve_store(store_home_path: str | None = None) -> int:
+def run_serve_store(store_home_path: str | None = None, *, expose_all_tools: bool = False) -> int:
     """CLI entry point for ``rsm mcp serve --store``.
 
     Opens the RSM Index Store and starts the store-scoped stdio loop.
@@ -295,6 +313,9 @@ def run_serve_store(store_home_path: str | None = None) -> int:
 
     ``store_home_path`` overrides the default RSM_HOME resolution when provided.
     Pass ``None`` to use the standard :func:`resolve_store_home` resolution.
+
+    ``expose_all_tools`` controls whether legacy/internal/deprecated tools are
+    listed and invocable.
     """
     from repo_semantic_memory.store_home import resolve_store_home  # noqa: PLC0415
 
@@ -304,5 +325,5 @@ def run_serve_store(store_home_path: str | None = None) -> int:
         print(f"error: could not resolve RSM store home: {exc}", file=sys.stderr)
         return 2
 
-    state = StoreSessionState(store_home=home)
+    state = StoreSessionState(store_home=home, expose_all_tools=expose_all_tools)
     return serve_stdio(state)

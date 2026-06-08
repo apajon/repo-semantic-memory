@@ -570,6 +570,17 @@ def build_parser() -> argparse.ArgumentParser:
             "rsm store register <repo> --index"
         ),
     )
+    mcp_serve_parser.add_argument(
+        "--expose-all-tools",
+        action="store_true",
+        default=False,
+        help=(
+            "Expose all legacy, internal, and deprecated MCP tools alongside the "
+            "default 4 public tools (rsm_search, rsm_find_related, "
+            "rsm_prepare_context, rsm_get_context_page). "
+            "Without this flag, only the 4 public tools are listed and invocable."
+        ),
+    )
 
     store_parser = subparsers.add_parser(
         "store",
@@ -815,10 +826,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if getattr(args, "store", False):
                 from repo_semantic_memory.mcp.server import run_serve_store
 
-                return run_serve_store()
+                return run_serve_store(expose_all_tools=args.expose_all_tools)
             from repo_semantic_memory.mcp.server import run_serve
 
-            return run_serve(repo=args.repo, db=args.db)
+            return run_serve(repo=args.repo, db=args.db, expose_all_tools=args.expose_all_tools)
         parser.print_help()
         return 2
     if args.command == "store":
