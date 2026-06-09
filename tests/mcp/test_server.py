@@ -529,6 +529,89 @@ def test_stdio_unknown_tool_returns_tool_error(indexed_repo: tuple[Path, Path]) 
     assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
 
 
+# ---------------------------------------------------------------------------
+# Mode-sensitive surface: repo/db mode rejects store/nav tools
+# ---------------------------------------------------------------------------
+
+
+def test_stdio_repo_mode_rejects_store_nav_tools(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Repo/db mode rejects rsm_list_indexes, rsm_select_index, rsm_current_index.
+
+    Store/navigation tools are only public in --store mode.
+    """
+    from repo_semantic_memory.mcp.runtime import STORE_NAVIGATION_TOOL_NAMES
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    for tool_name in STORE_NAVIGATION_TOOL_NAMES:
+        responses = _drive(
+            session,
+            [
+                {
+                    "jsonrpc": "2.0",
+                    "id": 50,
+                    "method": "tools/call",
+                    "params": {"name": tool_name, "arguments": {}},
+                },
+            ],
+        )
+        assert responses[0]["result"]["isError"] is True, f"Repo/db mode should reject {tool_name}"
+        assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
+
+
+def test_stdio_repo_mode_tools_list_excludes_store_nav(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Repo/db mode default tools/list has exactly 4 task tools, no store/nav."""
+    from repo_semantic_memory.mcp.runtime import STORE_NAVIGATION_TOOL_NAMES
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    for store_tool in STORE_NAVIGATION_TOOL_NAMES:
+        assert store_tool not in names, f"Repo/db mode tools/list should not include {store_tool}"
+    assert len(names) == 4
+
+
+def test_stdio_repo_mode_expose_all_excludes_store_nav(
+    indexed_repo: tuple[Path, Path],
+) -> None:
+    """Repo/db expose-all mode still excludes store/nav tools.
+
+    Store/nav tools are not in PHASE1_TOOL_NAMES (the repo-mode full surface).
+    They are only available in --store mode.
+    """
+    from repo_semantic_memory.mcp.runtime import STORE_NAVIGATION_TOOL_NAMES
+
+    repo, db = indexed_repo
+    session = validate_session(repo, db, expose_all_tools=True)
+    responses = _drive(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        ],
+    )
+    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
+    for store_tool in STORE_NAVIGATION_TOOL_NAMES:
+        assert store_tool not in names, (
+            f"Repo/db expose-all tools/list should not include {store_tool}"
+        )
+    # Expose-all repo mode → 11 tools (4 task + 7 legacy)
+    assert len(names) == 11
+
+
 def test_stdio_malformed_json_returns_parse_error(indexed_repo: tuple[Path, Path]) -> None:
     repo, db = indexed_repo
     session = validate_session(repo, db)

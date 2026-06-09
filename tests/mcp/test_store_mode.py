@@ -139,10 +139,10 @@ def test_build_store_tool_registry_matches_store_tool_names() -> None:
 def test_build_store_tool_registry_public_only_returns_7_tools() -> None:
     """build_store_tool_registry(public_only=True) returns 7 public tools:
     4 task + 3 store/navigation."""
-    from repo_semantic_memory.mcp.runtime import DEFAULT_PUBLIC_TOOL_NAMES
+    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
 
     registry = build_store_tool_registry(public_only=True)
-    assert set(registry.keys()) == set(DEFAULT_PUBLIC_TOOL_NAMES)
+    assert set(registry.keys()) == set(STORE_PUBLIC_TOOL_NAMES)
     assert set(registry.keys()) == {
         "rsm_prepare_context",
         "rsm_get_context_page",
@@ -577,9 +577,9 @@ def test_serve_stdio_store_mode_tools_list_default_has_7_public_tools(tmp_path: 
     )
     tools_response = next(r for r in responses if r.get("id") == 2)
     tool_names = {t["name"] for t in tools_response["result"]["tools"]}
-    from repo_semantic_memory.mcp.runtime import DEFAULT_PUBLIC_TOOL_NAMES
+    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
 
-    assert tool_names == set(DEFAULT_PUBLIC_TOOL_NAMES)
+    assert tool_names == set(STORE_PUBLIC_TOOL_NAMES)
     assert len(tool_names) == 7
     for name in STORE_ONLY_TOOL_NAMES:
         assert name in tool_names
