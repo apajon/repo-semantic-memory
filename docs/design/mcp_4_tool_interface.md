@@ -4,7 +4,11 @@
 > **Date:** 2026-06-06  
 > **Branch:** `feat/benchmark-harness-59`  
 > **Depends on:** `docs/design/mcp_tool_surface_minimization.md` (61.0)  
-> **Status:** Design complete. No code changed.
+> **Status:** Design complete. No code changed.  
+> **Correction (61.15 — 2026-06-09):** The final contract is mode-sensitive.
+> This document describes the 4 task tools only (valid for both modes).
+> Store/nav tools are public in store mode (7-tool default).
+> See `docs/reviews/mcp_surface_61x_final_report.md` for the final contract.
 
 ## 1. Purpose
 

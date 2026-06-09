@@ -30,6 +30,7 @@ from typing import IO, Any
 from repo_semantic_memory.mcp.runtime import (
     PHASE1_TOOL_NAMES,
     PUBLIC_TOOL_NAMES,
+    STORE_PUBLIC_TOOL_NAMES,
     STORE_TOOL_NAMES,
     SessionConfig,
     StoreSessionState,
@@ -176,7 +177,7 @@ def _dispatch(
             if session.expose_all_tools:
                 allowed = STORE_TOOL_NAMES
             else:
-                allowed = PUBLIC_TOOL_NAMES
+                allowed = STORE_PUBLIC_TOOL_NAMES
         else:
             if session.expose_all_tools:
                 allowed = PHASE1_TOOL_NAMES
@@ -264,9 +265,10 @@ def run_serve(repo: str, db: str | None, *, expose_all_tools: bool = False) -> i
     exits with code 2 and a clear ``error:`` line on stderr.
 
     ``expose_all_tools`` controls whether legacy/internal/deprecated tools are
-    listed and invocable.  When ``False`` (the default), only the 4 public
+    listed and invocable.  When ``False`` (the default), only the public task
     tools (rsm_search, rsm_find_related, rsm_prepare_context,
-    rsm_get_context_page) are exposed.
+    rsm_get_context_page) are exposed.  Store navigation tools are not
+    available in ``--repo`` mode.
     """
     resolved_db = db
     db_from_registry = False

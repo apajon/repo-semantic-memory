@@ -12,7 +12,6 @@ from repo_semantic_memory.cli import build_parser
 from repo_semantic_memory.cli import main as cli_main
 from repo_semantic_memory.mcp import (
     PHASE1_TOOL_NAMES,
-    PUBLIC_TOOL_NAMES,
     STORE_ONLY_TOOL_NAMES,
     STORE_TOOL_NAMES,
     StoreSessionState,
@@ -135,6 +134,25 @@ def test_store_tool_names_order_store_first() -> None:
 def test_build_store_tool_registry_matches_store_tool_names() -> None:
     registry = build_store_tool_registry()
     assert tuple(registry.keys()) == STORE_TOOL_NAMES
+
+
+def test_build_store_tool_registry_public_only_returns_7_tools() -> None:
+    """build_store_tool_registry(public_only=True) returns 7 public tools:
+    4 task + 3 store/navigation."""
+    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
+
+    registry = build_store_tool_registry(public_only=True)
+    assert set(registry.keys()) == set(STORE_PUBLIC_TOOL_NAMES)
+    assert set(registry.keys()) == {
+        "rsm_prepare_context",
+        "rsm_get_context_page",
+        "rsm_search",
+        "rsm_find_related",
+        "rsm_list_indexes",
+        "rsm_select_index",
+        "rsm_current_index",
+    }
+    assert len(registry) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -547,8 +565,8 @@ def test_serve_stdio_store_mode_tools_list(tmp_path: Path) -> None:
         assert name in tool_names
 
 
-def test_serve_stdio_store_mode_tools_list_default_only_public(tmp_path: Path) -> None:
-    """Default store mode tools/list exposes only 4 public tools, no store tools."""
+def test_serve_stdio_store_mode_tools_list_default_has_7_public_tools(tmp_path: Path) -> None:
+    """Default store mode tools/list exposes 7 public tools: 4 task + 3 store/navigation."""
     state = StoreSessionState(store_home=tmp_path / "rsm")
     responses = _stdio_exchange(
         state,
@@ -559,9 +577,12 @@ def test_serve_stdio_store_mode_tools_list_default_only_public(tmp_path: Path) -
     )
     tools_response = next(r for r in responses if r.get("id") == 2)
     tool_names = {t["name"] for t in tools_response["result"]["tools"]}
-    assert tool_names == set(PUBLIC_TOOL_NAMES)
+    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
+
+    assert tool_names == set(STORE_PUBLIC_TOOL_NAMES)
+    assert len(tool_names) == 7
     for name in STORE_ONLY_TOOL_NAMES:
-        assert name not in tool_names
+        assert name in tool_names
 
 
 def test_serve_stdio_store_mode_default_rejects_legacy_tool(tmp_path: Path) -> None:
@@ -637,8 +658,8 @@ def test_serve_stdio_store_mode_expose_all_accepts_legacy_tool(tmp_path: Path) -
     assert tool_response["result"]["isError"] is False
 
 
-def test_serve_stdio_store_mode_default_rejects_store_tool(tmp_path: Path) -> None:
-    """Default store mode rejects rsm_list_indexes (it's a store-only internal tool)."""
+def test_serve_stdio_store_mode_default_accepts_store_navigation_tool(tmp_path: Path) -> None:
+    """Default store mode accepts rsm_list_indexes (a public store/navigation tool)."""
     state = StoreSessionState(store_home=tmp_path / "rsm")
     responses = _stdio_exchange(
         state,
@@ -653,7 +674,26 @@ def test_serve_stdio_store_mode_default_rejects_store_tool(tmp_path: Path) -> No
         ],
     )
     tool_response = next(r for r in responses if r.get("id") == 2)
-    assert tool_response["result"]["isError"] is True
+    assert tool_response["result"]["isError"] is False
+
+
+def test_serve_stdio_store_mode_default_accepts_current_index(tmp_path: Path) -> None:
+    """Default store mode accepts rsm_current_index (a public store/navigation tool)."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "rsm_current_index", "arguments": {}},
+            },
+        ],
+    )
+    tool_response = next(r for r in responses if r.get("id") == 2)
+    assert tool_response["result"]["isError"] is False
 
 
 def test_serve_stdio_store_mode_initialize_instructions(tmp_path: Path) -> None:

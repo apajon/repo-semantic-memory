@@ -3,7 +3,12 @@
 > **Task:** 61.0 — Design-only  
 > **Date:** 2026-06-06  
 > **Branch:** `feat/benchmark-harness-59`  
-> **Status:** Design complete. No code changed.
+> **Status:** Design complete. No code changed.  
+> **Correction (61.15 — 2026-06-09):** The final contract is mode-sensitive.
+> Repo/db mode: 4 task tools by default, store/nav unavailable.
+> Store mode: 4 task + 3 store/nav by default.
+> `--expose-all-tools` adds legacy/debug tools to either mode.
+> This document is preserved as the original 61.0 design rationale.
 
 ## 1. Purpose
 

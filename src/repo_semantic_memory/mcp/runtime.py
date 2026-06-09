@@ -35,13 +35,26 @@ from repo_semantic_memory.mcp.tools import (
 from repo_semantic_memory.store import SQLiteStore
 from repo_semantic_memory.version import get_version_info
 
-# Public tool names exposed by default in the minimised 4-tool surface.
+# Public task tools exposed by default (4-tool task surface).
 PUBLIC_TOOL_NAMES: tuple[str, ...] = (
     "rsm_prepare_context",
     "rsm_get_context_page",
     "rsm_search",
     "rsm_find_related",
 )
+
+# Public store/navigation tools exposed by default in --store mode.
+# These are normal navigation/session tools, not legacy/debug tools.
+STORE_NAVIGATION_TOOL_NAMES: tuple[str, ...] = (
+    "rsm_list_indexes",
+    "rsm_select_index",
+    "rsm_current_index",
+)
+
+# Public tools for --store mode (default): 4 task tools + 3 store/navigation tools.
+# In --repo/--db mode, only PUBLIC_TOOL_NAMES (4 task tools) are public.
+# The public surface is mode-sensitive, not a single global default.
+STORE_PUBLIC_TOOL_NAMES: tuple[str, ...] = PUBLIC_TOOL_NAMES + STORE_NAVIGATION_TOOL_NAMES
 
 # Legacy, internal, and deprecated tools available only with --expose-all-tools.
 LEGACY_TOOL_NAMES: tuple[str, ...] = (
@@ -1557,8 +1570,7 @@ def build_store_tool_registry(
         ToolDescriptor(
             name="rsm_list_indexes",
             description=(
-                "[INTERNAL/DEBUG - store mode] List all repositories registered in the "
-                "RSM Index Store. "
+                "List all repositories registered in the RSM Index Store. "
                 "Returns repo_id, name, repo_root, db_path, and best-effort status "
                 "for each registered index. Use this first to discover available "
                 "repositories, then call rsm_select_index to activate one. Read-only."
@@ -1569,8 +1581,7 @@ def build_store_tool_registry(
         ToolDescriptor(
             name="rsm_select_index",
             description=(
-                "[INTERNAL/DEBUG - store mode] Select the active repository index "
-                "for this MCP session. "
+                "Select the active repository index for this MCP session. "
                 "Accepts repo_id (preferred), repo_root (absolute path), or name "
                 "(basename of repo_root; rejected if ambiguous). Validates that the "
                 "selected DB exists. Active selection is session-scoped: it is lost "
@@ -1589,8 +1600,7 @@ def build_store_tool_registry(
         ToolDescriptor(
             name="rsm_current_index",
             description=(
-                "[INTERNAL/DEBUG - store mode] Return the currently active repository "
-                "index for this MCP session. "
+                "Return the currently active repository index for this MCP session. "
                 "If no index has been selected, returns active_repo: null and a "
                 "recoverable no_active_index uncertainty. Read-only."
             ),
@@ -1601,23 +1611,20 @@ def build_store_tool_registry(
 
     repo_registry = build_tool_registry(public_only=public_only)
     combined = {d.name: d for d in store_descriptors}
-    if public_only:
-        # Also filter out store-management tools in public-only mode.
-        for name in list(combined.keys()):
-            if name in STORE_ONLY_TOOL_NAMES:
-                del combined[name]
+    # Store navigation tools are public in --store mode (not in --repo/--db mode).
+    # Do not remove them in public_only mode.
     combined.update(repo_registry)
 
     if public_only:
-        if tuple(combined.keys()) != PUBLIC_TOOL_NAMES:
+        if set(combined.keys()) != set(STORE_PUBLIC_TOOL_NAMES):
             raise RuntimeError(
-                "Store public-only tool registry does not match PUBLIC_TOOL_NAMES; "
+                "Store public tool registry does not match STORE_PUBLIC_TOOL_NAMES; "
                 "this is an internal invariant violation."
             )
     else:
-        if tuple(combined.keys()) != STORE_TOOL_NAMES:
+        if set(combined.keys()) != set(STORE_TOOL_NAMES):
             raise RuntimeError(
-                "Store tool registry order does not match STORE_TOOL_NAMES; "
+                "Store tool registry does not match STORE_TOOL_NAMES; "
                 "this is an internal invariant violation."
             )
     return combined
