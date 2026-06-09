@@ -1,8 +1,10 @@
 # MCP Surface 61.x Final Report
 
+> **Task:** 61.13 — Final closure report  
 > **Date:** 2026-06-09  
-> **Branch:** `fix/61.14-store-nav-public`  
-> **Status:** Updated. 61.15 mode-sensitive contract — surface depends on launch mode.
+> **Branch:** `fix/61.15-mode-sensitive-surface`  
+> **Status:** Complete. All 61.x tasks done. Final mode-sensitive contract active.
+> **Next step:** 62.0 — Index lifecore_ros2 manually.
 
 ## 1. Summary
 
@@ -67,6 +69,10 @@ The primary change is that coding agents now see a mode-appropriate surface:
 | `rsm_select_index` | Activate a repository index for this MCP session |
 | `rsm_current_index` | Return the currently active repository index |
 
+### 3.3 `rsm_search`
+
+**Purpose:** Broad discovery across indexed files, symbols, docs and tests.
+
 **Main input:** `query` (required), `limit`, `kind`, `path_role`.
 
 **Main output:** `active_repo`, `query`, `results` (with `result_id`, `path`,
@@ -78,7 +84,7 @@ The primary change is that coding agents now see a mode-appropriate surface:
   (`search_0001`, `search_0002`, …).
 - No source snippets; results include entity metadata only.
 
-### 3.2 `rsm_find_related`
+### 3.4 `rsm_find_related`
 
 **Purpose:** Anchor-based expansion around a known file, entity, or qualified
 name.
@@ -95,7 +101,7 @@ name.
 - `result_id` anchor deferred (search result IDs are response-local).
 - `relation_groups` filter deferred (all groups returned).
 
-### 3.3 `rsm_prepare_context`
+### 3.5 `rsm_prepare_context`
 
 **Purpose:** Build a deterministic, source-cited, budget-bounded ContextPack
 for a coding task.
@@ -112,7 +118,7 @@ for a coding task.
 - `detail_level` controls preview size; paging via `rsm_get_context_page` is
   the recommended way to get additional items.
 
-### 3.4 `rsm_get_context_page`
+### 3.6 `rsm_get_context_page`
 
 **Purpose:** Page over a previously-built ContextPack without recomputing.
 
@@ -179,26 +185,26 @@ These are public in `--store` mode (7-tool default surface). They are
 | **61.10** | Public/debug compatibility tests | Tests |
 | **61.11** | Documentation cleanup after surface reduction | Docs |
 | **61.12** | Test cleanup and consolidation | Tests |
-| **61.13** | Final 61.x MCP surface report | Docs |
+| **61.13** | ✅ Final 61.x MCP surface closure report | Docs |
 | **61.14** | Promote store/navigation tools to store mode default surface | Code |
 | **61.15** | Mode-sensitive contract: repo/db=4, store=7, expose-all adds legacy | Code |
 
 **Key files changed across 61.x:**
-- `src/repo_semantic_memory/mcp/runtime.py` — tool categories, filtering, deprecation markers, mode-sensitive naming
+- `src/repo_semantic_memory/mcp/runtime.py` — tool categories, filtering, deprecation markers, `STORE_PUBLIC_TOOL_NAMES`
 - `src/repo_semantic_memory/mcp/server.py` — `--expose-all-tools` flag, mode-sensitive dispatch
-- `src/repo_semantic_memory/mcp/__init__.py` — updated exports (`STORE_PUBLIC_TOOL_NAMES`)
+- `src/repo_semantic_memory/mcp/__init__.py` — updated exports
 - `src/repo_semantic_memory/cli.py` — `--expose-all-tools` CLI flag
-- `docs/usage/mcp.md` — mode-sensitive docs (61.15)
+- `docs/usage/mcp.md` — mode-sensitive docs
 - `docs/design/mcp_tool_surface_minimization.md` — 61.0 design (with 61.15 correction note)
 - `docs/design/mcp_4_tool_interface.md` — 61.1 design (with 61.15 correction note)
-- `docs/design/mcp_compatibility_strategy.md` — 61.2 design + Phase D note
-- `docs/reviews/mcp_surface_61x_final_report.md` — Updated for 61.15
-- `tests/mcp/test_server.py` — Updated for 61.15 (repo/db rejects store/nav)
-- `tests/mcp/test_store_mode.py` — Updated for 61.15
+- `docs/design/mcp_compatibility_strategy.md` — 61.2 design (with 61.15 correction note)
+- `docs/reviews/mcp_surface_61x_final_report.md` — This report (61.13 final closure)
+- `tests/mcp/test_server.py` — Mode-sensitive surface tests (199 tests)
+- `tests/mcp/test_store_mode.py` — Store mode surface tests
 
 ## 6. Validation Summary
 
-All results from 2026-06-09, branch `fix/61.14-store-nav-public`:
+All results from 2026-06-09, branch `fix/61.15-mode-sensitive-surface`:
 
 | Suite | Collected | Status |
 |---|---|---|
