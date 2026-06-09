@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import IO, Any
 
 from repo_semantic_memory.mcp.runtime import (
-    DEFAULT_PUBLIC_TOOL_NAMES,
     PHASE1_TOOL_NAMES,
     PUBLIC_TOOL_NAMES,
+    STORE_PUBLIC_TOOL_NAMES,
     STORE_TOOL_NAMES,
     SessionConfig,
     StoreSessionState,
@@ -177,7 +177,7 @@ def _dispatch(
             if session.expose_all_tools:
                 allowed = STORE_TOOL_NAMES
             else:
-                allowed = DEFAULT_PUBLIC_TOOL_NAMES
+                allowed = STORE_PUBLIC_TOOL_NAMES
         else:
             if session.expose_all_tools:
                 allowed = PHASE1_TOOL_NAMES

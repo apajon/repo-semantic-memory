@@ -51,8 +51,10 @@ STORE_NAVIGATION_TOOL_NAMES: tuple[str, ...] = (
     "rsm_current_index",
 )
 
-# Combined default public surface: 4 task tools + 3 store/navigation tools.
-DEFAULT_PUBLIC_TOOL_NAMES: tuple[str, ...] = PUBLIC_TOOL_NAMES + STORE_NAVIGATION_TOOL_NAMES
+# Public tools for --store mode (default): 4 task tools + 3 store/navigation tools.
+# In --repo/--db mode, only PUBLIC_TOOL_NAMES (4 task tools) are public.
+# The public surface is mode-sensitive, not a single global default.
+STORE_PUBLIC_TOOL_NAMES: tuple[str, ...] = PUBLIC_TOOL_NAMES + STORE_NAVIGATION_TOOL_NAMES
 
 # Legacy, internal, and deprecated tools available only with --expose-all-tools.
 LEGACY_TOOL_NAMES: tuple[str, ...] = (
@@ -1609,14 +1611,14 @@ def build_store_tool_registry(
 
     repo_registry = build_tool_registry(public_only=public_only)
     combined = {d.name: d for d in store_descriptors}
-    # Store navigation tools are now part of the default public surface.
+    # Store navigation tools are public in --store mode (not in --repo/--db mode).
     # Do not remove them in public_only mode.
     combined.update(repo_registry)
 
     if public_only:
-        if set(combined.keys()) != set(DEFAULT_PUBLIC_TOOL_NAMES):
+        if set(combined.keys()) != set(STORE_PUBLIC_TOOL_NAMES):
             raise RuntimeError(
-                "Store public tool registry does not match DEFAULT_PUBLIC_TOOL_NAMES; "
+                "Store public tool registry does not match STORE_PUBLIC_TOOL_NAMES; "
                 "this is an internal invariant violation."
             )
     else:
