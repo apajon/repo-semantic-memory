@@ -15,7 +15,9 @@ from repo_semantic_memory.mcp.handlers import (
 )
 from repo_semantic_memory.mcp.runtime import (
     DEFERRED_TOOL_NAMES,
+    LEGACY_TOOL_NAMES,
     PHASE1_TOOL_NAMES,
+    PUBLIC_TOOL_NAMES,
     STORE_ONLY_TOOL_NAMES,
     STORE_TOOL_NAMES,
     ActiveIndex,
@@ -65,8 +67,10 @@ __all__ = [
     "ExportAiMemoryResponse",
     "GetGitSummaryRequest",
     "GetGitSummaryResponse",
+    "LEGACY_TOOL_NAMES",
     "McpToolName",
     "PHASE1_TOOL_NAMES",
+    "PUBLIC_TOOL_NAMES",
     "STORE_ONLY_TOOL_NAMES",
     "STORE_TOOL_NAMES",
     "QueryGraphRequest",

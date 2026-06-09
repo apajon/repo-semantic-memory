@@ -35,8 +35,26 @@ from repo_semantic_memory.mcp.tools import (
 from repo_semantic_memory.store import SQLiteStore
 from repo_semantic_memory.version import get_version_info
 
-# Phase 1 tool names. Kept in a tuple so the registry order and any test that
-# asserts the exposed surface remains stable and easy to audit.
+# Public tool names exposed by default in the minimised 4-tool surface.
+PUBLIC_TOOL_NAMES: tuple[str, ...] = (
+    "rsm_prepare_context",
+    "rsm_get_context_page",
+    "rsm_search",
+    "rsm_find_related",
+)
+
+# Legacy, internal, and deprecated tools available only with --expose-all-tools.
+LEGACY_TOOL_NAMES: tuple[str, ...] = (
+    "rsm_status",
+    "rsm_search_symbols",
+    "rsm_explain_entity",
+    "rsm_build_context_pack",
+    "rsm_query_graph",
+    "rsm_validate_patch_context",
+    "rsm_get_git_summary",
+)
+
+# Phase 1 tool names = all registered repo tools, in registration order.
 PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_status",
     "rsm_search_symbols",
@@ -46,6 +64,9 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
     "rsm_query_graph",
     "rsm_validate_patch_context",
     "rsm_get_git_summary",
+    "rsm_prepare_context",
+    "rsm_search",
+    "rsm_find_related",
 )
 
 # Store-mode-only tool names exposed exclusively in ``--store`` sessions.
@@ -111,10 +132,14 @@ class StoreSessionState:
     One instance lives for the lifetime of a single ``serve_stdio`` call.
     ``active_index`` starts as ``None`` and is updated by ``rsm_select_index``.
     No disk writes; no persistence across MCP restarts.
+
+    ``expose_all_tools`` controls whether legacy/internal/deprecated tools
+    are listed and invocable.
     """
 
     store_home: Path
     active_index: ActiveIndex | None = field(default=None)
+    expose_all_tools: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,6 +149,7 @@ class SessionConfig:
     repo_root: Path
     db_path: Path
     index_mode: Literal["explicit_db", "store"] = "explicit_db"
+    expose_all_tools: bool = False
 
 
 @dataclass(frozen=True)
@@ -155,6 +181,7 @@ def validate_session(
     *,
     require_db_inside_repo: bool = True,
     index_mode: Literal["explicit_db", "store"] = "explicit_db",
+    expose_all_tools: bool = False,
 ) -> SessionConfig:
     """Validate ``--repo`` and ``--db`` paths and return a session config.
 
@@ -191,7 +218,12 @@ def validate_session(
             raise ValueError(
                 f"--db path must be inside --repo (got db={resolved_db}, repo={resolved_repo})"
             ) from exc
-    return SessionConfig(repo_root=resolved_repo, db_path=resolved_db, index_mode=index_mode)
+    return SessionConfig(
+        repo_root=resolved_repo,
+        db_path=resolved_db,
+        index_mode=index_mode,
+        expose_all_tools=expose_all_tools,
+    )
 
 
 def to_jsonable(value: Any) -> Any:
@@ -609,6 +641,309 @@ def _short_id_stream(prefix: str, items: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _tool_prepare_context(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Preferred wrapper for building a task-centered ContextPack.
+
+    Delegates to :func:`_tool_build_context_pack` so the output is identical.
+    Adds ``active_repo`` metadata to every response.
+    """
+
+    result = _tool_build_context_pack(args, session, store)
+    result["active_repo"] = {
+        "repo_root": session.repo_root.as_posix(),
+        "db_path": session.db_path.as_posix(),
+        "index_mode": session.index_mode,
+    }
+    return result
+
+
+def _tool_search(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Broad discovery across indexed files, symbols, docs and tests.
+
+    Wraps :func:`_tool_search_symbols` with a cleaned output shape,
+    deterministic per-result IDs, and ``active_repo`` metadata.
+    """
+
+    # Translate cleaned input names to the internal SearchSymbolsRequest shape.
+    # kind -> entity_kinds, path_role -> path_roles.
+    mapped_args = dict(args)
+    if "kind" in mapped_args and "entity_kinds" not in mapped_args:
+        mapped_args["entity_kinds"] = mapped_args.pop("kind")
+    else:
+        mapped_args.pop("kind", None)
+    if "path_role" in mapped_args and "path_roles" not in mapped_args:
+        mapped_args["path_roles"] = mapped_args.pop("path_role")
+    else:
+        mapped_args.pop("path_role", None)
+    # Remove any keys not handled by the internal handler.
+    for key in list(mapped_args.keys()):
+        if key not in ("query", "limit", "entity_kinds", "path_roles", "include_relations"):
+            mapped_args.pop(key, None)
+
+    raw = _tool_search_symbols(mapped_args, session, store)
+
+    # Build the cleaned output shape.
+    raw_results: list[dict[str, Any]] = (
+        raw.get("results")  # type: ignore[assignment]
+        if isinstance(raw.get("results"), list)
+        else []
+    )
+    results: list[dict[str, Any]] = []
+    for idx, item in enumerate(raw_results, start=1):
+        source_range = (
+            item.get("source_range") if isinstance(item.get("source_range"), dict) else {}
+        )
+        results.append(
+            {
+                "result_id": f"search_{idx:04d}",
+                "entity_id": item.get("entity_id"),
+                "path": item.get("path"),
+                "kind": item.get("kind"),
+                "name": item.get("name"),
+                "qualified_name": item.get("qualified_name"),
+                "source_range": {
+                    "start_line": source_range.get("start_line"),
+                    "end_line": source_range.get("end_line"),
+                }
+                if source_range
+                else None,
+                "path_role": item.get("path_role"),
+                "score": item.get("score"),
+                "reasons": item.get("ranking_reasons"),
+            }
+        )
+
+    return {
+        "active_repo": {
+            "repo_root": session.repo_root.as_posix(),
+            "db_path": session.db_path.as_posix(),
+            "index_mode": session.index_mode,
+        },
+        "query": str(args.get("query", "")),
+        "results": results,
+        "count": len(results),
+        "uncertainties": list(raw.get("uncertainties", ())),
+        "warnings": [],
+    }
+
+
+def _tool_find_related(
+    args: Mapping[str, Any], session: SessionConfig, store: ResultStore
+) -> dict[str, Any]:
+    """Anchor-based expansion around a known file, entity, or qualified name.
+
+    Resolves the anchor using priority:
+    ``entity_id`` > ``qualified_name`` > ``source_path``.
+    Loads the index, gathers relations for the anchor entity, and returns
+    compact related items with relation group and strength classification.
+    """
+
+    del store
+
+    # --- Resolve anchor -------------------------------------------------------
+
+    entity_id_arg = args.get("entity_id")
+    qualified_name_arg = args.get("qualified_name")
+    source_path_arg = args.get("source_path")
+
+    if not any(
+        isinstance(v, str) and v.strip()
+        for v in (entity_id_arg, qualified_name_arg, source_path_arg)
+    ):
+        raise ToolInvocationError(
+            "provide at least one of: entity_id, qualified_name, or source_path"
+        )
+
+    limit = _optional_int(args, "limit", 10)
+    if limit < 1 or limit > 50:
+        raise ToolInvocationError("argument 'limit' must be between 1 and 50")
+
+    # Load index
+    from repo_semantic_memory.store import SQLiteStore  # noqa: PLC0415
+
+    sqlite_store = SQLiteStore(session.db_path)
+    try:
+        sqlite_store.initialize()
+        entities = sqlite_store.list_entities()
+        relations = sqlite_store.list_relations()
+    finally:
+        sqlite_store.close()
+
+    entity_by_id = {entity.id.value: entity for entity in entities}
+    entities_by_qname: dict[str, list[str]] = {}
+    entities_by_path: dict[str, list[str]] = {}
+    for entity in entities:
+        entities_by_qname.setdefault(entity.qualified_name, []).append(entity.id.value)
+        entities_by_path.setdefault(entity.source_range.path, []).append(entity.id.value)
+
+    uncertainties: list[dict[str, Any]] = []
+    active_repo = {
+        "repo_root": session.repo_root.as_posix(),
+        "db_path": session.db_path.as_posix(),
+        "index_mode": session.index_mode,
+    }
+
+    def _not_found(key_name: str, val: str) -> dict[str, Any]:
+        return {
+            "active_repo": active_repo,
+            "anchor": {key_name: val},
+            "related": [],
+            "count": 0,
+            "uncertainties": [
+                {
+                    "code": "anchor_not_found",
+                    "message": f"{key_name} {val!r} not found in the index.",
+                    "recoverable": True,
+                }
+            ],
+            "warnings": [],
+        }
+
+    # Resolve anchor entity IDs
+    anchor_entity_ids: list[str] = []
+    anchor_desc: dict[str, Any] = {}
+
+    if isinstance(entity_id_arg, str) and entity_id_arg.strip():
+        eid = entity_id_arg.strip()
+        if eid not in entity_by_id:
+            return _not_found("entity_id", eid)
+        anchor_entity_ids = [eid]
+        anchor_desc = {
+            "entity_id": eid,
+            "kind": entity_by_id[eid].kind,
+            "name": entity_by_id[eid].name,
+            "path": entity_by_id[eid].source_range.path,
+        }
+    elif isinstance(qualified_name_arg, str) and qualified_name_arg.strip():
+        qname = qualified_name_arg.strip()
+        matched = entities_by_qname.get(qname, [])
+        if not matched:
+            return _not_found("qualified_name", qname)
+        anchor_entity_ids = matched
+        if len(matched) > 1:
+            uncertainties.append(
+                {
+                    "code": "ambiguous_qualified_name",
+                    "message": (
+                        f"qualified_name {qname!r} matches {len(matched)} entities; "
+                        "returning all matches."
+                    ),
+                    "recoverable": True,
+                }
+            )
+        anchor_desc = {"qualified_name": qname, "entity_ids": matched}
+    elif isinstance(source_path_arg, str) and source_path_arg.strip():
+        spath = source_path_arg.strip()
+        matched = entities_by_path.get(spath, [])
+        if not matched:
+            return _not_found("source_path", spath)
+        anchor_entity_ids = matched
+        anchor_desc = {"source_path": spath, "entity_ids": matched}
+
+    # --- Gather relations -----------------------------------------------------
+
+    anchor_set = frozenset(anchor_entity_ids)
+    relation_set: dict[str, dict[str, Any]] = {}
+
+    for relation in relations:
+        source = relation.source_entity_id.value
+        target = relation.target_entity_id.value
+        if source in anchor_set and target not in anchor_set:
+            entry = relation_set.setdefault(
+                target,
+                {
+                    "entity_id": target,
+                    "relation_kinds": [],
+                    "direction": "outgoing",
+                },
+            )
+            entry["relation_kinds"].append(relation.kind)
+        elif target in anchor_set and source not in anchor_set:
+            entry = relation_set.setdefault(
+                source,
+                {
+                    "entity_id": source,
+                    "relation_kinds": [],
+                    "direction": "incoming",
+                },
+            )
+            entry["relation_kinds"].append(relation.kind)
+
+    # --- Build output ---------------------------------------------------------
+
+    kind_to_group: dict[str, str] = {
+        "tests": "tests",
+        "imports": "imports",
+        "exports": "exports",
+        "inherits": "inherits",
+        "contains": "implementation_support",
+        "calls": "implementation_support",
+        "references": "implementation_support",
+    }
+    strong_kinds = frozenset({"tests", "imports", "exports", "inherits"})
+    medium_kinds = frozenset({"contains", "calls"})
+    strength_order = {"strong": 0, "medium": 1, "weak": 2}
+
+    related: list[dict[str, Any]] = []
+    for related_eid, rel_data in relation_set.items():
+        if related_eid not in entity_by_id:
+            continue
+        ent = entity_by_id[related_eid]
+        kinds = rel_data["relation_kinds"]
+        # Classify into groups
+        groups: dict[str, bool] = {}
+        for k in kinds:
+            groups[kind_to_group.get(k, "other")] = True
+        sorted_groups = sorted(groups.keys())
+        # Classify strength
+        if any(k in strong_kinds for k in kinds):
+            strength = "strong"
+        elif any(k in medium_kinds for k in kinds):
+            strength = "medium"
+        else:
+            strength = "weak"
+        related.append(
+            {
+                "entity_id": related_eid,
+                "path": ent.source_range.path,
+                "kind": ent.kind,
+                "name": ent.name,
+                "qualified_name": ent.qualified_name,
+                "source_range": {
+                    "start_line": ent.source_range.start_line,
+                    "end_line": ent.source_range.end_line,
+                },
+                "relation_group": sorted_groups[0] if sorted_groups else "other",
+                "relation_groups": sorted_groups,
+                "relation_kinds": kinds,
+                "relation_strength": strength,
+                "direction": rel_data["direction"],
+                "reasons": [f"relation={','.join(kinds)}"],
+            }
+        )
+
+    related.sort(
+        key=lambda r: (
+            strength_order.get(r["relation_strength"], 3),
+            r["path"],
+        )
+    )
+
+    return {
+        "active_repo": active_repo,
+        "anchor": anchor_desc,
+        "related": related[:limit],
+        "count": min(len(related), limit),
+        "total": len(related),
+        "uncertainties": uncertainties,
+        "warnings": [],
+    }
+
+
 def _tool_get_context_page(
     args: Mapping[str, Any], session: SessionConfig, store: ResultStore
 ) -> dict[str, Any]:
@@ -648,8 +983,8 @@ def _tool_get_context_page(
                     "code": "result_set_unknown",
                     "message": (
                         f"result_set_id {result_set_id!r} is unknown or has expired in "
-                        "this MCP session; call rsm_build_context_pack again to mint a "
-                        "fresh result set."
+                        "this MCP session; call rsm_prepare_context (or rsm_build_context_pack) "
+                        "to mint a fresh result set."
                     ),
                     "recoverable": True,
                     "subject_id": result_set_id,
@@ -746,9 +1081,12 @@ def _input_schema(properties: dict[str, Any], required: list[str]) -> dict[str, 
     }
 
 
-def build_tool_registry() -> dict[str, ToolDescriptor]:
+def build_tool_registry(
+    public_only: bool = False,
+) -> dict[str, ToolDescriptor]:
     """Return the read-only MCP tool registry for phase 1.
 
+    When ``public_only`` is ``True``, only the 4 public tools are included.
     The registry never includes indexing, export, import, mutation, or arbitrary
     shell/test execution tools. See ``DEFERRED_TOOL_NAMES`` for the explicit
     deferral list used by safety regression tests.
@@ -758,8 +1096,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_status",
             description=(
-                "Return read-only session status: configured --repo and --db, package/schema "
-                "versions, and indexed entity/relation counts."
+                "[INTERNAL/DEBUG] Return read-only session status: configured --repo and --db, "
+                "package/schema versions, and indexed entity/relation counts."
             ),
             input_schema=_input_schema({}, []),
             handler=_tool_status,
@@ -767,7 +1105,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_search_symbols",
             description=(
-                "Search indexed entities by lexical query using the bundled BM25 index. Read-only."
+                "[DEPRECATED - use rsm_search] Search indexed entities by lexical query "
+                "using the bundled BM25 index. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -784,8 +1123,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_explain_entity",
             description=(
-                "Resolve one entity with structural context, semantic components, and "
-                "citations. Read-only."
+                "[DEPRECATED - use rsm_find_related] Resolve one entity with structural "
+                "context, semantic components, and citations. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -802,7 +1141,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_build_context_pack",
             description=(
-                "Build a deterministic, source-cited, budget-bounded context pack for a task. "
+                "[DEPRECATED - use rsm_prepare_context] Build a deterministic, source-cited, "
+                "budget-bounded context pack for a task. "
                 "Returns a brief first-page preview by default (5 files, 5 entities, 3 relations, "
                 "0 citations) plus a session-scoped result_set_id; use rsm_get_context_page to "
                 "page over omitted items. Pass detail_level='compact' for the larger one-shot "
@@ -864,8 +1204,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_query_graph",
             description=(
-                "Bounded traversal of the structural relation graph from seed entity IDs. "
-                "Read-only."
+                "[DEPRECATED - use rsm_find_related] Bounded traversal of the structural "
+                "relation graph from seed entity IDs. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -885,8 +1225,8 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_validate_patch_context",
             description=(
-                "Check whether a candidate patch's touched paths and referenced entities are "
-                "covered by the local index. Read-only."
+                "[INTERNAL/DEBUG] Check whether a candidate patch's touched paths and "
+                "referenced entities are covered by the local index. Read-only."
             ),
             input_schema=_input_schema(
                 {
@@ -901,19 +1241,101 @@ def build_tool_registry() -> dict[str, ToolDescriptor]:
         ),
         ToolDescriptor(
             name="rsm_get_git_summary",
-            description="Return minimal local Git repository summary for a bounded path.",
+            description=(
+                "[INTERNAL/DEBUG] Return minimal local Git repository summary for a bounded path."
+            ),
             input_schema=_input_schema(
                 {"path": {"type": "string"}},
                 [],
             ),
             handler=_tool_get_git_summary,
         ),
+        ToolDescriptor(
+            name="rsm_prepare_context",
+            description=(
+                "Prepare a task-centered ContextPack for a coding agent. "
+                "Preferred high-level replacement for rsm_build_context_pack. "
+                "Returns a brief first-page preview by default (5 files, 5 entities, 3 relations, "
+                "0 citations) plus a session-scoped result_set_id; use rsm_get_context_page to "
+                "page over omitted items. Every response includes active_repo metadata. "
+                "Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "task": {"type": "string"},
+                    "budget_chars": {"type": "integer", "minimum": 1},
+                    "format": {"type": "string", "enum": ["markdown", "yaml"]},
+                    "profile": {"type": "string"},
+                    "detail_level": {
+                        "type": "string",
+                        "enum": sorted(_DETAIL_LEVEL_DEFAULTS),
+                    },
+                    "explain_ranking": {"type": "boolean"},
+                    "include_semantic_components": {"type": "boolean"},
+                    "include_rendered": {"type": "boolean"},
+                    "include_payload": {"type": "boolean"},
+                    "include_ranking_breakdowns": {"type": "boolean"},
+                    "max_files": {"type": "integer", "minimum": 0},
+                    "max_entities": {"type": "integer", "minimum": 0},
+                    "max_relations": {"type": "integer", "minimum": 0},
+                    "max_citations": {"type": "integer", "minimum": 0},
+                },
+                ["task"],
+            ),
+            handler=_tool_prepare_context,
+        ),
+        ToolDescriptor(
+            name="rsm_search",
+            description=(
+                "Broad discovery across indexed files, symbols, docs and tests. "
+                "Returns compact, deterministic results with source paths, entity kinds, "
+                "and scoring reasons. Preferred high-level replacement for "
+                "rsm_search_symbols. Every response includes active_repo metadata. "
+                "Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1},
+                    "kind": {"type": "array", "items": {"type": "string"}},
+                    "path_role": {"type": "array", "items": {"type": "string"}},
+                },
+                ["query"],
+            ),
+            handler=_tool_search,
+        ),
+        ToolDescriptor(
+            name="rsm_find_related",
+            description=(
+                "Anchor-based expansion around a known file, entity, or qualified name. "
+                "Resolves anchor via entity_id, qualified_name, or source_path (priority: "
+                "entity_id > qualified_name > source_path). Returns compact related items "
+                "classified by relation group (tests, imports, exports, inherits, "
+                "implementation_support) and strength (strong/medium/weak). "
+                "Preferred high-level replacement for rsm_explain_entity and rsm_query_graph. "
+                "Every response includes active_repo metadata. Read-only."
+            ),
+            input_schema=_input_schema(
+                {
+                    "entity_id": {"type": "string"},
+                    "qualified_name": {"type": "string"},
+                    "source_path": {"type": "string"},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                },
+                [],
+            ),
+            handler=_tool_find_related,
+        ),
     ]
     registry = {descriptor.name: descriptor for descriptor in descriptors}
-    # Defensive assertion: registry surface must match the phase 1 contract.
-    if tuple(registry.keys()) != PHASE1_TOOL_NAMES:
+    # Filter to public tools only when requested.
+    if public_only:
+        registry = {name: registry[name] for name in PUBLIC_TOOL_NAMES if name in registry}
+    # Defensive assertion: registry surface must match the expected contract.
+    expected = PUBLIC_TOOL_NAMES if public_only else PHASE1_TOOL_NAMES
+    if tuple(registry.keys()) != expected:
         raise RuntimeError(
-            "MCP tool registry order does not match PHASE1_TOOL_NAMES; "
+            "MCP tool registry order does not match expected names; "
             "this is an internal invariant violation."
         )
     return registry
@@ -1119,19 +1541,24 @@ def _tool_current_index(
     }
 
 
-def build_store_tool_registry() -> dict[str, ToolDescriptor]:
-    """Return the full tool registry for ``--store`` mode.
+def build_store_tool_registry(
+    public_only: bool = False,
+) -> dict[str, ToolDescriptor]:
+    """Return the tool registry for ``--store`` mode.
 
     Includes the three store-management tools (``rsm_list_indexes``,
     ``rsm_select_index``, ``rsm_current_index``) followed by all
     :func:`build_tool_registry` phase-1 tools.
+
+    When ``public_only`` is ``True``, store-management tools are also excluded.
     """
 
     store_descriptors: list[ToolDescriptor] = [
         ToolDescriptor(
             name="rsm_list_indexes",
             description=(
-                "List all repositories registered in the RSM Index Store. "
+                "[INTERNAL/DEBUG - store mode] List all repositories registered in the "
+                "RSM Index Store. "
                 "Returns repo_id, name, repo_root, db_path, and best-effort status "
                 "for each registered index. Use this first to discover available "
                 "repositories, then call rsm_select_index to activate one. Read-only."
@@ -1142,7 +1569,8 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_select_index",
             description=(
-                "Select the active repository index for this MCP session. "
+                "[INTERNAL/DEBUG - store mode] Select the active repository index "
+                "for this MCP session. "
                 "Accepts repo_id (preferred), repo_root (absolute path), or name "
                 "(basename of repo_root; rejected if ambiguous). Validates that the "
                 "selected DB exists. Active selection is session-scoped: it is lost "
@@ -1161,7 +1589,8 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ToolDescriptor(
             name="rsm_current_index",
             description=(
-                "Return the currently active repository index for this MCP session. "
+                "[INTERNAL/DEBUG - store mode] Return the currently active repository "
+                "index for this MCP session. "
                 "If no index has been selected, returns active_repo: null and a "
                 "recoverable no_active_index uncertainty. Read-only."
             ),
@@ -1170,15 +1599,27 @@ def build_store_tool_registry() -> dict[str, ToolDescriptor]:
         ),
     ]
 
-    repo_registry = build_tool_registry()
+    repo_registry = build_tool_registry(public_only=public_only)
     combined = {d.name: d for d in store_descriptors}
+    if public_only:
+        # Also filter out store-management tools in public-only mode.
+        for name in list(combined.keys()):
+            if name in STORE_ONLY_TOOL_NAMES:
+                del combined[name]
     combined.update(repo_registry)
 
-    if tuple(combined.keys()) != STORE_TOOL_NAMES:
-        raise RuntimeError(
-            "Store tool registry order does not match STORE_TOOL_NAMES; "
-            "this is an internal invariant violation."
-        )
+    if public_only:
+        if tuple(combined.keys()) != PUBLIC_TOOL_NAMES:
+            raise RuntimeError(
+                "Store public-only tool registry does not match PUBLIC_TOOL_NAMES; "
+                "this is an internal invariant violation."
+            )
+    else:
+        if tuple(combined.keys()) != STORE_TOOL_NAMES:
+            raise RuntimeError(
+                "Store tool registry order does not match STORE_TOOL_NAMES; "
+                "this is an internal invariant violation."
+            )
     return combined
 
 

@@ -12,6 +12,7 @@ from repo_semantic_memory.cli import build_parser
 from repo_semantic_memory.cli import main as cli_main
 from repo_semantic_memory.mcp import (
     PHASE1_TOOL_NAMES,
+    PUBLIC_TOOL_NAMES,
     STORE_ONLY_TOOL_NAMES,
     STORE_TOOL_NAMES,
     StoreSessionState,
@@ -176,7 +177,7 @@ def test_cli_mcp_serve_store_calls_run_serve_store(
     """CLI --store dispatches to run_serve_store, not run_serve."""
     captured_calls: list[str] = []
 
-    def fake_run_serve_store() -> int:
+    def fake_run_serve_store(expose_all_tools: bool = False) -> int:
         captured_calls.append("run_serve_store")
         return 0
 
@@ -528,7 +529,8 @@ def test_store_tools_unavailable_in_repo_mode(tmp_path: Path) -> None:
 
 
 def test_serve_stdio_store_mode_tools_list(tmp_path: Path) -> None:
-    state = StoreSessionState(store_home=tmp_path / "rsm")
+    """With expose_all_tools, store mode tools/list includes all tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm", expose_all_tools=True)
     responses = _stdio_exchange(
         state,
         [
@@ -543,6 +545,115 @@ def test_serve_stdio_store_mode_tools_list(tmp_path: Path) -> None:
         assert name in tool_names
     for name in PHASE1_TOOL_NAMES:
         assert name in tool_names
+
+
+def test_serve_stdio_store_mode_tools_list_default_only_public(tmp_path: Path) -> None:
+    """Default store mode tools/list exposes only 4 public tools, no store tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+        ],
+    )
+    tools_response = next(r for r in responses if r.get("id") == 2)
+    tool_names = {t["name"] for t in tools_response["result"]["tools"]}
+    assert tool_names == set(PUBLIC_TOOL_NAMES)
+    for name in STORE_ONLY_TOOL_NAMES:
+        assert name not in tool_names
+
+
+def test_serve_stdio_store_mode_default_rejects_legacy_tool(tmp_path: Path) -> None:
+    """Default store mode rejects legacy repo tools at invocation."""
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, _db_a = _make_indexed_repo(tmp_path / "repos", "legacy_repo", store_home)
+
+    state = StoreSessionState(store_home=store_home)
+    # Select a repo first so we're not hitting no_active_index.
+    repo_id = IndexRegistry.repo_id(repo_a)
+    _stdio_exchange(
+        state,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "rsm_select_index", "arguments": {"repo_id": repo_id}},
+            },
+        ],
+    )
+    # Now try to call a legacy tool — should be rejected in default mode.
+    responses = _stdio_exchange(
+        state,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_search_symbols",
+                    "arguments": {"query": "run"},
+                },
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is True
+
+
+def test_serve_stdio_store_mode_expose_all_accepts_legacy_tool(tmp_path: Path) -> None:
+    """Store mode with expose_all_tools accepts legacy tools."""
+    store_home = tmp_path / "rsm"
+    store_home.mkdir()
+    repo_a, _db_a = _make_indexed_repo(tmp_path / "repos", "expose_repo", store_home)
+
+    repo_id = IndexRegistry.repo_id(repo_a)
+    state = StoreSessionState(store_home=store_home, expose_all_tools=True)
+    responses = _stdio_exchange(
+        state,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "rsm_select_index", "arguments": {"repo_id": repo_id}},
+            },
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {
+                    "name": "rsm_search_symbols",
+                    "arguments": {"query": "run"},
+                },
+            },
+        ],
+    )
+    # Response index 2 = id:3, the rsm_search_symbols call.
+    tool_response = next(r for r in responses if r.get("id") == 3)
+    assert tool_response["result"]["isError"] is False
+
+
+def test_serve_stdio_store_mode_default_rejects_store_tool(tmp_path: Path) -> None:
+    """Default store mode rejects rsm_list_indexes (it's a store-only internal tool)."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "rsm_list_indexes", "arguments": {}},
+            },
+        ],
+    )
+    tool_response = next(r for r in responses if r.get("id") == 2)
+    assert tool_response["result"]["isError"] is True
 
 
 def test_serve_stdio_store_mode_initialize_instructions(tmp_path: Path) -> None:
@@ -569,7 +680,7 @@ def test_stdio_smoke_store_workflow(tmp_path: Path) -> None:
     repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "smoketest_repo", store_home)
     repo_id = IndexRegistry.repo_id(repo_a)
 
-    state = StoreSessionState(store_home=store_home)
+    state = StoreSessionState(store_home=store_home, expose_all_tools=True)
     responses = _stdio_exchange(
         state,
         [
