@@ -14,10 +14,12 @@ from repo_semantic_memory.mcp.handlers import (
     handle_validate_patch_context,
 )
 from repo_semantic_memory.mcp.runtime import (
+    DEFAULT_PUBLIC_TOOL_NAMES,
     DEFERRED_TOOL_NAMES,
     LEGACY_TOOL_NAMES,
     PHASE1_TOOL_NAMES,
     PUBLIC_TOOL_NAMES,
+    STORE_NAVIGATION_TOOL_NAMES,
     STORE_ONLY_TOOL_NAMES,
     STORE_TOOL_NAMES,
     ActiveIndex,
@@ -60,6 +62,7 @@ __all__ = [
     "BuildContextPackRequest",
     "BuildContextPackResponse",
     "Citation",
+    "DEFAULT_PUBLIC_TOOL_NAMES",
     "DEFERRED_TOOL_NAMES",
     "ExplainEntityRequest",
     "ExplainEntityResponse",
@@ -71,6 +74,7 @@ __all__ = [
     "McpToolName",
     "PHASE1_TOOL_NAMES",
     "PUBLIC_TOOL_NAMES",
+    "STORE_NAVIGATION_TOOL_NAMES",
     "STORE_ONLY_TOOL_NAMES",
     "STORE_TOOL_NAMES",
     "QueryGraphRequest",
