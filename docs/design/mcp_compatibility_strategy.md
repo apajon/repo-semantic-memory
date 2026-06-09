@@ -5,11 +5,7 @@
 > **Branch:** `feat/benchmark-harness-59`  
 > **Depends on:** `docs/design/mcp_tool_surface_minimization.md` (61.0),  
 > `docs/design/mcp_4_tool_interface.md` (61.1)  
-> **Status:** Design complete. No code changed.  
-> **Correction (61.15 — 2026-06-09):** The final contract is mode-sensitive.
-> Store/nav tools are public in store mode only (not in repo/db mode).
-> This document is preserved as the original migration strategy.
-> See `docs/reviews/mcp_surface_61x_final_report.md` for the final contract.
+> **Status:** Design complete. No code changed.
 
 ## 1. Purpose
 
@@ -124,7 +120,7 @@ These are available in both `--repo` and `--store` sessions.
 
 ### 2.2 Store-mode tools (STORE_ONLY_TOOL_NAMES — 3 tools)
 
-#### rsm_list_indexes
+#### rsm_store_list_indexes
 
 | Property | Value |
 |---|---|
@@ -135,7 +131,7 @@ These are available in both `--repo` and `--store` sessions.
 | **Test coverage** | `test_store_mode.py`: 6 tests (empty store, one index, multiple indexes, registry, determinism). MCP `tools/list` and `tools/call` integration tests |
 | **Current role** | Index discovery |
 
-#### rsm_select_index
+#### rsm_store_select_index
 
 | Property | Value |
 |---|---|
@@ -146,7 +142,7 @@ These are available in both `--repo` and `--store` sessions.
 | **Test coverage** | `test_store_mode.py`: 4+ tests (by repo_id, by name, by repo_root, ambiguous name, missing DB). MCP integration tests |
 | **Current role** | Index activation |
 
-#### rsm_current_index
+#### rsm_store_current_index
 
 | Property | Value |
 |---|---|
@@ -181,9 +177,9 @@ These are available in both `--repo` and `--store` sessions.
 | `rsm_query_graph` | `rsm_find_related` | Fold into `rsm_find_related` expansion | Old tool: remains registered, marked `[DEPRECATED - use rsm_find_related with graph_neighbors]`. New `_tool_find_related` calls `handle_query_graph` for graph_neighbors requests | New `_tool_find_related` dispatches to `handle_explain_entity` or `handle_query_graph` based on anchor/relation_groups | Handler tests unchanged | Medium |
 | `rsm_validate_patch_context` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is. Not folded into any public tool | No change | None | Low |
 | `rsm_get_git_summary` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is | No change | None | Low |
-| `rsm_list_indexes` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is in store mode. Not exposed on the public 4-tool surface | No change | None | Low |
-| `rsm_select_index` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is in store mode | No change | None | Low |
-| `rsm_current_index` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is in store mode | No change | None | Low |
+| `rsm_store_list_indexes` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is in store mode. Not exposed on the public 4-tool surface | No change | None | Low |
+| `rsm_store_select_index` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is in store mode | No change | None | Low |
+| `rsm_store_current_index` | Internal/debug | Keep registered, mark `[INTERNAL]` in description | Remains as-is in store mode | No change | None | Low |
 
 ---
 
@@ -267,7 +263,7 @@ support tool hiding or namespacing. Phase D depends on:
 
 **Likely removal candidates (only after compatibility window):**
 - `rsm_get_git_summary` (low utility, no unique functionality)
-- `rsm_current_index` (redundant with inline `active_repo`)
+- `rsm_store_current_index` (redundant with inline `active_repo`)
 - `rsm_validate_patch_context` (specialized, no clear agent workflow)
 
 **Likely permanent deprecated aliases:**
@@ -310,9 +306,9 @@ These tools remain registered but are clearly marked as internal.
 | `rsm_status` | `[INTERNAL - debug tool]` | Session diagnostics. Staleness/scope info surfaced via `warnings` in new tools |
 | `rsm_validate_patch_context` | `[INTERNAL - debug tool]` | Specialized patch-context check. Not a core agent workflow |
 | `rsm_get_git_summary` | `[INTERNAL - debug tool]` | Git info folded into `active_repo` + staleness |
-| `rsm_list_indexes` | `[INTERNAL - store mode]` | Store-mode infrastructure |
-| `rsm_select_index` | `[INTERNAL - store mode]` | Store-mode infrastructure |
-| `rsm_current_index` | `[INTERNAL - store mode]` | Redundant with inline `active_repo` |
+| `rsm_store_list_indexes` | `[INTERNAL - store mode]` | Store-mode infrastructure |
+| `rsm_store_select_index` | `[INTERNAL - store mode]` | Store-mode infrastructure |
+| `rsm_store_current_index` | `[INTERNAL - store mode]` | Redundant with inline `active_repo` |
 
 ### 5.4 Deprecation description format
 
@@ -392,7 +388,7 @@ This approach:
 
 | Aspect | Detail |
 |---|---|
-| **Behavior** | `rsm_list_indexes`, `rsm_select_index`, `rsm_current_index` remain registered and visible in `tools/list`. Agent instructions mention them for multi-repo discovery |
+| **Behavior** | `rsm_store_list_indexes`, `rsm_store_select_index`, `rsm_store_current_index` remain registered and visible in `tools/list`. Agent instructions mention them for multi-repo discovery |
 | **Pros** | No breaking change. Store mode works without new features. Users can discover repos and select one |
 | **Cons** | 3 extra tools on the surface during migration. Doesn't achieve the 4-tool target in store mode |
 | **Decision** | **Recommended for Phase A–C** |
@@ -418,8 +414,8 @@ This approach:
 ### 7.2 Recommended: Option A → C
 
 **Phase A–C:** Keep store-mode tools public. Agents interact:
-1. `rsm_list_indexes` → discover available repos
-2. `rsm_select_index({name: "my-project"})` → select one
+1. `rsm_store_list_indexes` → discover available repos
+2. `rsm_store_select_index({name: "my-project"})` → select one
 3. `rsm_prepare_context({task: "fix bug"})` → pack built against selected repo
 4. Every response includes `active_repo` → agent can confirm which repo
 
@@ -725,9 +721,9 @@ No doc lint checks are configured for markdown files in this repository.
 - `rsm_query_graph` → deprecated alias (folded into `rsm_find_related`)
 - `rsm_validate_patch_context` → internal/debug
 - `rsm_get_git_summary` → internal/debug
-- `rsm_list_indexes` → internal/debug (store mode)
-- `rsm_select_index` → internal/debug (store mode)
-- `rsm_current_index` → internal/debug (store mode)
+- `rsm_store_list_indexes` → internal/debug (store mode)
+- `rsm_store_select_index` → internal/debug (store mode)
+- `rsm_store_current_index` → internal/debug (store mode)
 
 **Compatibility phases defined:**
 - Phase A: Add new tools as wrappers (tools temporarily grow to 14)

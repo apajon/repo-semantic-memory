@@ -4,11 +4,7 @@
 > **Date:** 2026-06-06  
 > **Branch:** `feat/benchmark-harness-59`  
 > **Depends on:** `docs/design/mcp_tool_surface_minimization.md` (61.0)  
-> **Status:** Design complete. No code changed.  
-> **Correction (61.15 — 2026-06-09):** The final contract is mode-sensitive.
-> This document describes the 4 task tools only (valid for both modes).
-> Store/nav tools are public in store mode (7-tool default).
-> See `docs/reviews/mcp_surface_61x_final_report.md` for the final contract.
+> **Status:** Design complete. No code changed.
 
 ## 1. Purpose
 
@@ -46,7 +42,7 @@ implementation patterns in `src/repo_semantic_memory/mcp/`:
 
 | Principle | Source grounding | Implementation rule |
 |---|---|---|
-| **active_repo in every repo-scoped response** | `rsm_status` includes `repo_root`/`db_path`; `rsm_select_index` returns `active_repo` | Every response from `rsm_search`, `rsm_find_related`, `rsm_prepare_context` includes an `active_repo` block |
+| **active_repo in every repo-scoped response** | `rsm_status` includes `repo_root`/`db_path`; `rsm_store_select_index` returns `active_repo` | Every response from `rsm_search`, `rsm_find_related`, `rsm_prepare_context` includes an `active_repo` block |
 | **Index status/staleness warnings** | `index_status.py` → `detect_stale_from_metadata()`, already surfaced in `rsm_status` and `rsm_build_context_pack` | Staleness and scope warnings appear in `.warnings` of every response, never fatal |
 | **Deterministic ordering** | All current handlers sort results lexicographically or by deterministic score | No random ordering. Sort keys are documented per-tool |
 | **Stable `source_path` fields** | `Entity.source_range.path` uses POSIX separators; `_compact_entity_dict` flattens to `path` | Field name is always `path` (not `source_path`, `file_path`, `filepath`) |
@@ -108,7 +104,7 @@ but results may be incomplete.
   "uncertainties": [
     {
       "code": "NO_ACTIVE_REPO",
-      "message": "No active index selected. Call rsm_list_indexes then rsm_select_index.",
+      "message": "No active index selected. Call rsm_store_list_indexes then rsm_store_select_index.",
       "recoverable": true
     }
   ]
@@ -233,7 +229,7 @@ function in `pack_builder.py`, and same `ResultStore` in `session.py`.
 | Decision | Choice | Rationale |
 |---|---|---|
 | `task` required? | Yes | Task description is essential for ranking. No default query |
-| `repo` parameter? | Not in tool input | `active_repo` is session-scoped (set at server startup or via `rsm_select_index`). `repo` is not per-call |
+| `repo` parameter? | Not in tool input | `active_repo` is session-scoped (set at server startup or via `rsm_store_select_index`). `repo` is not per-call |
 | `include_tests` / `include_docs`? | Not in tool input | Test/doc inclusion is driven by ranking and query intent, not explicit flags. The pack builder already expands support/tests automatically |
 | `include_graph`? | Reserved, not yet | Graph expansion is internal to the pack builder. Exposing it would leak implementation details |
 | Defaults match current? | Yes | `budget_chars=8000`, `profile="agent_standard"`, `detail_level="brief"` match current `rsm_build_context_pack` defaults |
@@ -667,9 +663,9 @@ returned item's path + relation group.
 | `rsm_query_graph` | entity_ids, relation_kinds, direction, max_hops, limit | entity_ids, entities, relations, citations | `rsm_find_related` | `entity_ids[0]` → `anchor.entity_id`, `max_hops=1` → `relation_groups=["graph_neighbors"]`, `max_hops>1` → not supported in v1 (reserved) | Keep as deprecated alias | Multi-hop graph traversal: expose or reserve? → reserve for v1 |
 | `rsm_validate_patch_context` | task, changed_paths, referenced_entity_ids, budget_chars | covered_paths, missing_paths, suggested_context_query | Internal/debug | Not mapped. Logic may be exposed as a `rsm_prepare_context` option later | Keep available, mark `[INTERNAL]` | Is patch validation a core agent workflow? → no, it's specialized |
 | `rsm_get_git_summary` | path | repository_root, branch, head_commit, dirty | Internal/debug | Git info folded into `active_repo` + staleness warnings | Keep available, mark `[INTERNAL]` | Standalone git tool adds no value for agents |
-| `rsm_list_indexes` | None | indexes list, count | Internal/debug | Store-mode infrastructure. Not part of 4-tool public surface | Keep available, mark `[INTERNAL]` | Store mode is a deployment concern |
-| `rsm_select_index` | repo_id, repo_root, name | selected, active_repo | Internal/debug | Store-mode infrastructure | Keep available, mark `[INTERNAL]` | Per-call repo switching: expose or keep session-scoped? → session-scoped |
-| `rsm_current_index` | None | active_repo or null | Internal/debug | Redundant with `active_repo` in every response | Keep available, mark `[INTERNAL]` | Remove after deprecation window |
+| `rsm_store_list_indexes` | None | indexes list, count | Internal/debug | Store-mode infrastructure. Not part of 4-tool public surface | Keep available, mark `[INTERNAL]` | Store mode is a deployment concern |
+| `rsm_store_select_index` | repo_id, repo_root, name | selected, active_repo | Internal/debug | Store-mode infrastructure | Keep available, mark `[INTERNAL]` | Per-call repo switching: expose or keep session-scoped? → session-scoped |
+| `rsm_store_current_index` | None | active_repo or null | Internal/debug | Redundant with `active_repo` in every response | Keep available, mark `[INTERNAL]` | Remove after deprecation window |
 
 ---
 
@@ -716,7 +712,7 @@ Session ends → cache cleared
 
 ### 10.4 Invalidation
 
-When `active_repo` changes (store mode: `rsm_select_index`), all session-scoped
+When `active_repo` changes (store mode: `rsm_store_select_index`), all session-scoped
 IDs (search results and context packs) are invalidated. The agent receives
 `EXPIRED_CONTEXT_PACK` or `INVALID_PAGE_TOKEN` and must re-query.
 

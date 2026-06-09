@@ -1,17 +1,17 @@
 # RSM MCP Usage
 
-> **Status:** Mode-sensitive public surface active (61.15).  
-> **Last updated:** 2026-06-09 (61.15).  
-> **Next step:** 61.13 — corrected contract (must use mode-sensitive contract from 61.15).
+> **Status:** Mode-sensitive surface active (61.16).  
+> **Last updated:** 2026-06-09 (61.16).  
+> **Next step:** 61.13 — Final report.
 
 ## 1. Purpose
 
-RSM's MCP public surface is **mode-sensitive** — the set of tools exposed
-by default depends on the launch mode.
+RSM's MCP surface is **mode-sensitive**:
 
-### Repo/db mode (`rsm mcp serve --repo … --db …`)
+- **Repo/db mode** (`--repo` / `--db`): 4 task tools by default, 11 with `--expose-all-tools`.
+- **Store mode** (`--store`): 7 tools by default (4 task + 3 `rsm_store_*` navigation), 14 with `--expose-all-tools`.
 
-Default `tools/list` exposes **4 task tools**:
+The public task tools are:
 
 | Tool | Role |
 |---|---|
@@ -20,32 +20,28 @@ Default `tools/list` exposes **4 task tools**:
 | `rsm_search` | Broad discovery across indexed files, symbols, docs and tests |
 | `rsm_find_related` | Anchor-based expansion around a known file, entity, or qualified name |
 
-### Store mode (`rsm mcp serve --store`)
+Store navigation tools (store mode only):
 
-Default `tools/list` exposes **7 tools** — 4 task + 3 store/navigation:
+| Tool | Role |
+|---|---|
+| `rsm_store_list_indexes` | List all registered repositories in the RSM Index Store |
+| `rsm_store_select_index` | Select the active repository index for this MCP session |
+| `rsm_store_current_index` | Return the currently active repository index |
 
-| Category | Tool | Role |
-|---|---|---|
-| Task | `rsm_prepare_context` | Build a task-centered ContextPack |
-| Task | `rsm_get_context_page` | Page over a prepared ContextPack |
-| Task | `rsm_search` | Broad discovery across files, symbols, docs, tests |
-| Task | `rsm_find_related` | Anchor-based expansion |
-| Store/nav | `rsm_list_indexes` | List all repositories in the RSM Index Store |
-| Store/nav | `rsm_select_index` | Activate a repository index for this session |
-| Store/nav | `rsm_current_index` | Return the currently active repository index |
-
-### Both modes
-
-With `--expose-all-tools`, legacy/debug tools are added to whichever mode's
-normal public surface. Store/nav tools remain **unavailable** in repo/db mode
-even with `--expose-all-tools`.
+These tools replace an earlier 11-tool surface. The migration is complete:
 
 - ✅ The four task tools are implemented (61.3–61.6).
-- ✅ Old tools are marked `[DEPRECATED]` or `[INTERNAL/DEBUG]` in their MCP descriptions (61.7).
-- ✅ Mode-sensitive default tool filtering is **active** (61.15).
-- ✅ Store/navigation tools are public in store mode, unavailable in repo/db mode (61.15).
-- ✅ `--expose-all-tools` flag enables legacy/debug tools for debugging (61.9).
-- ✅ Compatibility tests validate all modes (61.10).
+- ✅ Legacy tools are marked `[DEPRECATED]` or `[INTERNAL/DEBUG]` (61.7).
+- ✅ Mode-sensitive filtering is **active** — default counts: repo/db=4, store=7 (61.9, 61.16).
+- ✅ `--expose-all-tools` flag enables the full legacy surface for debugging (61.9).
+- ✅ Store navigation tools use the `rsm_store_*` prefix so agents can distinguish store navigation from task-context tools (61.16).
+- ✅ Compatibility tests validate all four mode combinations (61.10, 61.16).
+
+**Default `tools/list`:**
+- Repo/db mode: 4 tools
+- Store mode: 7 tools (4 task + 3 `rsm_store_*`)
+
+Legacy/internal tools require `rsm mcp serve --expose-all-tools`.
 
 ## 2. Recommended Agent Workflow
 
@@ -286,7 +282,7 @@ invocable.
 rsm mcp serve --repo /path/to/repo --db /path/to/repo/.rsm/index.sqlite --expose-all-tools
 ```
 
-With `--expose-all-tools`, `tools/list` returns all tools (7 public + 7 legacy),
+With `--expose-all-tools`, `tools/list` returns all 14 tools (4 public + 10 legacy),
 and all tools are invocable. This is intended for debugging and migration
 compatibility only.
 
@@ -307,15 +303,15 @@ compatibility only.
 | `rsm_validate_patch_context` | `[INTERNAL/DEBUG]` | Patch context sufficiency check |
 | `rsm_get_git_summary` | `[INTERNAL/DEBUG]` | Repository git metadata |
 
-### Public store/navigation tools
+### Store navigation tools (public in store mode only)
 
-| Tool | Status |
-|---|---|
-| `rsm_list_indexes` | Public store/navigation, available by default in `--store` mode |
-| `rsm_select_index` | Public store/navigation, available by default in `--store` mode |
-| `rsm_current_index` | Public store/navigation, available by default in `--store` mode |
+| Tool | Status | Notes |
+|---|---|---|
+| `rsm_store_list_indexes` | Public (store mode) | Index discovery in store mode — always visible in `--store` default surface |
+| `rsm_store_select_index` | Public (store mode) | Index activation in store mode — always visible in `--store` default surface |
+| `rsm_store_current_index` | Public (store mode) | Session state introspection — always visible in `--store` default surface |
 
-### Public task tools (unchanged)
+### Public tools (unchanged)
 
 | Tool | Status |
 |---|---|
@@ -392,7 +388,7 @@ compatibility only.
 
 | Code | Tool(s) | Meaning | Agent action |
 |---|---|---|---|
-| `no_active_index` | All repo tools | No index selected in store mode | Call `rsm_list_indexes` then `rsm_select_index` |
+| `no_active_index` | All repo tools | No index selected in store mode | Call `rsm_store_list_indexes` then `rsm_store_select_index` |
 | `result_set_unknown` | `rsm_get_context_page` | `result_set_id` expired or invalid | Call `rsm_prepare_context` again |
 | `anchor_not_found` | `rsm_find_related` | Anchor entity/path not in index | Check spelling, try a different anchor |
 | `empty_query_tokens` | `rsm_search` | Query has no searchable tokens | Use more specific terms |
@@ -418,15 +414,15 @@ code. A scoped index means some files were excluded from indexing.
 Store mode (`rsm mcp serve --store`) enables multi-repository workspaces with
 one MCP server config. The current state:
 
-- Store/navigation tools (`rsm_list_indexes`, `rsm_select_index`,
-  `rsm_current_index`) are **public in store mode** (7-tool default surface).
-- Store/nav tools are **not available** in repo/db mode (4-tool default surface).
-- `active_repo` is included in every repo-scoped response from the 4 task
+- Store-mode tools (`rsm_store_list_indexes`, `rsm_store_select_index`,
+  `rsm_store_current_index`) are marked `[INTERNAL/DEBUG - store mode]`.
+- Store-mode tools are **hidden by default**. They are visible only
+  with `--expose-all-tools`.
+- `active_repo` is included in every repo-scoped response from the 4 public
   tools (where implemented).
 - Per-call `repo` parameter is **deferred** (not yet implemented).
-- With `--expose-all-tools`, legacy/debug tools are added:
-  - Store mode: 14 tools (7 public + 7 legacy)
-  - Repo/db mode: 11 tools (4 task + 7 legacy)
+- When running in store mode with `--expose-all-tools`, the full 17-tool
+  surface is available (4 public + 3 store + 10 repo).
 
 For `--store` CLI usage, prerequisites, and configuration, see the original
 phase 1 documentation preserved at the end of this document.
@@ -435,15 +431,13 @@ phase 1 documentation preserved at the end of this document.
 
 ## 8. Compatibility Notes
 
-- **The public surface is mode-sensitive.** Repo/db mode exposes 4 task tools.
-  Store mode exposes 4 task + 3 store/nav tools.
-- **Legacy tools are hidden by default** in both modes.
-- **Legacy tools are not removed.** They are available via `--expose-all-tools`.
-- **Store/nav tools are unavailable in repo/db mode** even with `--expose-all-tools`.
+- **Old tools are hidden by default.** `tools/list` returns only 4 public tools.
+- **Old tools are not removed.** They are available via `--expose-all-tools`.
 - **Deprecation is description-based.** `[DEPRECATED]` and `[INTERNAL/DEBUG]`
   prefixes in tool descriptions are visible in expose-all mode.
-- **Compatibility mode is explicit.** `--expose-all-tools` enables legacy/debug tools.
-- **Migration is complete.** The mode-sensitive contract is stable.
+- **Compatibility mode is explicit.** `--expose-all-tools` enables the full
+  14-tool surface.
+- **Migration is complete.** The default 4-tool surface is stable.
 
 ---
 
@@ -465,26 +459,19 @@ phase 1 documentation preserved at the end of this document.
 
 | Task | Description |
 |---|---|
-| **61.9** | ✅ Default surface reduction — `tools/list` returns 4 task tools in repo/db mode |
-| **61.10** | ✅ Public/debug compatibility tests — validate both modes |
-| **61.11** | ✅ Documentation cleanup after surface reduction |
+| **61.9** | ✅ MCP default tool surface reduction — `tools/list` returns 4 public tools by default |
+| **61.10** | ✅ MCP public/debug compatibility tests — validate both modes |
+| **61.11** | ✅ MCP documentation cleanup after surface reduction |
 | **61.12** | MCP test cleanup and consolidation |
-| **61.13** | Final 61.x MCP surface report (must use mode-sensitive contract from 61.15) |
-| **61.14** | ✅ Store navigation tools promoted to store mode default surface |
-| **61.15** | ✅ Mode-sensitive contract: repo/db=4, store=7, expose-all adds legacy |
+| **61.13** | Final 61.x MCP surface report |
 
-The mode-sensitive contract is active and validated:
-
-| Mode | Default | `--expose-all-tools` |
-|---|---|---|
-| `--repo` / `--db` | 4 task tools | 11 tools (4 task + 7 legacy) |
-| `--store` | 7 tools (4 task + 3 store/nav) | 14 tools (4 task + 3 store/nav + 7 legacy) |
+The 4-tool default surface is active and validated.
 
 ---
 
 ## 11. Future Direction
 
-- **Default `tools/list`** exposes 4 task tools in repo/db mode, 7 tools (4 task + 3 store/nav) in store mode.
+- **Default `tools/list`** exposes only 4 public tools.
 - **Legacy/internal tools** are available behind `--expose-all-tools`.
 - **Search/find_related benchmarks** are planned to complement the existing
   ContextPack benchmark harness.

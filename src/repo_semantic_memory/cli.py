@@ -555,8 +555,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Serve all repositories registered in the RSM Index Store. "
-            "No repository is pre-selected; the agent calls rsm_list_indexes then "
-            "rsm_select_index before using repository-specific tools. "
+            "No repository is pre-selected; the agent calls rsm_store_list_indexes then "
+            "rsm_store_select_index before using repository-specific tools. "
             "Mutually exclusive with --repo."
         ),
     )
@@ -576,9 +576,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Expose all legacy, internal, and deprecated MCP tools alongside the "
-            "default 4 public tools (rsm_search, rsm_find_related, "
-            "rsm_prepare_context, rsm_get_context_page). "
-            "Without this flag, only the 4 public tools are listed and invocable."
+            "default public tools. "
+            "Without this flag, repo/db mode exposes 4 task tools and "
+            "store mode exposes 7 tools (4 task + 3 rsm_store_* navigation). "
+            "With this flag, all 11 repo tools or 14 store tools are listed and invocable."
         ),
     )
 
