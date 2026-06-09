@@ -77,8 +77,8 @@ def _initialize_result(session: SessionConfig | StoreSessionState) -> dict[str, 
     if isinstance(session, StoreSessionState):
         instructions = (
             "Store-scoped RSM MCP server. No repository is pre-selected. "
-            "Call rsm_list_indexes to see registered repositories, then "
-            "rsm_select_index to activate one before using repository-specific tools. "
+            "Call rsm_store_list_indexes to see registered repositories, then "
+            "rsm_store_select_index to activate one before using repository-specific tools. "
             "Active selection is session-scoped and not persisted across restarts."
         )
     else:
@@ -265,10 +265,9 @@ def run_serve(repo: str, db: str | None, *, expose_all_tools: bool = False) -> i
     exits with code 2 and a clear ``error:`` line on stderr.
 
     ``expose_all_tools`` controls whether legacy/internal/deprecated tools are
-    listed and invocable.  When ``False`` (the default), only the public task
+    listed and invocable.  When ``False`` (the default), only the 4 public
     tools (rsm_search, rsm_find_related, rsm_prepare_context,
-    rsm_get_context_page) are exposed.  Store navigation tools are not
-    available in ``--repo`` mode.
+    rsm_get_context_page) are exposed.
     """
     resolved_db = db
     db_from_registry = False
@@ -310,8 +309,8 @@ def run_serve_store(store_home_path: str | None = None, *, expose_all_tools: boo
     """CLI entry point for ``rsm mcp serve --store``.
 
     Opens the RSM Index Store and starts the store-scoped stdio loop.
-    No repository is pre-selected; the agent must call ``rsm_list_indexes``
-    and ``rsm_select_index`` before using repository-specific tools.
+    No repository is pre-selected; the agent must call ``rsm_store_list_indexes``
+    and ``rsm_store_select_index`` before using repository-specific tools.
 
     ``store_home_path`` overrides the default RSM_HOME resolution when provided.
     Pass ``None`` to use the standard :func:`resolve_store_home` resolution.

@@ -3,12 +3,7 @@
 > **Task:** 61.0 — Design-only  
 > **Date:** 2026-06-06  
 > **Branch:** `feat/benchmark-harness-59`  
-> **Status:** Design complete. No code changed.  
-> **Correction (61.15 — 2026-06-09):** The final contract is mode-sensitive.
-> Repo/db mode: 4 task tools by default, store/nav unavailable.
-> Store mode: 4 task + 3 store/nav by default.
-> `--expose-all-tools` adds legacy/debug tools to either mode.
-> This document is preserved as the original 61.0 design rationale.
+> **Status:** Design complete. No code changed.
 
 ## 1. Purpose
 
@@ -34,7 +29,7 @@ size as a product-level architecture problem:
   tools applies.
 
 - **Debug capabilities do not belong on the public interface.** Low-level tools
-  like `rsm_status`, `rsm_current_index`, and `rsm_get_git_summary` are useful
+  like `rsm_status`, `rsm_store_current_index`, and `rsm_get_git_summary` are useful
   for debugging and diagnostics, but they should not dominate the tool list that
   coding agents see by default.
 
@@ -155,7 +150,7 @@ These are available in both `--repo` and `--store` sessions.
 
 ### 2.2 Store-mode tools (STORE_ONLY_TOOL_NAMES)
 
-#### rsm_list_indexes
+#### rsm_store_list_indexes
 
 | Property | Value |
 |---|---|
@@ -166,7 +161,7 @@ These are available in both `--repo` and `--store` sessions.
 | **Level** | Low-level (infrastructure) |
 | **Target** | Internal/debug. Store mode itself is a deployment concern, not an agent workflow |
 
-#### rsm_select_index
+#### rsm_store_select_index
 
 | Property | Value |
 |---|---|
@@ -177,7 +172,7 @@ These are available in both `--repo` and `--store` sessions.
 | **Level** | Low-level (infrastructure) |
 | **Target** | Internal/debug |
 
-#### rsm_current_index
+#### rsm_store_current_index
 
 | Property | Value |
 |---|---|
@@ -381,9 +376,9 @@ SHOULD NOT:
 | `rsm_query_graph` | Graph traversal | Fold into `rsm_find_related` | `rsm_find_related` with `max_depth > 1` provides bounded graph expansion. Keep `rsm_query_graph` as deprecated alias | Medium: graph traversal callers need to use `rsm_find_related` with depth | Graph expansion is valuable but should not be a separate tool |
 | `rsm_validate_patch_context` | Patch context check | Internal/debug | Keep available but mark as internal. The validation logic is useful for debugging context sufficiency | Low: specialized tool, rarely used by agents | May be exposed as an advanced mode later |
 | `rsm_get_git_summary` | Git metadata | Internal/debug | Git info folded into `rsm_status` output. Not needed as standalone tool | Low: low agent utility | Repository metadata is infrastructure, not agent workflow |
-| `rsm_list_indexes` | Store index discovery | Internal/debug | Keep for store-mode debugging. Not exposed to coding agents | Low: store mode is a deployment concern | Agents that need multi-repo discovery should use a separate mechanism |
-| `rsm_select_index` | Store index selection | Internal/debug | Same as above | Low | Same rationale |
-| `rsm_current_index` | Active index query | Internal/debug | Same as above. `active_repo` is included in every `rsm_search`/`rsm_find_related`/`rsm_prepare_context` response | Low | Redundant with inline `active_repo` fields |
+| `rsm_store_list_indexes` | Store index discovery | Internal/debug | Keep for store-mode debugging. Not exposed to coding agents | Low: store mode is a deployment concern | Agents that need multi-repo discovery should use a separate mechanism |
+| `rsm_store_select_index` | Store index selection | Internal/debug | Same as above | Low | Same rationale |
+| `rsm_store_current_index` | Active index query | Internal/debug | Same as above. `active_repo` is included in every `rsm_search`/`rsm_find_related`/`rsm_prepare_context` response | Low | Redundant with inline `active_repo` fields |
 
 ---
 
@@ -395,8 +390,8 @@ SHOULD NOT:
 |---|---|---|
 | **Public stable** | The 4-tool surface exposed to coding agents. Semver-protected. Changes require deprecation notices | `rsm_search`, `rsm_find_related`, `rsm_prepare_context`, `rsm_get_context_page` |
 | **Public deprecated** | Current tools kept as aliases during migration, marked deprecated in descriptions | `rsm_search_symbols`, `rsm_explain_entity`, `rsm_build_context_pack`, `rsm_query_graph` |
-| **Internal/debug** | Tools available but not advertised as public. Useful for diagnostics, not for agent workflows | `rsm_status`, `rsm_validate_patch_context`, `rsm_get_git_summary`, `rsm_list_indexes`, `rsm_select_index`, `rsm_current_index` |
-| **Removed later** | Tools that may be removed after a compatibility window if no usage is observed | `rsm_get_git_summary` (redundant with status), `rsm_current_index` (redundant with inline fields) |
+| **Internal/debug** | Tools available but not advertised as public. Useful for diagnostics, not for agent workflows | `rsm_status`, `rsm_validate_patch_context`, `rsm_get_git_summary`, `rsm_store_list_indexes`, `rsm_store_select_index`, `rsm_store_current_index` |
+| **Removed later** | Tools that may be removed after a compatibility window if no usage is observed | `rsm_get_git_summary` (redundant with status), `rsm_store_current_index` (redundant with inline fields) |
 
 ### Important design principle
 
@@ -451,7 +446,7 @@ Until this is addressed (61.7), the deprecation strategy relies on:
 
 ```
 - Remove only if zero observed usage after a documented window
-- Likely candidates: rsm_get_git_summary, rsm_current_index
+- Likely candidates: rsm_get_git_summary, rsm_store_current_index
 - Keep deprecated aliases indefinitely for tools that agents may have scripted
 ```
 
@@ -493,7 +488,7 @@ All target tools should follow these output principles:
 | Error condition | Type | Tool(s) affected | Handling |
 |---|---|---|---|
 | **No active repo** | Recoverable uncertainty | `rsm_search`, `rsm_find_related`, `rsm_prepare_context` | Return `no_active_index` uncertainty with agent instructions |
-| **Unknown repo/index** | Fatal tool error | `rsm_select_index` (store mode only) | Tool-call error with message |
+| **Unknown repo/index** | Fatal tool error | `rsm_store_select_index` (store mode only) | Tool-call error with message |
 | **Stale index** | Warning uncertainty | All repo tools | Return `stale_index` uncertainty, results still served |
 | **Missing index** | Fatal tool error | All repo tools (startup) | Server startup error, not a per-call error |
 | **Invalid page token** | Recoverable uncertainty | `rsm_get_context_page` | Return `result_set_unknown` uncertainty |
@@ -628,7 +623,7 @@ This is the proposed task order. Do not implement now (61.0 is design-only).
    - Re-calling with refined parameters is simpler than session-scoped result sets for discovery.
    - Only `rsm_prepare_context` needs session-scoped result sets (the pack is expensive to recompute).
 
-4. **Should store-mode tools (`rsm_list_indexes`, `rsm_select_index`, `rsm_current_index`) be hidden or kept?**
+4. **Should store-mode tools (`rsm_store_list_indexes`, `rsm_store_select_index`, `rsm_store_current_index`) be hidden or kept?**
    - Current thinking: hidden from default interface, available in debug mode.
    - Store mode is a deployment concern, not a coding-agent workflow.
 
@@ -692,9 +687,9 @@ The file is valid Markdown with no YAML frontmatter requirements.
 - `rsm_query_graph` — graph traversal (→ fold into `rsm_find_related`)
 - `rsm_validate_patch_context` — patch context check (→ internal/debug)
 - `rsm_get_git_summary` — git metadata (→ internal/debug)
-- `rsm_list_indexes` — store index discovery (→ internal/debug)
-- `rsm_select_index` — store index selection (→ internal/debug)
-- `rsm_current_index` — active index query (→ internal/debug)
+- `rsm_store_list_indexes` — store index discovery (→ internal/debug)
+- `rsm_store_select_index` — store index selection (→ internal/debug)
+- `rsm_store_current_index` — active index query (→ internal/debug)
 
 **Target tools defined:**
 - `rsm_search` — broad discovery of files/symbols/docs/tests

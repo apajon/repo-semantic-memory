@@ -11,8 +11,11 @@ import pytest
 from repo_semantic_memory.cli import build_parser
 from repo_semantic_memory.cli import main as cli_main
 from repo_semantic_memory.mcp import (
+    LEGACY_TOOL_NAMES,
     PHASE1_TOOL_NAMES,
+    PUBLIC_TOOL_NAMES,
     STORE_ONLY_TOOL_NAMES,
+    STORE_PUBLIC_TOOL_NAMES,
     STORE_TOOL_NAMES,
     StoreSessionState,
     build_store_tool_registry,
@@ -114,9 +117,9 @@ def _stdio_exchange(
 
 
 def test_store_only_tool_names_are_declared() -> None:
-    assert "rsm_list_indexes" in STORE_ONLY_TOOL_NAMES
-    assert "rsm_select_index" in STORE_ONLY_TOOL_NAMES
-    assert "rsm_current_index" in STORE_ONLY_TOOL_NAMES
+    assert "rsm_store_list_indexes" in STORE_ONLY_TOOL_NAMES
+    assert "rsm_store_select_index" in STORE_ONLY_TOOL_NAMES
+    assert "rsm_store_current_index" in STORE_ONLY_TOOL_NAMES
 
 
 def test_store_tool_names_includes_all_phase1() -> None:
@@ -134,25 +137,6 @@ def test_store_tool_names_order_store_first() -> None:
 def test_build_store_tool_registry_matches_store_tool_names() -> None:
     registry = build_store_tool_registry()
     assert tuple(registry.keys()) == STORE_TOOL_NAMES
-
-
-def test_build_store_tool_registry_public_only_returns_7_tools() -> None:
-    """build_store_tool_registry(public_only=True) returns 7 public tools:
-    4 task + 3 store/navigation."""
-    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
-
-    registry = build_store_tool_registry(public_only=True)
-    assert set(registry.keys()) == set(STORE_PUBLIC_TOOL_NAMES)
-    assert set(registry.keys()) == {
-        "rsm_prepare_context",
-        "rsm_get_context_page",
-        "rsm_search",
-        "rsm_find_related",
-        "rsm_list_indexes",
-        "rsm_select_index",
-        "rsm_current_index",
-    }
-    assert len(registry) == 7
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +192,7 @@ def test_cli_mcp_serve_store_calls_run_serve_store(
 
 
 # ---------------------------------------------------------------------------
-# rsm_list_indexes
+# rsm_store_list_indexes
 # ---------------------------------------------------------------------------
 
 
@@ -216,7 +200,7 @@ def test_list_indexes_empty_store(tmp_path: Path) -> None:
     store_home = tmp_path / "rsm"
     store_home.mkdir()
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_list_indexes", {}, state)
+    result = invoke_tool("rsm_store_list_indexes", {}, state)
     assert result["indexes"] == []
     assert result["count"] == 0
     assert "agent_instructions" in result
@@ -229,7 +213,7 @@ def test_list_indexes_returns_registered_repos(tmp_path: Path) -> None:
     repo_b, db_b = _make_indexed_repo(tmp_path / "repos", "beta", store_home)
 
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_list_indexes", {}, state)
+    result = invoke_tool("rsm_store_list_indexes", {}, state)
 
     assert result["count"] == 2
     indexes = result["indexes"]
@@ -244,7 +228,7 @@ def test_list_indexes_includes_required_fields(tmp_path: Path) -> None:
     repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "myrepo", store_home)
 
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_list_indexes", {}, state)
+    result = invoke_tool("rsm_store_list_indexes", {}, state)
 
     entry = result["indexes"][0]
     assert "repo_id" in entry
@@ -265,7 +249,7 @@ def test_list_indexes_stable_ordering(tmp_path: Path) -> None:
     _make_indexed_repo(tmp_path / "repos", "mango", store_home)
 
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_list_indexes", {}, state)
+    result = invoke_tool("rsm_store_list_indexes", {}, state)
 
     names = [i["name"] for i in result["indexes"]]
     assert names == sorted(names)
@@ -277,8 +261,8 @@ def test_list_indexes_repo_id_is_stable(tmp_path: Path) -> None:
     repo_a, _ = _make_indexed_repo(tmp_path / "repos", "stable_id_test", store_home)
 
     state = StoreSessionState(store_home=store_home)
-    r1 = invoke_tool("rsm_list_indexes", {}, state)
-    r2 = invoke_tool("rsm_list_indexes", {}, state)
+    r1 = invoke_tool("rsm_store_list_indexes", {}, state)
+    r2 = invoke_tool("rsm_store_list_indexes", {}, state)
 
     assert r1["indexes"][0]["repo_id"] == r2["indexes"][0]["repo_id"]
     # The repo_id must match what IndexRegistry computes directly.
@@ -287,7 +271,7 @@ def test_list_indexes_repo_id_is_stable(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# rsm_select_index
+# rsm_store_select_index
 # ---------------------------------------------------------------------------
 
 
@@ -298,7 +282,7 @@ def test_select_index_by_repo_id(tmp_path: Path) -> None:
     repo_id = IndexRegistry.repo_id(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_select_index", {"repo_id": repo_id}, state)
+    result = invoke_tool("rsm_store_select_index", {"repo_id": repo_id}, state)
 
     assert result["selected"]["repo_id"] == repo_id
     assert result["selected"]["name"] == "typer"
@@ -313,7 +297,7 @@ def test_select_index_by_repo_root(tmp_path: Path) -> None:
     repo_a, db_a = _make_indexed_repo(tmp_path / "repos", "richlib", store_home)
 
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_select_index", {"repo_root": str(repo_a)}, state)
+    result = invoke_tool("rsm_store_select_index", {"repo_root": str(repo_a)}, state)
 
     assert result["selected"]["repo_root"] == str(repo_a)
     assert state.active_index is not None
@@ -326,7 +310,7 @@ def test_select_index_by_name_unambiguous(tmp_path: Path) -> None:
     repo_a, _ = _make_indexed_repo(tmp_path / "repos", "uniquename", store_home)
 
     state = StoreSessionState(store_home=store_home)
-    result = invoke_tool("rsm_select_index", {"name": "uniquename"}, state)
+    result = invoke_tool("rsm_store_select_index", {"name": "uniquename"}, state)
 
     assert result["selected"]["name"] == "uniquename"
     assert state.active_index is not None
@@ -342,7 +326,7 @@ def test_select_index_by_name_ambiguous_fails(tmp_path: Path) -> None:
 
     state = StoreSessionState(store_home=store_home)
     with pytest.raises(Exception, match="ambiguous"):
-        invoke_tool("rsm_select_index", {"name": "mylib"}, state)
+        invoke_tool("rsm_store_select_index", {"name": "mylib"}, state)
 
 
 def test_select_index_missing_repo_id_fails(tmp_path: Path) -> None:
@@ -351,7 +335,7 @@ def test_select_index_missing_repo_id_fails(tmp_path: Path) -> None:
 
     state = StoreSessionState(store_home=store_home)
     with pytest.raises(Exception, match="no registered index"):
-        invoke_tool("rsm_select_index", {"repo_id": "deadbeefdeadbeef"}, state)
+        invoke_tool("rsm_store_select_index", {"repo_id": "deadbeefdeadbeef"}, state)
 
 
 def test_select_index_missing_repo_root_fails(tmp_path: Path) -> None:
@@ -360,7 +344,7 @@ def test_select_index_missing_repo_root_fails(tmp_path: Path) -> None:
 
     state = StoreSessionState(store_home=store_home)
     with pytest.raises(Exception, match="no registered index"):
-        invoke_tool("rsm_select_index", {"repo_root": str(tmp_path / "nonexistent")}, state)
+        invoke_tool("rsm_store_select_index", {"repo_root": str(tmp_path / "nonexistent")}, state)
 
 
 def test_select_index_no_selector_fails(tmp_path: Path) -> None:
@@ -369,17 +353,17 @@ def test_select_index_no_selector_fails(tmp_path: Path) -> None:
 
     state = StoreSessionState(store_home=store_home)
     with pytest.raises(ValueError):
-        invoke_tool("rsm_select_index", {}, state)
+        invoke_tool("rsm_store_select_index", {}, state)
 
 
 # ---------------------------------------------------------------------------
-# rsm_current_index
+# rsm_store_current_index
 # ---------------------------------------------------------------------------
 
 
 def test_current_index_no_selection_returns_null_active_repo(tmp_path: Path) -> None:
     state = StoreSessionState(store_home=tmp_path / "rsm")
-    result = invoke_tool("rsm_current_index", {}, state)
+    result = invoke_tool("rsm_store_current_index", {}, state)
 
     assert result["active_repo"] is None
     assert any(u["code"] == "no_active_index" for u in result["uncertainties"])
@@ -393,9 +377,9 @@ def test_current_index_after_selection_returns_active_repo(tmp_path: Path) -> No
     repo_id = IndexRegistry.repo_id(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"repo_id": repo_id}, state)
+    invoke_tool("rsm_store_select_index", {"repo_id": repo_id}, state)
 
-    result = invoke_tool("rsm_current_index", {}, state)
+    result = invoke_tool("rsm_store_current_index", {}, state)
     assert result["active_repo"] is not None
     assert result["active_repo"]["repo_id"] == repo_id
     assert result["active_repo"]["name"] == "selected_repo"
@@ -440,7 +424,7 @@ def test_repo_tool_after_selection_returns_active_repo(tmp_path: Path) -> None:
     repo_id = IndexRegistry.repo_id(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"repo_id": repo_id}, state)
+    invoke_tool("rsm_store_select_index", {"repo_id": repo_id}, state)
 
     result = invoke_tool("rsm_status", {}, state)
     assert "active_repo" in result
@@ -458,13 +442,13 @@ def test_switching_repos_updates_active_repo_in_responses(tmp_path: Path) -> Non
     state = StoreSessionState(store_home=store_home)
 
     # Select alpha
-    invoke_tool("rsm_select_index", {"repo_id": IndexRegistry.repo_id(repo_a)}, state)
+    invoke_tool("rsm_store_select_index", {"repo_id": IndexRegistry.repo_id(repo_a)}, state)
     status_a = invoke_tool("rsm_status", {}, state)
     assert status_a["active_repo"]["name"] == "alpha"
     assert status_a["repo_root"] == str(repo_a)
 
     # Switch to beta
-    invoke_tool("rsm_select_index", {"repo_id": IndexRegistry.repo_id(repo_b)}, state)
+    invoke_tool("rsm_store_select_index", {"repo_id": IndexRegistry.repo_id(repo_b)}, state)
     status_b = invoke_tool("rsm_status", {}, state)
     assert status_b["active_repo"]["name"] == "beta"
     assert status_b["repo_root"] == str(repo_b)
@@ -482,11 +466,11 @@ def test_no_cross_repo_stale_state(tmp_path: Path) -> None:
 
     state = StoreSessionState(store_home=store_home)
 
-    invoke_tool("rsm_select_index", {"repo_id": IndexRegistry.repo_id(repo_a)}, state)
+    invoke_tool("rsm_store_select_index", {"repo_id": IndexRegistry.repo_id(repo_a)}, state)
     assert state.active_index is not None
     assert state.active_index.name == "repoA"
 
-    invoke_tool("rsm_select_index", {"repo_id": IndexRegistry.repo_id(repo_b)}, state)
+    invoke_tool("rsm_store_select_index", {"repo_id": IndexRegistry.repo_id(repo_b)}, state)
     assert state.active_index is not None
     assert state.active_index.name == "repoB"
 
@@ -538,7 +522,7 @@ def test_store_tools_unavailable_in_repo_mode(tmp_path: Path) -> None:
 
     session = SessionConfig(repo_root=repo_root.resolve(), db_path=db_path.resolve())
     with pytest.raises(ToolInvocationError, match="unknown tool"):
-        invoke_tool("rsm_list_indexes", {}, session)
+        invoke_tool("rsm_store_list_indexes", {}, session)
 
 
 # ---------------------------------------------------------------------------
@@ -565,8 +549,10 @@ def test_serve_stdio_store_mode_tools_list(tmp_path: Path) -> None:
         assert name in tool_names
 
 
-def test_serve_stdio_store_mode_tools_list_default_has_7_public_tools(tmp_path: Path) -> None:
-    """Default store mode tools/list exposes 7 public tools: 4 task + 3 store/navigation."""
+def test_serve_stdio_store_mode_tools_list_default_public_and_store(tmp_path: Path) -> None:
+    """Default store mode tools/list exposes 7 tools: 4 task + 3 rsm_store_*."""
+    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
+
     state = StoreSessionState(store_home=tmp_path / "rsm")
     responses = _stdio_exchange(
         state,
@@ -577,11 +563,11 @@ def test_serve_stdio_store_mode_tools_list_default_has_7_public_tools(tmp_path: 
     )
     tools_response = next(r for r in responses if r.get("id") == 2)
     tool_names = {t["name"] for t in tools_response["result"]["tools"]}
-    from repo_semantic_memory.mcp.runtime import STORE_PUBLIC_TOOL_NAMES
-
     assert tool_names == set(STORE_PUBLIC_TOOL_NAMES)
     assert len(tool_names) == 7
     for name in STORE_ONLY_TOOL_NAMES:
+        assert name in tool_names
+    for name in PUBLIC_TOOL_NAMES:
         assert name in tool_names
 
 
@@ -602,7 +588,7 @@ def test_serve_stdio_store_mode_default_rejects_legacy_tool(tmp_path: Path) -> N
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": "rsm_select_index", "arguments": {"repo_id": repo_id}},
+                "params": {"name": "rsm_store_select_index", "arguments": {"repo_id": repo_id}},
             },
         ],
     )
@@ -640,7 +626,7 @@ def test_serve_stdio_store_mode_expose_all_accepts_legacy_tool(tmp_path: Path) -
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": "rsm_select_index", "arguments": {"repo_id": repo_id}},
+                "params": {"name": "rsm_store_select_index", "arguments": {"repo_id": repo_id}},
             },
             {
                 "jsonrpc": "2.0",
@@ -658,8 +644,8 @@ def test_serve_stdio_store_mode_expose_all_accepts_legacy_tool(tmp_path: Path) -
     assert tool_response["result"]["isError"] is False
 
 
-def test_serve_stdio_store_mode_default_accepts_store_navigation_tool(tmp_path: Path) -> None:
-    """Default store mode accepts rsm_list_indexes (a public store/navigation tool)."""
+def test_serve_stdio_store_mode_default_rejects_store_tool(tmp_path: Path) -> None:
+    """Default store mode accepts rsm_store_list_indexes (it's a public store tool)."""
     state = StoreSessionState(store_home=tmp_path / "rsm")
     responses = _stdio_exchange(
         state,
@@ -669,26 +655,7 @@ def test_serve_stdio_store_mode_default_accepts_store_navigation_tool(tmp_path: 
                 "jsonrpc": "2.0",
                 "id": 2,
                 "method": "tools/call",
-                "params": {"name": "rsm_list_indexes", "arguments": {}},
-            },
-        ],
-    )
-    tool_response = next(r for r in responses if r.get("id") == 2)
-    assert tool_response["result"]["isError"] is False
-
-
-def test_serve_stdio_store_mode_default_accepts_current_index(tmp_path: Path) -> None:
-    """Default store mode accepts rsm_current_index (a public store/navigation tool)."""
-    state = StoreSessionState(store_home=tmp_path / "rsm")
-    responses = _stdio_exchange(
-        state,
-        [
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-            {
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": "rsm_current_index", "arguments": {}},
+                "params": {"name": "rsm_store_list_indexes", "arguments": {}},
             },
         ],
     )
@@ -705,7 +672,7 @@ def test_serve_stdio_store_mode_initialize_instructions(tmp_path: Path) -> None:
     )
     init_response = responses[0]
     instructions = init_response["result"]["instructions"]
-    assert "rsm_list_indexes" in instructions or "rsm_select_index" in instructions
+    assert "rsm_store_list_indexes" in instructions or "rsm_store_select_index" in instructions
 
 
 # ---------------------------------------------------------------------------
@@ -730,14 +697,14 @@ def test_stdio_smoke_store_workflow(tmp_path: Path) -> None:
                 "jsonrpc": "2.0",
                 "id": 3,
                 "method": "tools/call",
-                "params": {"name": "rsm_list_indexes", "arguments": {}},
+                "params": {"name": "rsm_store_list_indexes", "arguments": {}},
             },
             {
                 "jsonrpc": "2.0",
                 "id": 4,
                 "method": "tools/call",
                 "params": {
-                    "name": "rsm_select_index",
+                    "name": "rsm_store_select_index",
                     "arguments": {"repo_id": repo_id},
                 },
             },
@@ -758,16 +725,16 @@ def test_stdio_smoke_store_workflow(tmp_path: Path) -> None:
 
     # tools/list includes store tools
     tool_names = {t["name"] for t in by_id[2]["result"]["tools"]}
-    assert "rsm_list_indexes" in tool_names
-    assert "rsm_select_index" in tool_names
-    assert "rsm_current_index" in tool_names
+    assert "rsm_store_list_indexes" in tool_names
+    assert "rsm_store_select_index" in tool_names
+    assert "rsm_store_current_index" in tool_names
 
-    # rsm_list_indexes returns our repo
+    # rsm_store_list_indexes returns our repo
     list_payload = json.loads(by_id[3]["result"]["content"][0]["text"])
     assert list_payload["count"] == 1
     assert list_payload["indexes"][0]["repo_id"] == repo_id
 
-    # rsm_select_index succeeded
+    # rsm_store_select_index succeeded
     select_payload = json.loads(by_id[4]["result"]["content"][0]["text"])
     assert select_payload["selected"]["repo_id"] == repo_id
 
@@ -798,7 +765,7 @@ def test_store_mode_context_pack_db_outside_repo_root(tmp_path: Path) -> None:
     )
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"name": "myapp"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "myapp"}, state)
 
     result = invoke_tool("rsm_build_context_pack", {"task": "module loading"}, state)
 
@@ -819,7 +786,7 @@ def test_store_mode_search_symbols_db_outside_repo_root(tmp_path: Path) -> None:
     assert not db_a.is_relative_to(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"name": "searchrepo"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "searchrepo"}, state)
 
     result = invoke_tool("rsm_search_symbols", {"query": "run"}, state)
 
@@ -837,7 +804,7 @@ def test_store_mode_query_graph_db_outside_repo_root(tmp_path: Path) -> None:
     assert not db_a.is_relative_to(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"name": "graphrepo"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "graphrepo"}, state)
 
     entity_id = "python:module:src.main_graphrepo"
     result = invoke_tool(
@@ -861,7 +828,7 @@ def test_store_mode_explain_entity_db_outside_repo_root(tmp_path: Path) -> None:
     assert not db_a.is_relative_to(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"name": "explainrepo"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "explainrepo"}, state)
 
     entity_id = "python:function:src.main_explainrepo.run_explainrepo"
     result = invoke_tool("rsm_explain_entity", {"entity_id": entity_id}, state)
@@ -881,7 +848,7 @@ def test_store_mode_validate_patch_context_db_outside_repo_root(tmp_path: Path) 
     assert not db_a.is_relative_to(repo_a)
 
     state = StoreSessionState(store_home=store_home)
-    invoke_tool("rsm_select_index", {"name": "patchrepo"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "patchrepo"}, state)
 
     result = invoke_tool(
         "rsm_validate_patch_context",
@@ -908,13 +875,13 @@ def test_store_mode_cross_repo_context_pack(tmp_path: Path) -> None:
     state = StoreSessionState(store_home=store_home)
 
     # First repo
-    invoke_tool("rsm_select_index", {"name": "proja"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "proja"}, state)
     pack_a = invoke_tool("rsm_build_context_pack", {"task": "task for proja"}, state)
     assert pack_a["active_repo"]["name"] == "proja"
     assert pack_a["active_repo"]["db_path"] == str(db_a)
 
     # Switch to second repo
-    invoke_tool("rsm_select_index", {"name": "projb"}, state)
+    invoke_tool("rsm_store_select_index", {"name": "projb"}, state)
     pack_b = invoke_tool("rsm_build_context_pack", {"task": "task for projb"}, state)
     assert pack_b["active_repo"]["name"] == "projb"
     assert pack_b["active_repo"]["db_path"] == str(db_b)
@@ -951,3 +918,326 @@ def test_repo_mode_still_rejects_db_outside_repo_root(tmp_path: Path) -> None:
     # In --repo/explicit_db mode the DB-inside-repo check must still fire.
     with pytest.raises((ValueError, ToolInvocationError)):
         invoke_tool("rsm_search_symbols", {"query": "run"}, session)
+
+
+# ---------------------------------------------------------------------------
+# 61.16 — Mode-sensitive MCP surface contract tests
+# ---------------------------------------------------------------------------
+
+
+def test_store_public_tool_names_count() -> None:
+    """STORE_PUBLIC_TOOL_NAMES has exactly 7 tools (3 store + 4 task)."""
+    assert len(STORE_PUBLIC_TOOL_NAMES) == 7
+    assert STORE_PUBLIC_TOOL_NAMES == STORE_ONLY_TOOL_NAMES + PUBLIC_TOOL_NAMES
+
+
+def test_store_public_tool_names_excludes_legacy() -> None:
+    """STORE_PUBLIC_TOOL_NAMES does not include legacy/debug tools."""
+    for name in LEGACY_TOOL_NAMES:
+        assert name not in STORE_PUBLIC_TOOL_NAMES
+
+
+def test_store_default_tools_list_count(tmp_path: Path) -> None:
+    """Default store mode tools/list returns exactly 7 tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    assert len(names) == 7
+    assert names == set(STORE_PUBLIC_TOOL_NAMES)
+
+
+def test_store_default_tools_list_includes_store_tools(tmp_path: Path) -> None:
+    """Default store mode tools/list includes all 3 rsm_store_* tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    assert "rsm_store_list_indexes" in names
+    assert "rsm_store_select_index" in names
+    assert "rsm_store_current_index" in names
+
+
+def test_store_expose_all_tools_list_count(tmp_path: Path) -> None:
+    """Store mode with expose_all_tools returns exactly 14 tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm", expose_all_tools=True)
+    responses = _stdio_exchange(
+        state,
+        [{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    assert len(names) == 14
+    assert names == set(STORE_TOOL_NAMES)
+    # All public + store + legacy tools present
+    for name in STORE_ONLY_TOOL_NAMES:
+        assert name in names
+    for name in PHASE1_TOOL_NAMES:
+        assert name in names
+
+
+def test_store_default_accepts_store_list_indexes(tmp_path: Path) -> None:
+    """Default store mode accepts rsm_store_list_indexes."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_store_list_indexes", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+
+
+def test_store_default_accepts_store_current_index(tmp_path: Path) -> None:
+    """Default store mode accepts rsm_store_current_index."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_store_current_index", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+
+
+def test_store_default_rejects_legacy_tool(tmp_path: Path) -> None:
+    """Default store mode rejects legacy/debug tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_status", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is True
+    assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
+
+
+def test_store_expose_all_accepts_legacy_tool(tmp_path: Path) -> None:
+    """Store mode with expose_all_tools accepts legacy/debug tools."""
+    state = StoreSessionState(store_home=tmp_path / "rsm", expose_all_tools=True)
+    responses = _stdio_exchange(
+        state,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_status", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is False
+
+
+def test_store_default_excludes_old_tool_names(tmp_path: Path) -> None:
+    """Default store mode tools/list does NOT expose old (unprefixed) store tool names."""
+    state = StoreSessionState(store_home=tmp_path / "rsm")
+    responses = _stdio_exchange(
+        state,
+        [{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    old_names = {"rsm_list_indexes", "rsm_select_index", "rsm_current_index"}
+    assert names.isdisjoint(old_names)
+
+
+def test_store_expose_all_excludes_old_tool_names(tmp_path: Path) -> None:
+    """Even with expose_all_tools, old unprefixed store tool names are NOT exposed."""
+    state = StoreSessionState(store_home=tmp_path / "rsm", expose_all_tools=True)
+    responses = _stdio_exchange(
+        state,
+        [{"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    old_names = {"rsm_list_indexes", "rsm_select_index", "rsm_current_index"}
+    assert names.isdisjoint(old_names)
+
+
+def test_store_tool_markers_are_clean() -> None:
+    """rsm_store_* tools have no deprecation/internal markers."""
+    from repo_semantic_memory.mcp import build_store_tool_registry
+
+    registry = build_store_tool_registry()
+    for name in STORE_ONLY_TOOL_NAMES:
+        desc = registry[name].description
+        assert not desc.startswith("[DEPRECATED"), f"{name} should not be deprecated"
+        assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
+
+
+def test_repo_default_tools_list_excludes_store_tools(tmp_path: Path) -> None:
+    """Repo/db mode default tools/list does NOT expose rsm_store_* tools."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    db_path = repo_root / ".rsm" / "index.sqlite"
+    db_path.parent.mkdir()
+    s = SQLiteStore(db_path)
+    try:
+        s.initialize()
+    finally:
+        s.close()
+
+    from repo_semantic_memory.mcp import SessionConfig
+
+    session = SessionConfig(repo_root=repo_root.resolve(), db_path=db_path.resolve())
+    responses = _stdio_exchange_repo(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        ],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    assert len(names) == 4
+    assert names == set(PUBLIC_TOOL_NAMES)
+    for name in STORE_ONLY_TOOL_NAMES:
+        assert name not in names
+
+
+def test_repo_default_rejects_store_tool(tmp_path: Path) -> None:
+    """Repo/db default mode rejects rsm_store_* tools at invocation."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    db_path = repo_root / ".rsm" / "index.sqlite"
+    db_path.parent.mkdir()
+    s = SQLiteStore(db_path)
+    try:
+        s.initialize()
+    finally:
+        s.close()
+
+    from repo_semantic_memory.mcp import SessionConfig
+
+    session = SessionConfig(repo_root=repo_root.resolve(), db_path=db_path.resolve())
+    responses = _stdio_exchange_repo(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_store_list_indexes", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is True
+    assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
+
+
+def test_repo_expose_all_excludes_store_tools(tmp_path: Path) -> None:
+    """Repo/db mode with expose_all_tools does NOT expose rsm_store_* tools."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    db_path = repo_root / ".rsm" / "index.sqlite"
+    db_path.parent.mkdir()
+    s = SQLiteStore(db_path)
+    try:
+        s.initialize()
+    finally:
+        s.close()
+
+    from repo_semantic_memory.mcp import SessionConfig
+
+    session = SessionConfig(
+        repo_root=repo_root.resolve(), db_path=db_path.resolve(), expose_all_tools=True
+    )
+    responses = _stdio_exchange_repo(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        ],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    assert len(names) == 11
+    for name in STORE_ONLY_TOOL_NAMES:
+        assert name not in names
+
+
+def test_repo_expose_all_rejects_store_tool(tmp_path: Path) -> None:
+    """Repo/db mode with expose_all_tools rejects rsm_store_* tools at invocation."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    db_path = repo_root / ".rsm" / "index.sqlite"
+    db_path.parent.mkdir()
+    s = SQLiteStore(db_path)
+    try:
+        s.initialize()
+    finally:
+        s.close()
+
+    from repo_semantic_memory.mcp import SessionConfig
+
+    session = SessionConfig(
+        repo_root=repo_root.resolve(), db_path=db_path.resolve(), expose_all_tools=True
+    )
+    responses = _stdio_exchange_repo(
+        session,
+        [
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "rsm_store_list_indexes", "arguments": {}},
+            },
+        ],
+    )
+    assert responses[0]["result"]["isError"] is True
+    assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
+
+
+def test_repo_default_tools_list_count(tmp_path: Path) -> None:
+    """Repo/db default tools/list returns exactly 4 tools."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    db_path = repo_root / ".rsm" / "index.sqlite"
+    db_path.parent.mkdir()
+    s = SQLiteStore(db_path)
+    try:
+        s.initialize()
+    finally:
+        s.close()
+
+    from repo_semantic_memory.mcp import SessionConfig
+
+    session = SessionConfig(repo_root=repo_root.resolve(), db_path=db_path.resolve())
+    responses = _stdio_exchange_repo(
+        session,
+        [
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+        ],
+    )
+    names = {t["name"] for t in responses[0]["result"]["tools"]}
+    assert len(names) == 4
+    assert names == set(PUBLIC_TOOL_NAMES)
+
+
+def _stdio_exchange_repo(session, messages: list[dict]) -> list[dict]:
+    """Run a list of JSON-RPC messages through serve_stdio for a SessionConfig."""
+    stdin = io.StringIO("\n".join(json.dumps(m) for m in messages) + "\n")
+    stdout = io.StringIO()
+    from repo_semantic_memory.mcp.server import serve_stdio
+
+    serve_stdio(session, stdin=stdin, stdout=stdout)
+    responses = []
+    for line in stdout.getvalue().splitlines():
+        line = line.strip()
+        if line:
+            responses.append(json.loads(line))
+    return responses

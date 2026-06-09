@@ -271,8 +271,8 @@ def test_tool_registry_names_match_full_surface() -> None:
     }
 
 
-def test_tool_registry_repo_mode_public_only_returns_4_task_tools() -> None:
-    """build_tool_registry(public_only=True) returns the 4 public task tools (repo mode)."""
+def test_tool_registry_public_only_returns_4_tools() -> None:
+    """build_tool_registry(public_only=True) returns exactly the 4 public tools."""
     from repo_semantic_memory.mcp.runtime import PUBLIC_TOOL_NAMES
 
     registry = build_tool_registry(public_only=True)
@@ -527,89 +527,6 @@ def test_stdio_unknown_tool_returns_tool_error(indexed_repo: tuple[Path, Path]) 
     )
     assert responses[0]["result"]["isError"] is True
     assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
-
-
-# ---------------------------------------------------------------------------
-# Mode-sensitive surface: repo/db mode rejects store/nav tools
-# ---------------------------------------------------------------------------
-
-
-def test_stdio_repo_mode_rejects_store_nav_tools(
-    indexed_repo: tuple[Path, Path],
-) -> None:
-    """Repo/db mode rejects rsm_list_indexes, rsm_select_index, rsm_current_index.
-
-    Store/navigation tools are only public in --store mode.
-    """
-    from repo_semantic_memory.mcp.runtime import STORE_NAVIGATION_TOOL_NAMES
-
-    repo, db = indexed_repo
-    session = validate_session(repo, db)
-    for tool_name in STORE_NAVIGATION_TOOL_NAMES:
-        responses = _drive(
-            session,
-            [
-                {
-                    "jsonrpc": "2.0",
-                    "id": 50,
-                    "method": "tools/call",
-                    "params": {"name": tool_name, "arguments": {}},
-                },
-            ],
-        )
-        assert responses[0]["result"]["isError"] is True, f"Repo/db mode should reject {tool_name}"
-        assert "unknown tool" in responses[0]["result"]["content"][0]["text"]
-
-
-def test_stdio_repo_mode_tools_list_excludes_store_nav(
-    indexed_repo: tuple[Path, Path],
-) -> None:
-    """Repo/db mode default tools/list has exactly 4 task tools, no store/nav."""
-    from repo_semantic_memory.mcp.runtime import STORE_NAVIGATION_TOOL_NAMES
-
-    repo, db = indexed_repo
-    session = validate_session(repo, db)
-    responses = _drive(
-        session,
-        [
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-        ],
-    )
-    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
-    for store_tool in STORE_NAVIGATION_TOOL_NAMES:
-        assert store_tool not in names, f"Repo/db mode tools/list should not include {store_tool}"
-    assert len(names) == 4
-
-
-def test_stdio_repo_mode_expose_all_excludes_store_nav(
-    indexed_repo: tuple[Path, Path],
-) -> None:
-    """Repo/db expose-all mode still excludes store/nav tools.
-
-    Store/nav tools are not in PHASE1_TOOL_NAMES (the repo-mode full surface).
-    They are only available in --store mode.
-    """
-    from repo_semantic_memory.mcp.runtime import STORE_NAVIGATION_TOOL_NAMES
-
-    repo, db = indexed_repo
-    session = validate_session(repo, db, expose_all_tools=True)
-    responses = _drive(
-        session,
-        [
-            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-            {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
-        ],
-    )
-    names = [tool["name"] for tool in responses[1]["result"]["tools"]]
-    for store_tool in STORE_NAVIGATION_TOOL_NAMES:
-        assert store_tool not in names, (
-            f"Repo/db expose-all tools/list should not include {store_tool}"
-        )
-    # Expose-all repo mode → 11 tools (4 task + 7 legacy)
-    assert len(names) == 11
 
 
 def test_stdio_malformed_json_returns_parse_error(indexed_repo: tuple[Path, Path]) -> None:
@@ -1930,29 +1847,29 @@ def test_tool_descriptions_have_correct_internal_markers() -> None:
 
 
 def test_public_tools_have_no_deprecation_markers() -> None:
-    """The 7 public tools should NOT have any deprecation/internal markers."""
+    """The 4 public tools should NOT have any deprecation/internal markers."""
     registry = build_tool_registry()
-    public_task_tools = [
+    public_tools = [
         "rsm_get_context_page",
         "rsm_prepare_context",
         "rsm_search",
         "rsm_find_related",
     ]
-    for name in public_task_tools:
+    for name in public_tools:
         desc = registry[name].description
         assert not desc.startswith("[DEPRECATED"), f"{name} should not be deprecated"
         assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
 
 
-def test_store_navigation_tools_have_no_internal_markers() -> None:
-    """Store navigation tools are public and should NOT have [INTERNAL/DEBUG] prefix."""
+def test_store_tools_are_public_not_internal() -> None:
+    """Store-mode tools do NOT have [INTERNAL/DEBUG] prefix — they are public in store mode."""
     from repo_semantic_memory.mcp import build_store_tool_registry
 
     registry = build_store_tool_registry()
-    for name in ("rsm_list_indexes", "rsm_select_index", "rsm_current_index"):
+    for name in ("rsm_store_list_indexes", "rsm_store_select_index", "rsm_store_current_index"):
         desc = registry[name].description
-        assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
         assert not desc.startswith("[DEPRECATED"), f"{name} should not be deprecated"
+        assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
 
 
 def test_deprecated_tools_still_invocable(
@@ -2109,10 +2026,10 @@ def test_stdio_expose_all_legacy_tool_is_callable(
     assert responses[0]["result"]["isError"] is False
 
 
-def test_stdio_default_rejects_legacy_status_tool(
+def test_stdio_default_rejects_store_like_legacy(
     indexed_repo: tuple[Path, Path],
 ) -> None:
-    """Default repo mode rejects rsm_status (a legacy/internal tool) at invocation."""
+    """Default mode rejects rsm_status (internal tool) at invocation."""
     repo, db = indexed_repo
     session = validate_session(repo, db)
     responses = _drive(

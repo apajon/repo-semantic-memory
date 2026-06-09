@@ -35,26 +35,13 @@ from repo_semantic_memory.mcp.tools import (
 from repo_semantic_memory.store import SQLiteStore
 from repo_semantic_memory.version import get_version_info
 
-# Public task tools exposed by default (4-tool task surface).
+# Public tool names exposed by default in the minimised 4-tool surface.
 PUBLIC_TOOL_NAMES: tuple[str, ...] = (
     "rsm_prepare_context",
     "rsm_get_context_page",
     "rsm_search",
     "rsm_find_related",
 )
-
-# Public store/navigation tools exposed by default in --store mode.
-# These are normal navigation/session tools, not legacy/debug tools.
-STORE_NAVIGATION_TOOL_NAMES: tuple[str, ...] = (
-    "rsm_list_indexes",
-    "rsm_select_index",
-    "rsm_current_index",
-)
-
-# Public tools for --store mode (default): 4 task tools + 3 store/navigation tools.
-# In --repo/--db mode, only PUBLIC_TOOL_NAMES (4 task tools) are public.
-# The public surface is mode-sensitive, not a single global default.
-STORE_PUBLIC_TOOL_NAMES: tuple[str, ...] = PUBLIC_TOOL_NAMES + STORE_NAVIGATION_TOOL_NAMES
 
 # Legacy, internal, and deprecated tools available only with --expose-all-tools.
 LEGACY_TOOL_NAMES: tuple[str, ...] = (
@@ -84,13 +71,18 @@ PHASE1_TOOL_NAMES: tuple[str, ...] = (
 
 # Store-mode-only tool names exposed exclusively in ``--store`` sessions.
 STORE_ONLY_TOOL_NAMES: tuple[str, ...] = (
-    "rsm_list_indexes",
-    "rsm_select_index",
-    "rsm_current_index",
+    "rsm_store_list_indexes",
+    "rsm_store_select_index",
+    "rsm_store_current_index",
 )
 
-# All tool names available in ``--store`` mode: store tools first, then repo tools.
+# All tool names available in ``--store`` mode with ``--expose-all-tools``:
+# store tools first, then repo tools.
 STORE_TOOL_NAMES: tuple[str, ...] = STORE_ONLY_TOOL_NAMES + PHASE1_TOOL_NAMES
+
+# Public tool names exposed by default in ``--store`` mode:
+# 3 store/navigation tools + 4 task tools (store-first, consistent with STORE_TOOL_NAMES).
+STORE_PUBLIC_TOOL_NAMES: tuple[str, ...] = STORE_ONLY_TOOL_NAMES + PUBLIC_TOOL_NAMES
 
 # Tools explicitly deferred in phase 1. Listed only so safety tests can assert
 # they are NOT registered.
@@ -112,7 +104,7 @@ class ActiveIndex:
     """The currently selected index in a store-mode MCP session.
 
     Holds the resolved, validated state for the active repository.  Frozen so
-    that the object returned by :func:`rsm_current_index` can be compared by
+    that the object returned by :func:`rsm_store_current_index` can be compared by
     value without copies.
     """
 
@@ -143,7 +135,7 @@ class StoreSessionState:
     """Mutable per-session state for ``--store`` mode.
 
     One instance lives for the lifetime of a single ``serve_stdio`` call.
-    ``active_index`` starts as ``None`` and is updated by ``rsm_select_index``.
+    ``active_index`` starts as ``None`` and is updated by ``rsm_store_select_index``.
     No disk writes; no persistence across MCP restarts.
 
     ``expose_all_tools`` controls whether legacy/internal/deprecated tools
@@ -1366,20 +1358,23 @@ def _no_active_index_response() -> dict[str, Any]:
         "uncertainties": [
             {
                 "code": "no_active_index",
-                "message": ("Call rsm_list_indexes then rsm_select_index before repository tools."),
+                "message": (
+                    "Call rsm_store_list_indexes then rsm_store_select_index "
+                    "before repository tools."
+                ),
                 "recoverable": True,
             }
         ],
         "agent_instructions": [
-            "Use rsm_list_indexes to see registered repositories.",
-            "Call rsm_select_index before repository-specific tools.",
+            "Use rsm_store_list_indexes to see registered repositories.",
+            "Call rsm_store_select_index before repository-specific tools.",
             "Check active_repo in each response before using paths.",
             "Do not assume paths from one repository apply to another.",
         ],
     }
 
 
-def _tool_list_indexes(
+def _tool_store_list_indexes(
     args: Mapping[str, Any], session: StoreSessionState, store: ResultStore
 ) -> dict[str, Any]:
     """List all registered indexes from the RSM Index Store."""
@@ -1436,15 +1431,15 @@ def _tool_list_indexes(
         "indexes": indexes,
         "count": len(indexes),
         "agent_instructions": [
-            "Use rsm_list_indexes to see registered repositories.",
-            "Call rsm_select_index before repository-specific tools.",
+            "Use rsm_store_list_indexes to see registered repositories.",
+            "Call rsm_store_select_index before repository-specific tools.",
             "Check active_repo in each response before using paths.",
             "Do not assume paths from one repository apply to another.",
         ],
     }
 
 
-def _tool_select_index(
+def _tool_store_select_index(
     args: Mapping[str, Any], session: StoreSessionState, store: ResultStore
 ) -> dict[str, Any]:
     """Select the active index for this MCP session by repo_id, repo_root, or name."""
@@ -1522,7 +1517,7 @@ def _tool_select_index(
     }
 
 
-def _tool_current_index(
+def _tool_store_current_index(
     args: Mapping[str, Any], session: StoreSessionState, store: ResultStore
 ) -> dict[str, Any]:
     """Return the active index for this MCP session, or a recoverable uncertainty."""
@@ -1536,15 +1531,15 @@ def _tool_current_index(
                 {
                     "code": "no_active_index",
                     "message": (
-                        "No active index selected. Call rsm_list_indexes then "
-                        "rsm_select_index before repository tools."
+                        "No active index selected. Call rsm_store_list_indexes then "
+                        "rsm_store_select_index before repository tools."
                     ),
                     "recoverable": True,
                 }
             ],
             "agent_instructions": [
-                "Use rsm_list_indexes to see registered repositories.",
-                "Call rsm_select_index before repository-specific tools.",
+                "Use rsm_store_list_indexes to see registered repositories.",
+                "Call rsm_store_select_index before repository-specific tools.",
             ],
         }
 
@@ -1559,27 +1554,29 @@ def build_store_tool_registry(
 ) -> dict[str, ToolDescriptor]:
     """Return the tool registry for ``--store`` mode.
 
-    Includes the three store-management tools (``rsm_list_indexes``,
-    ``rsm_select_index``, ``rsm_current_index``) followed by all
+    Includes the three store-management tools (``rsm_store_list_indexes``,
+    ``rsm_store_select_index``, ``rsm_store_current_index``) followed by all
     :func:`build_tool_registry` phase-1 tools.
 
-    When ``public_only`` is ``True``, store-management tools are also excluded.
+    When ``public_only`` is ``True``, store-management tools are kept
+    (they are public in store mode) but legacy/debug repo tools are excluded.
     """
 
     store_descriptors: list[ToolDescriptor] = [
         ToolDescriptor(
-            name="rsm_list_indexes",
+            name="rsm_store_list_indexes",
             description=(
                 "List all repositories registered in the RSM Index Store. "
                 "Returns repo_id, name, repo_root, db_path, and best-effort status "
                 "for each registered index. Use this first to discover available "
-                "repositories, then call rsm_select_index to activate one. Read-only."
+                "repositories, then call rsm_store_select_index to activate one. "
+                "Read-only."
             ),
             input_schema=_input_schema({}, []),
-            handler=_tool_list_indexes,
+            handler=_tool_store_list_indexes,
         ),
         ToolDescriptor(
-            name="rsm_select_index",
+            name="rsm_store_select_index",
             description=(
                 "Select the active repository index for this MCP session. "
                 "Accepts repo_id (preferred), repo_root (absolute path), or name "
@@ -1595,36 +1592,38 @@ def build_store_tool_registry(
                 },
                 [],
             ),
-            handler=_tool_select_index,
+            handler=_tool_store_select_index,
         ),
         ToolDescriptor(
-            name="rsm_current_index",
+            name="rsm_store_current_index",
             description=(
                 "Return the currently active repository index for this MCP session. "
                 "If no index has been selected, returns active_repo: null and a "
                 "recoverable no_active_index uncertainty. Read-only."
             ),
             input_schema=_input_schema({}, []),
-            handler=_tool_current_index,
+            handler=_tool_store_current_index,
         ),
     ]
 
     repo_registry = build_tool_registry(public_only=public_only)
+    # Store tools first (consistent with STORE_PUBLIC_TOOL_NAMES / STORE_TOOL_NAMES),
+    # then repo tools.
     combined = {d.name: d for d in store_descriptors}
-    # Store navigation tools are public in --store mode (not in --repo/--db mode).
-    # Do not remove them in public_only mode.
+    # Store tools are public in store mode by default — never filter them out.
+    # The repo_registry already filters to public-only when requested.
     combined.update(repo_registry)
 
     if public_only:
-        if set(combined.keys()) != set(STORE_PUBLIC_TOOL_NAMES):
+        if tuple(combined.keys()) != STORE_PUBLIC_TOOL_NAMES:
             raise RuntimeError(
-                "Store public tool registry does not match STORE_PUBLIC_TOOL_NAMES; "
+                "Store public-only tool registry does not match STORE_PUBLIC_TOOL_NAMES; "
                 "this is an internal invariant violation."
             )
     else:
-        if set(combined.keys()) != set(STORE_TOOL_NAMES):
+        if tuple(combined.keys()) != STORE_TOOL_NAMES:
             raise RuntimeError(
-                "Store tool registry does not match STORE_TOOL_NAMES; "
+                "Store tool registry order does not match STORE_TOOL_NAMES; "
                 "this is an internal invariant violation."
             )
     return combined
