@@ -5,7 +5,8 @@
 > **Branch:** `feat/benchmark-harness-59`  
 > **Depends on:** `docs/design/mcp_tool_surface_minimization.md` (61.0),  
 > `docs/design/mcp_4_tool_interface.md` (61.1)  
-> **Status:** Design complete. No code changed.
+> **Status:** Design complete. No code changed.  
+> **Correction (61.14 — 2026-06-09):** The target surface was revised. Store/navigation tools are now public (not internal/debug). The default surface is 7 tools: 4 task + 3 store/nav. This document is preserved as the original migration strategy. See `docs/reviews/mcp_surface_61x_final_report.md` for the final corrected contract.
 
 ## 1. Purpose
 

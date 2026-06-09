@@ -4,7 +4,8 @@
 > **Date:** 2026-06-06  
 > **Branch:** `feat/benchmark-harness-59`  
 > **Depends on:** `docs/design/mcp_tool_surface_minimization.md` (61.0)  
-> **Status:** Design complete. No code changed.
+> **Status:** Design complete. No code changed.  
+> **Correction (61.14 — 2026-06-09):** The target surface was revised to 7 tools: 4 task + 3 store/navigation. This document describes the 4 task tools only. Store/navigation tools are documented in `docs/usage/mcp.md`. See `docs/reviews/mcp_surface_61x_final_report.md` for the final corrected contract.
 
 ## 1. Purpose
 
