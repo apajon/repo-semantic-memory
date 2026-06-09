@@ -271,8 +271,8 @@ def test_tool_registry_names_match_full_surface() -> None:
     }
 
 
-def test_tool_registry_public_only_returns_4_tools() -> None:
-    """build_tool_registry(public_only=True) returns exactly the 4 public tools."""
+def test_tool_registry_repo_mode_public_only_returns_4_task_tools() -> None:
+    """build_tool_registry(public_only=True) returns the 4 public task tools (repo mode)."""
     from repo_semantic_memory.mcp.runtime import PUBLIC_TOOL_NAMES
 
     registry = build_tool_registry(public_only=True)
@@ -1847,28 +1847,29 @@ def test_tool_descriptions_have_correct_internal_markers() -> None:
 
 
 def test_public_tools_have_no_deprecation_markers() -> None:
-    """The 4 public tools should NOT have any deprecation/internal markers."""
+    """The 7 public tools should NOT have any deprecation/internal markers."""
     registry = build_tool_registry()
-    public_tools = [
+    public_task_tools = [
         "rsm_get_context_page",
         "rsm_prepare_context",
         "rsm_search",
         "rsm_find_related",
     ]
-    for name in public_tools:
+    for name in public_task_tools:
         desc = registry[name].description
         assert not desc.startswith("[DEPRECATED"), f"{name} should not be deprecated"
         assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
 
 
-def test_store_tools_have_internal_markers() -> None:
-    """Store-mode tools have [INTERNAL/DEBUG - store mode] prefix."""
+def test_store_navigation_tools_have_no_internal_markers() -> None:
+    """Store navigation tools are public and should NOT have [INTERNAL/DEBUG] prefix."""
     from repo_semantic_memory.mcp import build_store_tool_registry
 
     registry = build_store_tool_registry()
-    assert registry["rsm_list_indexes"].description.startswith("[INTERNAL/DEBUG - store mode]")
-    assert registry["rsm_select_index"].description.startswith("[INTERNAL/DEBUG - store mode]")
-    assert registry["rsm_current_index"].description.startswith("[INTERNAL/DEBUG - store mode]")
+    for name in ("rsm_list_indexes", "rsm_select_index", "rsm_current_index"):
+        desc = registry[name].description
+        assert not desc.startswith("[INTERNAL"), f"{name} should not be internal"
+        assert not desc.startswith("[DEPRECATED"), f"{name} should not be deprecated"
 
 
 def test_deprecated_tools_still_invocable(
@@ -2025,10 +2026,10 @@ def test_stdio_expose_all_legacy_tool_is_callable(
     assert responses[0]["result"]["isError"] is False
 
 
-def test_stdio_default_rejects_store_like_legacy(
+def test_stdio_default_rejects_legacy_status_tool(
     indexed_repo: tuple[Path, Path],
 ) -> None:
-    """Default mode rejects rsm_status (internal tool) at invocation."""
+    """Default repo mode rejects rsm_status (a legacy/internal tool) at invocation."""
     repo, db = indexed_repo
     session = validate_session(repo, db)
     responses = _drive(
