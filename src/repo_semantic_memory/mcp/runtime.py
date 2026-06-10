@@ -120,14 +120,21 @@ class ActiveIndex:
     db_path: Path
     """Resolved absolute path to the SQLite index database."""
 
+    readiness: ReadinessInfo | None = None
+    """Index readiness/freshness summary, computed lazily on select."""
+
     def as_dict(self) -> dict[str, Any]:
         """Return a JSON-serialisable dict with string path values."""
-        return {
+        result: dict[str, Any] = {
             "repo_id": self.repo_id,
             "name": self.name,
             "repo_root": self.repo_root.as_posix(),
             "db_path": self.db_path.as_posix(),
         }
+        if self.readiness is not None:
+            result["index_status"] = self.readiness.index_status
+            result["index_status_reason"] = self.readiness.index_status_reason
+        return result
 
 
 @dataclass
@@ -148,6 +155,69 @@ class StoreSessionState:
 
 
 @dataclass(frozen=True)
+class ReadinessInfo:
+    """Lightweight readiness/freshness summary for one index.
+
+    Derived from :class:`IndexStatusReport` but flattened to a simple
+    JSON-safe shape that can be embedded in MCP responses without forcing
+    every consumer to depend on ``index_status`` internals.
+    """
+
+    index_status: str
+    """One of ``fresh``, ``stale``, ``maybe_stale``, ``missing``, ``unknown``."""
+
+    index_status_reason: str
+    """Human-readable reason code (e.g. ``ok``, ``git_head_changed``, ``not_git_repo``)."""
+
+    indexed_at: str | None = None
+    """ISO-8601 timestamp of the last successful index, if available."""
+
+    indexed_git_head: str | None = None
+    """Git commit SHA at index time, if available."""
+
+    current_git_head: str | None = None
+    """Git commit SHA of the working tree, if available."""
+
+    working_tree_dirty: bool | None = None
+    """Whether the working tree has uncommitted changes, if detectable."""
+
+
+def compute_readiness(
+    repo_root: Path,
+    db_path: Path,
+    index_mode: Literal["explicit_db", "store"],
+) -> ReadinessInfo:
+    """Compute index readiness from on-disk metadata.
+
+    Opens the SQLite DB to read metadata.  Returns a minimal
+    :class:`ReadinessInfo` in all cases (never raises for missing DB or
+    git errors).
+    """
+    from repo_semantic_memory.index_status import detect_index_status  # noqa: PLC0415
+
+    try:
+        report = detect_index_status(
+            repo_root=repo_root,
+            db_path=db_path if db_path.exists() else None,
+            index_mode=index_mode,
+        )
+    except Exception:  # noqa: BLE001 — readiness must never break the server
+        return ReadinessInfo(
+            index_status="unknown",
+            index_status_reason="detection_error",
+        )
+
+    return ReadinessInfo(
+        index_status=report.index_status.value,
+        index_status_reason=report.index_status_reason,
+        indexed_at=report.indexed_at,
+        indexed_git_head=report.indexed_git_head,
+        current_git_head=report.current_git_head,
+        working_tree_dirty=report.working_tree_dirty,
+    )
+
+
+@dataclass(frozen=True)
 class SessionConfig:
     """Validated repo/db configuration for one MCP server session."""
 
@@ -155,6 +225,7 @@ class SessionConfig:
     db_path: Path
     index_mode: Literal["explicit_db", "store"] = "explicit_db"
     expose_all_tools: bool = False
+    readiness: ReadinessInfo | None = None
 
 
 @dataclass(frozen=True)
@@ -223,11 +294,17 @@ def validate_session(
             raise ValueError(
                 f"--db path must be inside --repo (got db={resolved_db}, repo={resolved_repo})"
             ) from exc
+    readiness = compute_readiness(
+        repo_root=resolved_repo,
+        db_path=resolved_db,
+        index_mode=index_mode,
+    )
     return SessionConfig(
         repo_root=resolved_repo,
         db_path=resolved_db,
         index_mode=index_mode,
         expose_all_tools=expose_all_tools,
+        readiness=readiness,
     )
 
 
@@ -1503,11 +1580,18 @@ def _tool_store_select_index(
             f"Rebuild with: rsm index {repo_root_str} --register"
         )
 
+    readiness = compute_readiness(
+        repo_root=Path(repo_root_str),
+        db_path=db_path,
+        index_mode="store",
+    )
+
     active = ActiveIndex(
         repo_id=repo_id_val,
         name=name_val,
         repo_root=Path(repo_root_str),
         db_path=db_path,
+        readiness=readiness,
     )
     session.active_index = active
 
