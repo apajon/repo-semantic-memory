@@ -1,12 +1,18 @@
 """Tests for MCP readiness contract (62.6).
 
 Tests the readiness detection and reporting for all 8 states:
-- missing_db, invalid_db, schema_mismatch, empty_store, no_active_index, stale_index, unknown_freshness, ready
+- missing_db
+- invalid_db
+- schema_mismatch
+- empty_store
+- no_active_index
+- stale_index
+- unknown_freshness
+- ready
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -21,11 +27,9 @@ from repo_semantic_memory.mcp.runtime import (
     ReadinessInfo,
     compute_readiness,
 )
-from repo_semantic_memory.mcp.server import serve_stdio
-from repo_semantic_memory.model import Entity, Evidence, Relation, SourceRange, StableId
+from repo_semantic_memory.model import Entity, SourceRange, StableId
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.store_home import IndexRegistry
-
 
 # ---------------------------------------------------------------------------
 # Test: missing_db state (repo mode)
