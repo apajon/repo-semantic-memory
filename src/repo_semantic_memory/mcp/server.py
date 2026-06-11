@@ -81,12 +81,29 @@ def _initialize_result(session: SessionConfig | StoreSessionState) -> dict[str, 
             "rsm_store_select_index to activate one before using repository-specific tools. "
             "Active selection is session-scoped and not persisted across restarts."
         )
+        session_info: dict[str, Any] = {
+            "mode": "store",
+            "store_home": session.store_home.as_posix(),
+        }
+        if session.active_index is not None:
+            session_info["active_index"] = session.active_index.as_dict()
+        else:
+            session_info["active_index"] = None
     else:
         instructions = (
             "Read-only local RSM tools. The configured --repo and --db are fixed for "
             "this session. Call rsm_status to inspect them. "
             "Use rsm_prepare_context to build task-centered context packs."
         )
+        session_info = {
+            "mode": "repo",
+            "repo_root": session.repo_root.as_posix(),
+            "db_path": session.db_path.as_posix(),
+            "index_mode": session.index_mode,
+        }
+        if session.readiness is not None:
+            session_info["index_status"] = session.readiness.index_status
+            session_info["index_status_reason"] = session.readiness.index_status_reason
     return {
         "protocolVersion": PROTOCOL_VERSION,
         "capabilities": {"tools": {"listChanged": False}},
@@ -95,6 +112,7 @@ def _initialize_result(session: SessionConfig | StoreSessionState) -> dict[str, 
             "version": info.package_version,
         },
         "instructions": instructions,
+        "session": session_info,
     }
 
 

@@ -1,0 +1,244 @@
+# lifecore_ros2 benchmark cases (62.1 harness schema).
+#
+# All cases use mode: manual_external and require a pre-built index from the
+# local lifecore_ros2 repository checkout.
+#
+# Run with:
+#   uv run rsm eval bench \
+#     --db /path/to/lifecore_ros2/.rsm/index.sqlite \
+#     --dataset benchmarks/lifecore_ros2_benchmark_cases.yaml \
+#     --mode manual
+#
+# The DB path must point to an existing lifecore_ros2 index built by:
+#   rsm index /path/to/lifecore_ros2 --register
+# or
+#   rsm store register /path/to/lifecore_ros2 --index
+#
+# Expected repository states:
+#   lifecore_ros2:       dev-lifecore_state @ 233cb81 (2,039 entities, fresh)
+#   lifecore_ros2_examples: main @ 76e5500 (~100 entities, fresh)
+#
+# These cases were validated in 62.0 manual validation.
+
+tasks:
+  # -----------------------------------------------------------------------
+  # Case 1 — LifecycleComponent core
+  # -----------------------------------------------------------------------
+  - id: lc_lifecycle_component_core
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find where LifecycleComponent class is implemented."
+    expected:
+      central_files:
+        - src/lifecore_ros2/core/lifecycle_component.py
+      support_files:
+        - src/lifecore_ros2/core/lifecycle_component_node.py
+        - src/lifecore_ros2/core/__init__.py
+      test_files:
+        - tests/core/test_lifecycle.py
+        - tests/helpers/lifecycle.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - central_retrieval
+      - manual
+    notes: >
+      Basic central-file retrieval for the core LifecycleComponent class.
+      Expected central file: lifecycle_component.py.
+      Expected support: LifecycleComponentNode and core __init__.py (exports).
+      Expected tests: direct LifecycleComponent tests and test helpers.
+      62.0 observed: LifecycleComponent search is strong.
+
+  # -----------------------------------------------------------------------
+  # Case 2 — Activation gating
+  # -----------------------------------------------------------------------
+  - id: lc_activation_gating
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find where activation gating for publisher, subscriber, and timer components is implemented."
+    expected:
+      central_files:
+        - src/lifecore_ros2/core/activation_gating.py
+      support_files:
+        - src/lifecore_ros2/components/lifecycle_publisher_component.py
+        - src/lifecore_ros2/components/lifecycle_subscriber_component.py
+        - src/lifecore_ros2/components/lifecycle_timer_component.py
+      test_files:
+        - tests/core/test_activation_gating.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - central_retrieval
+      - support_retrieval
+      - manual
+    notes: >
+      Activation gating implementation and component-level gating usage.
+      Expected central: activation_gating.py (require_active decorator, gating
+      primitives).
+      Expected support: publisher, subscriber, and timer components that use
+      the gating decorator.
+      Expected tests: test_activation_gating.py covers all gating scenarios.
+      62.0 observed: activation gating ContextPack was excellent.
+
+  # -----------------------------------------------------------------------
+  # Case 3 — Cleanup ownership (62.0 weakness capture)
+  # -----------------------------------------------------------------------
+  - id: lc_cleanup_ownership
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find where cleanup ownership behavior for lifecycle components is implemented."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_publisher_component.py
+        - src/lifecore_ros2/components/lifecycle_subscriber_component.py
+        - src/lifecore_ros2/components/lifecycle_timer_component.py
+      support_files:
+        - src/lifecore_ros2/core/lifecycle_component.py
+        - src/lifecore_ros2/components/lifecycle_service_client_component.py
+        - src/lifecore_ros2/components/lifecycle_service_server_component.py
+      test_files:
+        - tests/components/test_cleanup_ownership.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - weakness
+      - manual
+    notes: >
+      62.0 weakness capture: the cleanup ownership ContextPack returned only
+      the test file, missing the component source files. Expected central
+      files are the component implementations with _release_resources methods.
+      Expected support files are the LifecycleComponent base class and other
+      components with cleanup behavior.
+      Expected tests: test_cleanup_ownership.py covers all component types.
+      This case should expose current weakness if ranking is still too
+      test-driven.
+
+  # -----------------------------------------------------------------------
+  # Case 4 — lifecore_state descriptor/message architecture
+  # -----------------------------------------------------------------------
+  - id: lc_lifecore_state_architecture
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find the lifecore_state descriptor and message architecture documentation and RFCs."
+    expected:
+      central_files:
+        - lifecore_state/message_semantics.rst
+        - lifecore_state/rfcs/rfc_001_lifecore_state_architecture.rst
+      support_files:
+        - lifecore_state/rfcs/sprint_17_pr_description.md
+        - lifecore_state/rfcs/sprint_18_message_notes.rst
+        - lifecore_state/README.rst
+      test_files:
+        - tests/testing/test_private_lifecycle_helpers.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - doc_retrieval
+      - manual
+    notes: >
+      Retrieval of lifecore_state documentation and RFC architecture files.
+      All expected files are doc-type entities (RST/MD).
+      Expected central: message_semantics.rst and the main architecture RFC.
+      Expected support: sprint notes, PR description, and README.
+      Expected tests: lifecycle assertion message tests in test_helpers.
+      62.0 observed: lifecore_state ContextPack was excellent, though with
+      some on_message noise from unrelated subscriber stubs.
+
+  # -----------------------------------------------------------------------
+  # Case 5 — Publisher/subscriber component pair
+  # -----------------------------------------------------------------------
+  - id: lc_publisher_subscriber_components
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find the publisher and subscriber lifecycle component implementations."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_publisher_component.py
+        - src/lifecore_ros2/components/lifecycle_subscriber_component.py
+      support_files:
+        - src/lifecore_ros2/core/lifecycle_component.py
+        - src/lifecore_ros2/core/activation_gating.py
+      test_files:
+        - tests/components/test_publisher_component.py
+        - tests/components/test_subscriber_component.py
+        - tests/core/test_activation_gating.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - central_retrieval
+      - support_retrieval
+      - manual
+    notes: >
+      Publisher and subscriber component pair retrieval. Expected central:
+      both component implementation files. Expected support: LifecycleComponent
+      base class and activation gating utility (both used by these components).
+      Expected tests: dedicated component tests plus activation gating tests
+      that exercise publisher/subscriber gating behavior.
+      Avoid dominance by unrelated service/timer components.
+
+  # -----------------------------------------------------------------------
+  # Case 6 — Service client/server component pair
+  # -----------------------------------------------------------------------
+  - id: lc_service_client_server_components
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find the service client and server lifecycle component implementations."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_service_client_component.py
+        - src/lifecore_ros2/components/lifecycle_service_server_component.py
+      support_files:
+        - src/lifecore_ros2/core/lifecycle_component.py
+        - src/lifecore_ros2/core/activation_gating.py
+      test_files:
+        - tests/components/test_service_client.py
+        - tests/components/test_service_server.py
+        - tests/components/test_cleanup_ownership.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - central_retrieval
+      - support_retrieval
+      - manual
+    notes: >
+      Service client/server component pair. Expected central: both
+      implementation files. Expected support: LifecycleComponent base and
+      activation gating (both are gated components). Expected tests: dedicated
+      service client/server tests plus cleanup ownership tests covering
+      service client/server cleanup behavior.
+
+  # -----------------------------------------------------------------------
+  # Case 7 — Timer component lifecycle behavior
+  # -----------------------------------------------------------------------
+  - id: lc_timer_lifecycle_behavior
+    fixture: lifecore_ros2
+    mode: manual_external
+    query: "Find the timer component lifecycle activation and cleanup behavior."
+    expected:
+      central_files:
+        - src/lifecore_ros2/components/lifecycle_timer_component.py
+      support_files:
+        - src/lifecore_ros2/core/lifecycle_component.py
+        - src/lifecore_ros2/core/activation_gating.py
+      test_files:
+        - tests/components/test_cleanup_ownership.py
+      forbidden_files:
+        - docs/_build/
+    tags:
+      - lifecore_ros2
+      - central_retrieval
+      - manual
+    notes: >
+      Timer component lifecycle behavior. The timer has distinct lifecycle
+      behavior: start/stop in activate/deactivate, cleanup in cleanup.
+      Expected central: lifecycle_timer_component.py.
+      Expected support: LifecycleComponent base and activation gating.
+      Expected tests: timer cleanup ownership test class in
+      test_cleanup_ownership.py. Note: there is no dedicated timer test file;
+      timer tests are embedded in test_cleanup_ownership.py.

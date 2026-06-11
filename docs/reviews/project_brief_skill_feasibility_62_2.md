@@ -1,0 +1,452 @@
+# Project Brief / SKILL-like Summary Feasibility 62.2
+
+> **Date:** 2026-06-10
+> **Status:** Complete (design/feasibility only, no implementation)
+> **Prerequisite:** 62.0 (lifecore_ros2 validation), 62.1 (benchmark cases)
+
+---
+
+## 1. Summary
+
+This document evaluates whether RSM should generate a compact project brief /
+SKILL-like summary for indexed repositories. The brief would give coding agents
+a lightweight orientation layer — "what is this repo, where are its important
+files, what tests exist, how do I use RSM tools on it" — before they start
+making MCP tool calls.
+
+**Recommendation: Implement soon, after 62.6 (MCP readiness/freshness).**
+
+A project brief is feasible with mostly available RSM data. It would be a
+separate CLI command generating a static Markdown file, not a new MCP tool or
+resource. It does not require LLM calls, new extractors, or expensive graph
+analysis. The main implementation cost is wiring existing metadata and
+context-pack outputs into a deterministic Markdown template.
+
+---
+
+## 2. Problem Statement
+
+### What problem would a project brief solve?
+
+| Problem | How a brief helps |
+|---|---|
+| **Cold-start confusion** — agent connects to a fresh MCP session with no repo context | Brief gives immediate orientation: repo purpose, main modules, entry points |
+| **Repeated MCP calls** — agent calls `rsm_search` 3–4 times just to find basic structure | Brief answers "what are the main areas?" in one read, not N searches |
+| **Wrong tool choice** — agent calls `rsm_prepare_context` with vague queries because it doesn't know what's in the repo | Brief lists concrete file clusters and common tasks |
+| **Return-to-project workflows** — agent returns to lifecore_ros2 weeks later with no context | Brief is a static file, survives session loss, provides immediate bearings |
+| **Store mode confusion** — agent has 9 registered repos and doesn't know which to select | Brief tells the agent which repo to select and what tools to use |
+| **Known caveats invisible** — agent doesn't know the cleanup ownership weakness exists | Brief documents known weaknesses so the agent compensates |
+
+### What problem should it not try to solve?
+
+| Non-goal | Why excluded |
+|---|---|
+| **Full documentation generator** | README and Sphinx docs already exist; the brief is a 500–1,500 word orientation, not full docs |
+| **Graph explorer** | RSM already has `rsm_find_related` and `rsm_query_graph` for structural exploration |
+| **README replacement** | README is human-facing; the brief is agent-facing |
+| **Benchmark report replacement** | Benchmark reports (`docs/reviews/`) are separate human artifacts |
+| **Long architecture document** | Architecture docs should stay in `docs/`; the brief summarizes them in 2–3 bullet points |
+| **LLM-generated summary** | Must be deterministic from local index data only |
+
+---
+
+## 3. Candidate Output Formats
+
+| Format | Agent usability | Discoverability | Risk of polluting repo | Persistence | Portability | Compatible with agent workflows |
+|---|---|---|---|---|---|---|
+| `.rsm/PROJECT_CONTEXT.md` | ★★★ — agent reads as plain text | ★★★ — MCP `resources/read` or agent reads file directly | ★☆☆ — inside `.rsm/` which is gitignored | ★★★ — survives sessions | ★★★ — copy with index | ★★★ — works with any agent |
+| `.rsm/SKILL.md` | ★★★ — same as above | ★★★ | ★☆☆ — inside `.rsm/` | ★★★ | ★★★ | ★★★ — matches SKILL.md conventions |
+| `docs/reviews/_project_brief.md` | ★★☆ — not in standard location | ★★☆ — agent won't know to look there | ★★☆ — in user repo, not gitignored | ★★☆ — may conflict with user docs | ★★☆ — tied to repo checkout | ★★☆ |
+| MCP resource (later) | ★★★ — native MCP access | ★★★ — `resources/list` | ★☆☆ — no repo pollution | ★☆☆ — session-scoped | ★☆☆ — server-specific | ★★★ — MCP native |
+| `AGENTS.md` in target repo | ★★★ — standard agent instructions | ★★★ — well-known filename | ★★★ — pollutes user repo | ★★★ | ★★★ | ★★★ |
+
+### Recommended format
+
+**`.rsm/PROJECT_CONTEXT.md`** — generated inside the RSM store index directory
+or `.rsm/` inside the target repo.
+
+Rationale:
+- `.rsm/` is gitignored (standard RSM convention) — no user repo pollution.
+- Agents can read it as a static resource before making MCP calls.
+- Passes the "what if the agent has no session context" test — it's a file,
+  not a session-scoped MCP response.
+- Survives MCP server restarts and session loss.
+- Can be referenced in the MCP `initialize` instructions: "Read `.rsm/PROJECT_CONTEXT.md` for repo orientation."
+
+If generated inside the RSM Index Store (not in the target repo), the path
+would be something like:
+```
+$RSM_HOME/indexes/<repo_id>/project_context.md
+```
+This avoids any risk of modifying the target repo while keeping the brief
+paired with the index.
+
+---
+
+## 4. Recommended Format
+
+**`.rsm/PROJECT_CONTEXT.md`** (inside the RSM store index directory, not the
+target repo).
+
+When generated by an explicit CLI command, the default output path should be
+alongside the index DB. The user can override with `--output`.
+
+Store mode: generated per index, stored alongside each index's SQLite DB.
+Repo/db mode: generated alongside the DB path.
+
+---
+
+## 5. Minimal v1 Content
+
+Target: **500–1,500 words** for normal repos, proportionally smaller for
+small repos.
+
+```markdown
+# Project Brief: <repo name>
+
+> Generated: <datetime>
+> Indexed commit: <abbreviated hash>
+> Index status: <fresh | stale — N commits behind>
+> Schema version: <version>
+
+## Purpose
+
+<short summary — derived from first N entities or extracted from README>
+
+## Main Code Areas
+
+- <module/dir 1> — <key entities, brief description>
+- <module/dir 2> — <key entities, brief description>
+- ...
+
+## Important Entry Points
+
+- <file path> — <class/function, what it's for>
+- ...
+
+## Test Areas
+
+- <test dir/file 1> — <what it tests>
+- ...
+
+## Docs / RFCs
+
+- <doc path> — <topic>
+- ...
+
+## Common Agent Workflows
+
+- `rsm_search("<concept>")` — broad discovery
+- `rsm_find_related(entity_id="...")` — find related code/tests
+- `rsm_prepare_context(task="...")` — build task-specific context
+- Store mode: `rsm_store_select_index(repo_id="...")` — select this repo
+
+## Known Caveats
+
+- <caveat 1>
+- <caveat 2>
+
+## Benchmark Tasks
+
+- <benchmark ID 1> — <query>
+- <benchmark ID 2> — <query>
+```
+
+---
+
+## 6. Data Availability
+
+| Section | Data source | Availability |
+|---|---|---|
+| Repo name / root | Index metadata (SQLite `metadata` table) | **Available now** — `store status` already returns `repo`, `db` |
+| Indexed commit / time | Index metadata (`indexed_at`, `indexed_git_head`) | **Available now** — via `detect_stale_from_metadata` |
+| Freshness status | `detect_stale_from_metadata` | **Available now** — returns `fresh`/`stale`/`unknown` |
+| Schema version | Index metadata | **Available now** — `schema_version` field |
+| Purpose / scope | First N entities, `__init__.py` exports, README text | **Available now** — entities are indexed; README is a `doc` entity |
+| Main code areas | Entity kind/count per directory, module entities | **Available now** — `list_entities()` returns all entities with paths |
+| Important entry points | Top-ranked central files from benchmark tasks | **Available now** — benchmark cases already define these |
+| Test areas | Test-path entities grouped by directory | **Available now** — `classify_path_role` identifies `test` paths |
+| Docs / RFCs | Doc-path entities | **Available now** — indexed as `doc` entities |
+| Known caveats | Hard-coded per-repo or from validation reports | **Small metadata addition** — needs manual curation or derived from benchmark failures |
+| Benchmark tasks | Existing benchmark YAML | **Available now** — linked by fixture name |
+| Agent workflow hints | Static text | **Available now** — same for all repos; no per-repo generation needed |
+
+### What is NOT available today
+
+- **README summary** — RSM indexes README as a `doc` entity but does not
+  extract its title/conclusion. A summary would need either a heuristic
+  (first paragraph) or a future extractor.
+- **File count / language breakdown** — not stored in metadata. Could be
+  derived from entity path extensions or a `SELECT COUNT(DISTINCT path)`
+  query, but that's O(n) on every generation.
+- **Benchmark-to-repo mapping** — current benchmark YAML uses `fixture` names
+  but there's no reverse index from repo path to benchmark cases. A small
+  metadata file or convention would be needed.
+
+### Implementation efficiency
+
+| Operation | Cost | Notes |
+|---|---|---|
+| Read metadata from SQLite | O(1) — single query | `get_metadata()` returns dict |
+| Count entities by path prefix | O(n) on entity count — ~2,000 for lifecore_ros2 | Acceptable for normal repos (under 10K entities) |
+| Read benchmark YAML cases | O(1) — file load + parse | Cached after first read |
+| Detect staleness | O(1) — git HEAD comparison | Already implemented in `detect_stale_from_metadata` |
+| Generate Markdown | O(m) where m = section count (typically <20) | Trivial string formatting |
+
+**No expensive graph analysis, no LLM calls, no network access, no deep doc parsing.**
+
+Maximum expected cost for a 10K-entity repo: < 50ms wall-clock (mostly
+SQLite queries).
+
+---
+
+## 7. Generation Strategy
+
+### When to generate
+
+**Start with explicit CLI command only.** No post-index auto-generation.
+
+| Trigger | Recommended? | Why |
+|---|---|---|
+| After `rsm index` | **No** (v1) — keep index fast; brief is a separate concern | Indexing is already the slowest operation |
+| Explicit CLI command | **Yes** — `rsm project-brief` | Clear, predictable, testable |
+| On `rsm store register` | **Maybe v2** — optional flag | Could auto-generate brief for all registered repos |
+| MCP initialize | **No** — session-scoped; brief should be a file | Brief survives restarts |
+| Periodic / cron | **No** — overengineers the v1 | User regenerates when stale |
+
+### Proposed CLI command
+
+```bash
+rsm project-brief --db <path> [--output <path>]
+```
+
+Default `--output`: `<db_parent>/project_context.md` (alongside the SQLite DB).
+
+If `--db` is omitted, consult the RSM Index Store (same convention as other
+`--db`-optional commands).
+
+Store mode variant:
+```bash
+rsm project-brief --store --repo <path>
+```
+or
+```bash
+rsm store project-brief <repo-path>
+```
+
+But for v1, start with `--db` only. Store mode is a v2 enhancement.
+
+### Inputs
+
+- `--db`: path to existing SQLite index (required, or looked up from store)
+- `--output`: output file path (default: alongside DB, named `project_context.md`)
+- `--force`: overwrite existing output
+
+### Output characteristics
+
+- **Deterministic** — same index always produces the same brief.
+- **No network/LLM dependency** — pure local computation.
+- **Max size** — hard-capped at 2,000 lines or ~15,000 characters, whichever
+  is smaller. Truncate lower-priority sections if exceeded.
+- **Stale index warning** — if the index is stale, the brief header says
+  `(stale — N commits behind)` and suggests re-indexing.
+
+### Overwrite / lifecycle
+
+- Overwrite on re-run with `--force`.
+- No auto-regeneration when index changes.
+- User is responsible for re-running after re-index if they want an updated brief.
+
+---
+
+## 8. Implementation Efficiency Assessment
+
+| Concern | Assessment |
+|---|---|
+| **SQLite query cost** | O(1) for metadata; O(n) for path-prefix grouping. Acceptable for <50K entities. |
+| **Markdown generation** | Simple string templating. No markdown parser needed. |
+| **Staleness detection** | Already implemented; reused from `detect_stale_from_metadata`. |
+| **README summary extraction** | Not needed for v1 — can use heuristic (first sentence of first indexed markdown section) or simply omit. |
+| **Large repo scaling** | Brief size is capped (15K chars). It will never grow with repo size beyond the cap. Entity counting is O(n) but fast. |
+| **Memory** | No additional memory beyond loading metadata + ~100 entities for each high-signal directory. |
+
+**Verdict: Efficient enough for v1. No performance blockers.**
+
+---
+
+## 9. Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|---|---|---|
+| **Brief becomes stale** | High (user forgets to regenerate after re-index) | Medium — header clearly marks stale status | Add freshness warning to header; agent learns to check the date |
+| **Brief is too long** | Low (capped at 15K chars) | Low — truncation is safe | Hard cap protects agent token budgets |
+| **Brief is too short to be useful** | Medium (500 words may not help) | Medium — agent ignores it | Evaluate with real agent workflow after v1 |
+| **Generation is slow on large repos** | Low (<50ms for 10K entities) | Low — no impact | Profile after implementation |
+| **Conflicts with existing `.rsm/` conventions** | None | — | `.rsm/` is RSM's directory; adding a file is natural |
+| **User relies on brief instead of MCP tools** | Low (brief is orientation, not search) | Low — tools still provide deeper answers | Brief explicitly says "read this first, then use MCP tools" |
+
+---
+
+## 10. Acceptance Criteria
+
+For v1 implementation, the project brief must:
+
+1. ✅ **Help an agent choose correct MCP tools** — brief includes "Common Agent Workflows" section
+2. ✅ **Identify main modules and entry points** — from entity index data
+3. ✅ **Reference benchmark cases** — links to existing `benchmarks/lifecore_ros2_benchmark_cases.yaml`
+4. ✅ **Not exceed token budget** — hard cap at 15,000 characters (~3,750 tokens)
+5. ✅ **Be deterministic** — same index → same output
+6. ✅ **Be generated from local index only** — no network, no LLM
+7. ✅ **Include stale index warning** — header shows `fresh` or `stale`
+8. ✅ **Not pollute target repo by default** — generated inside RSM store or `.rsm/`
+9. ✅ **Complete in < 100ms** — no expensive operations
+
+### Validation ideas
+
+- **Comparison test:** Agent workflow with vs without project brief on lifecore_ros2
+  - Track: number of MCP calls before first useful `rsm_prepare_context`
+  - Expected: brief → 0–1 search calls; no brief → 3–5
+- **Manual review:** Generate brief for lifecore_ros2; human evaluates completeness
+- **Regression:** Re-generate brief after re-index; confirm it updates (freshness, commit hash)
+
+---
+
+## 11. Recommendation
+
+**Implement soon, after 62.6 (MCP readiness/freshness).**
+
+Rationale:
+
+1. **Data is mostly available now.** Metadata, entities, path roles, and
+   benchmark cases are all in the index. The only missing piece is a
+   deterministic template + CLI command.
+
+2. **Minimal implementation risk.** The brief is a static file generator, not
+   a new runtime component. It adds no attack surface, no network dependency,
+   and no LLM cost.
+
+3. **Clear value for agent workflows.** The 62.0 validation showed that agents
+   need orientation before using MCP tools. A brief gives them a one-shot
+   orientation without repeated search calls.
+
+4. **Natural companion to 62.6 readiness.** The 62.6 task (MCP index readiness
+   and freshness contract) will make the MCP surface report whether an index
+   exists and is fresh. Once that's done, the brief can reference the same
+   freshness status.
+
+5. **Separable from search/ranking refinement.** The brief does not depend on
+   search quality, ranking, or pagination. It can be implemented independently
+   of 63.x.
+
+**Do not implement before 62.6** — the freshness/staleness contract in MCP
+tools is a prerequisite for the brief's freshness header. Without it, the
+brief's staleness detection relies on the CLI-only `store status` path, which
+isn't available to agents through MCP.
+
+---
+
+## 12. Proposed Follow-up Task
+
+**62.7 — Implement `rsm project-brief` CLI command.**
+
+Scope:
+- Deterministic Markdown generator from existing SQLite index metadata
+- Default output path alongside index DB (`<db_parent>/project_context.md`)
+- Hard-capped at 15,000 characters
+- Freshness header using `detect_stale_from_metadata`
+- Benchmarks section linking to existing benchmark YAML (matched by fixture name)
+- Tests: generated output matches expected content for lifecore_ros2 index
+
+Do not include in 62.7:
+- Store mode `--store` flag
+- MCP resource exposure
+- README summary extraction
+- Auto-generation after index
+
+**Estimated implementation effort:** Small (one new file in `cli.py`, one
+generator module, one test file, one Markdown template).
+
+---
+
+## 62.2 — Final report
+
+```
+62.2 — Final report
+
+Files changed:
+- docs/reviews/project_brief_skill_feasibility_62_2.md (created)
+
+Problem solved:
+- Cold-start confusion: agents have no repo orientation when connecting fresh
+- Repeated MCP calls: brief replaces 3-5 search calls with one read
+- Wrong tool choice: brief lists concrete areas and common workflows
+- Return-to-project support: brief survives session loss
+- Known caveats invisible: brief documents ranking weaknesses
+
+Recommended format:
+- .rsm/PROJECT_CONTEXT.md inside the RSM store index directory
+- Generated by explicit CLI command: rsm project-brief --db <path>
+- Not auto-generated after index
+- Not exposed as MCP resource in v1
+
+Minimal v1 contents:
+- Repository identity (name, root, indexed commit, time, freshness)
+- Purpose / scope (short summary)
+- Main code areas (module list, high-signal directories)
+- Important entry points (central files/entities)
+- Test areas (test directories, known clusters)
+- Docs / RFCs (relevant doc entities)
+- Common agent workflows (search/find_related/prepare_context/store nav)
+- Known caveats (stale index, ranking weaknesses)
+- Benchmark tasks (links to benchmark YAML cases)
+
+Data availability:
+- available now: repo identity, freshness, schema version, main code areas,
+  test areas, docs/RFCs, benchmark tasks, agent workflow hints
+- small metadata addition: known caveats (manual curation or derived from
+  benchmark failures)
+- requires future work: README summary extraction (heuristic or dedicated
+  extractor), benchmark-to-repo reverse mapping
+
+Generation strategy:
+- CLI command: rsm project-brief --db <path> [--output <path>] [--force]
+- Deterministic, no network/LLM, hard-capped at 15,000 characters
+- Default output alongside index DB
+- Freshness warning in header if stale
+- No auto-generation; user explicitly runs command
+
+Efficiency assessment:
+- SQLite queries: O(1) metadata + O(n) entity grouping
+- No expensive graph analysis, no LLM, no network
+- Expected <50ms for 10K-entity repo
+- No performance blockers
+
+Risks:
+- Staleness (mitigated by header warning)
+- Length (mitigated by hard cap)
+- Usefulness (mitigated by post-implementation evaluation)
+
+Recommendation:
+- implement soon, after 62.6 (MCP readiness/freshness)
+
+Follow-up task proposed:
+- 62.7 — Implement rsm project-brief CLI command
+
+Validation:
+- git diff --stat: (only report file created)
+- git status --short: untracked docs/reviews/project_brief_skill_feasibility_62_2.md
+- doc checks: No doc lint checks configured
+
+Scope confirmation:
+- no code changed: ✓
+- no new CLI command: ✓ (design only)
+- no new MCP tool/resource: ✓ (proposed for 62.7, not implemented here)
+- no ranking changed: ✓
+- no extractor changed: ✓
+- no ContextPack schema changed: ✓
+- no benchmark scoring changed: ✓
+- no dependencies added: ✓
+
+Status:
+- 62.2 complete
+```
