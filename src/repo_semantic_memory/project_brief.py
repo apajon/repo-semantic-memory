@@ -49,6 +49,125 @@ _STORE_MODE_WORKFLOW = """\
 6. `rsm_prepare_context(task="...")` — build task-centered ContextPack
 7. `rsm_get_context_page(result_set_id, stream="...")` — page over large packs"""
 
+# ── doc path detection (broader than classify_path_role) ────────────────────
+
+# Prefixes and patterns that indicate documentation, review, planning, or RFC files.
+_BROAD_DOC_PREFIXES = (
+    "docs/",
+    "doc/",
+    "docs_src/",
+    "tutorials/",
+    "tutorial/",
+)
+_RFC_DIR_PATTERNS = ("/rfcs/", "/rfc/")
+_RFC_FILE_PREFIXES = ("rfcs/", "rfc/")
+_ROOT_DOC_NAMES = frozenset(
+    {
+        "README.md",
+        "README.rst",
+        "CHANGELOG.md",
+        "CHANGELOG.rst",
+        "CONTRIBUTING.md",
+        "CONTRIBUTING.rst",
+        "ARCHITECTURE.md",
+        "ARCHITECTURE.rst",
+        "LICENSE",
+        "LICENSE.md",
+        "LICENSE.rst",
+        "SECURITY.md",
+        "SUPPORT.md",
+        "CODE_OF_CONDUCT.md",
+    }
+)
+_DOC_EXTENSIONS = (".rst", ".md")
+_MAX_DOC_ENTRIES = 12
+
+# Priority groups for doc ordering (lower = higher priority).
+_DOC_PRIORITY: dict[str, int] = {
+    "docs/reviews": 0,
+    "docs/design": 1,
+    "docs/planning": 2,
+    "docs/concepts": 2,
+    "docs/usage": 2,
+    "docs/design_notes": 1,
+    "docs/api": 2,
+}
+# Special priority for RFCs (anywhere in path)
+_RFC_PRIORITY = 1
+
+
+def _is_doc_path(path: str) -> bool:
+    """Return True if *path* is likely a documentation, review, planning, or RFC file.
+
+    Broader than :func:`classify_path_role` — captures project-specific doc
+    directories (e.g. ``lifecore_state/``), RFC directories, root-level
+    ``README.md``, and ``.rst``/``.md`` files outside source/test trees.
+    """
+    normalized = path.strip("/")
+
+    # Standard doc prefixes
+    if normalized.startswith(_BROAD_DOC_PREFIXES):
+        return True
+
+    # RFC directories (any level)
+    for pattern in _RFC_DIR_PATTERNS:
+        if pattern in f"/{normalized}/":
+            return True
+    if normalized.startswith(_RFC_FILE_PREFIXES):
+        return True
+
+    # Root-level doc files
+    if "/" not in normalized and normalized in _ROOT_DOC_NAMES:
+        return True
+
+    # .md and .rst files that are NOT in source or test directories
+    if normalized.endswith(_DOC_EXTENSIONS):
+        # Skip source/test dirs (handled by classify_path_role)
+        if normalized.startswith(("src/", "tests/", "test/", "lib/", "packages/")):
+            return False
+        # Skip CI configs
+        if normalized.startswith((".github/", ".gitlab/", "ci/")):
+            return False
+        # Skip generated/build
+        if any(s in normalized for s in ("_build/", "__pycache__/", ".egg-info/", "/dist/")):
+            return False
+        return True
+
+    return False
+
+
+def _doc_priority(path: str) -> int:
+    """Return a deterministic sort priority for a doc path (lower = higher)."""
+    # Check prefix-based priority groups
+    for prefix, prio in _DOC_PRIORITY.items():
+        if path.startswith(prefix):
+            return prio
+
+    # Check for /rfcs/ or /rfc/ anywhere in path (e.g., lifecore_state/rfcs/...)
+    for pattern in _RFC_DIR_PATTERNS:
+        if pattern in f"/{path}/":
+            return _RFC_PRIORITY
+
+    # Root-level .md/.rst is high priority
+    if "/" not in path and path.endswith(_DOC_EXTENSIONS):
+        return 0
+
+    # Other docs/ prefixed files
+    if path.startswith("docs/"):
+        return 3
+
+    # Other project-specific doc files (e.g., lifecore_state/)
+    if path.endswith(_DOC_EXTENSIONS):
+        return 4
+
+    return 10
+
+
+def _sort_doc_paths(paths: set[str]) -> list[str]:
+    """Sort doc paths deterministically: priority group first, then path."""
+    return sorted(paths, key=lambda p: (_doc_priority(p), p))
+
+
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -395,16 +514,22 @@ def generate_project_brief(
 
     # 7. Docs / Reviews / Planning Notes
     doc_lines = ["## Docs / Reviews / Planning Notes", ""]
-    doc_entities = [
-        e
-        for e in entities
-        if classify_path_role(path=_entity_source_path(e), source_roots=()) == "doc"
-        and e.kind in ("file",)
-        and not _entity_source_path(e).startswith("docs/_build/")
-    ]
-    if doc_entities:
-        for de in doc_entities[:12]:
-            doc_lines.append(f"- `{_entity_source_path(de)}`")
+    # Collect all unique file paths that match our broader doc detection
+    doc_paths: set[str] = set()
+    for e in entities:
+        path = _entity_source_path(e)
+        if _is_doc_path(path):
+            doc_paths.add(path)
+
+    sorted_docs = _sort_doc_paths(doc_paths)
+    shown = sorted_docs[:_MAX_DOC_ENTRIES]
+    omitted = len(sorted_docs) - len(shown)
+
+    if shown:
+        for dp in shown:
+            doc_lines.append(f"- `{dp}`")
+        if omitted > 0:
+            doc_lines.append(f"  ... {omitted} more documentation files omitted")
     else:
         doc_lines.append("No indexed documentation found.")
     sections.append("\n".join(doc_lines))
