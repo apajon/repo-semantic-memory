@@ -54,6 +54,7 @@ from repo_semantic_memory.memory import (
     infer_semantic_components,
 )
 from repo_semantic_memory.model import Entity, Relation, SemanticComponent
+from repo_semantic_memory.project_brief import generate_project_brief
 from repo_semantic_memory.store import SQLiteStore, build_default_extraction_metadata
 from repo_semantic_memory.version import CONTEXT_PACK_VERSION, SCHEMA_VERSION, get_version_info
 
@@ -649,6 +650,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit status as JSON.",
     )
 
+    project_brief_parser = subparsers.add_parser(
+        "project-brief",
+        help="Generate a compact project brief / SKILL-like summary from an indexed repository.",
+    )
+    project_brief_parser.add_argument(
+        "--db",
+        default=None,
+        help=(
+            "SQLite database file path. "
+            "When omitted, the RSM Index Store registry is consulted for the current directory."
+        ),
+    )
+    project_brief_parser.add_argument(
+        "--output",
+        default=None,
+        help=(
+            "Output Markdown file path. Defaults to .rsm/PROJECT_CONTEXT.md alongside the index DB."
+        ),
+    )
+    project_brief_parser.add_argument(
+        "--max-chars",
+        type=int,
+        default=15000,
+        help="Maximum character budget for the output (default: 15000).",
+    )
+    project_brief_parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Overwrite existing output file if it exists.",
+    )
+
     return parser
 
 
@@ -852,6 +885,55 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         parser.print_help()
         return 2
+    if args.command == "project-brief":
+        from repo_semantic_memory.store_home import resolve_reader_db
+
+        db = args.db
+        if db is None:
+            try:
+                db = str(resolve_reader_db(None).path)
+            except (FileNotFoundError, ValueError) as exc:
+                print(f"error: could not resolve index DB: {exc}", file=sys.stderr)
+                print(
+                    "Provide --db <path> or register the repo with:"
+                    " rsm store register <repo> --index",
+                    file=sys.stderr,
+                )
+                return 2
+
+        # Resolve output path
+        if args.output is not None:
+            output_path = Path(args.output)
+        else:
+            # Default: .rsm/PROJECT_CONTEXT.md alongside the DB
+            db_dir = Path(db).parent
+            output_path = db_dir / "PROJECT_CONTEXT.md"
+
+        # Check overwrite behavior
+        if output_path.exists() and not args.force:
+            print(
+                f"error: output file already exists: {output_path}",
+                file=sys.stderr,
+            )
+            print("Use --force to overwrite.", file=sys.stderr)
+            return 1
+
+        try:
+            content = generate_project_brief(
+                db_path=db,
+                max_chars=args.max_chars,
+            )
+        except FileNotFoundError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(content, encoding="utf-8")
+        print(f"Project brief written to: {output_path}")
+        return 0
 
     parser.print_help()
     return 0
