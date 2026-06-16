@@ -2,7 +2,9 @@
 
 RSM is local-first. It reads the current repository and writes local artifacts; source code, docs, tests, and Git history remain authoritative.
 
-This quickstart walks through the normal local workflow: install dependencies, build an index, inspect the repository, ask for task-specific context, optionally export `.ai/` artifacts, and run evaluation commands.
+Two paths: **CLI** (manual indexing → pack → copy to agent) and **MCP** (agent calls RSM directly).
+
+MCP is the recommended integration path when using RSM with a coding agent. CLI remains important for indexing, debugging, validation, and CI/evaluation.
 
 ## Install dependencies
 
@@ -138,6 +140,7 @@ rm -rf .rsm/
 
 ## Next reading
 
+- [MCP usage](usage/mcp.md) — MCP server configuration and tool reference (recommended for agent workflows)
 - [CLI examples](usage/examples.md) — concrete command examples with representative output
 - [CLI usage](usage/cli.md) — full command reference
 - [Repo maps](concepts/repo_maps.md) — broad orientation output

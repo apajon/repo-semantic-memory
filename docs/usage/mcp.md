@@ -1,3 +1,5 @@
+> MCP is the recommended integration path when using RSM with coding agents. RSM ships with a local read-only MCP server so compatible agents can call search, find-related, and ContextPack tools directly from the editor workflow.
+
 > For concrete MCP configuration examples and tool tables, see [CLI Examples](examples.md#5-mcp--repodb-mode).
 
 # RSM MCP Usage

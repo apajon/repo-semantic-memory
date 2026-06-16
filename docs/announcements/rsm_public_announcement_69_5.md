@@ -8,10 +8,12 @@ Status: Draft — not yet published.
 
 # Announcing repo-semantic-memory
 
-`repo-semantic-memory` (`rsm`) is a local tool that indexes a repository and prepares focused context for coding agents.
+`repo-semantic-memory` (`rsm`) is a local repository context layer for coding agents.
+
+You can use it from the CLI, but it is especially useful through MCP: compatible coding agents can call RSM to search your repository, find related files, and prepare focused ContextPacks before editing code.
 
 ```text
-Index the repo -> search for task context -> prepare a ContextPack -> give it to your agent
+Index the repo -> configure MCP -> agent asks RSM -> start editing with context
 ```
 
 ## Why I built this
@@ -24,13 +26,16 @@ RSM is my attempt to make that first step cheaper and more reliable. It builds a
 
 ## What it does today
 
-RSM indexes Python and Markdown files in your repository and lets you:
+RSM ships with a local read-only MCP server, so compatible coding agents can call repository search and ContextPack tools directly from the editor workflow. The four public MCP tools are:
 
-- **Search** for task-relevant files, symbols, tests, and docs.
-- **Find related entities** — tests, imports, exports, callers, and callees — starting from a known file or symbol.
-- **Prepare ContextPacks** — task-specific, budget-bounded context packages with source citations.
-- **Generate project briefs** — compact Markdown summaries that an agent can read before calling any RSM tools.
-- **Expose the workflow through MCP** — a local read-only MCP server gives coding agents direct access to search, find-related, and context pack tools.
+- `rsm_search` — find relevant files, symbols, tests, and docs across the index.
+- `rsm_find_related` — expand around a known file, symbol, or qualified name.
+- `rsm_prepare_context` — build a task-specific, budget-bounded ContextPack.
+- `rsm_get_context_page` — page through a larger ContextPack result.
+
+Store mode (`rsm mcp serve --store`) lets one MCP server expose multiple registered repository indexes, with `rsm_store_list_indexes` and `rsm_store_select_index` for discovery and activation.
+
+RSM also works from the CLI — indexing, ContextPack generation, project briefs, and evaluation:
 
 Everything is deterministic: same index, same query, same result. No LLM calls, no network access, no randomized ordering.
 
@@ -95,9 +100,9 @@ Tracks are not committed release promises. Priorities are driven by benchmarks, 
 
 I built `repo-semantic-memory` because coding agents waste too much time reading entire files and rediscovering project structure before they can make a useful change.
 
-RSM indexes your local repository (Python + Markdown), retrieves task-relevant files, tests, and docs, and prepares a focused ContextPack to give to your agent before it starts editing.
+RSM is a local repository context layer for coding agents. It indexes your repo and exposes search, find-related, and ContextPack tools through a local MCP server — so your agent can ask RSM directly instead of exploring from scratch.
 
-It is local, deterministic, and read-only. No LLM calls, no network access. Pre-1.0 and experimental — honest about what it does not do yet.
+CLI also available. Pre-1.0 and experimental — honest about what it does not do yet.
 
 If you work with Python repos and coding agents, give it a try:
 
@@ -118,15 +123,15 @@ Link: [repo-semantic-memory on GitHub](https://github.com/apajon/repo-semantic-m
 > **Suggested category:** General / Software Engineering
 > **Suggested tags:** `tools`, `python`, `developer-experience`
 
-### repo-semantic-memory: focused repo context for coding agents
+### repo-semantic-memory: a local context layer for coding agents (also for ROS 2)
 
 I built `repo-semantic-memory` (`rsm`) while working on `lifecore_ros2` — a Python lifecycle framework for ROS 2 nodes.
 
 The problem was simple: every time I asked a coding agent to make a change, it spent a lot of time re-reading files, rediscovering the project structure, and piecing together how modules interacted — before it could do anything useful.
 
-RSM indexes a local repository and prepares focused ContextPacks for specific tasks. Instead of "explore the whole repo," the agent gets the files, tests, docs, and related symbols that matter for the task — with source citations and a character budget.
+RSM ships with a local read-only MCP server. Compatible agents can call `rsm_search`, `rsm_find_related`, and `rsm_prepare_context` directly from the editor workflow to get task-relevant files, tests, docs, and symbols — with source citations and a character budget.
 
-It works through CLI commands or an MCP server (VS Code, Claude Code, etc.).
+CLI commands are also available for indexing, manual context packs, project briefs, and evaluation.
 
 ### What it does for ROS 2 developers
 

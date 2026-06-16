@@ -12,12 +12,12 @@
 
 **Give your coding agent the right repo context before it edits code.**
 
-`repo-semantic-memory` (`rsm`) is a local tool that indexes a repository and prepares focused context for coding agents.
+`repo-semantic-memory` (`rsm`) is a local repository context layer for coding agents.
 
-Instead of asking an agent to explore a codebase from scratch, RSM helps it start from the files, tests, docs, and related context that matter for the task.
+You can use it from the CLI, but it is especially useful through MCP: compatible coding agents can call RSM to search your repository, find related files, and prepare focused ContextPacks before editing code.
 
 ```text
-Index the repo -> search for task context -> prepare a ContextPack -> give it to your agent
+Index the repo -> configure MCP -> agent asks RSM -> start editing with context
 ```
 
 [Quickstart](docs/quickstart.md) · [CLI](docs/usage/cli.md) · [Examples](docs/usage/examples.md) · [MCP](docs/usage/mcp.md) · [Project Brief](docs/usage/project_brief.md) · [Limitations](docs/known_limitations.md) · [Roadmap](docs/design/roadmap.md) · [Benchmarks](docs/eval/benchmarks.md)
@@ -26,7 +26,9 @@ Index the repo -> search for task context -> prepare a ContextPack -> give it to
 
 ## Quickstart
 
-Install dependencies:
+### CLI quickstart
+
+Install dependencies, index, and prepare context:
 
 ```bash
 uv sync --all-groups
@@ -60,15 +62,16 @@ Default output:
 .rsm/PROJECT_CONTEXT.md
 ```
 
-### Use RSM through MCP in VS Code
+### MCP quickstart (recommended for coding agents)
 
-For an editor/agent workflow, expose the same index through the MCP server:
+Index your repo, then start the MCP server so your agent can call RSM directly:
 
 ```bash
+uv run rsm index . --db .rsm/index.sqlite
 uv run rsm mcp serve --repo . --db .rsm/index.sqlite
 ```
 
-Example `mcp.json` configuration for a single repository/index:
+Example `mcp.json` for VS Code:
 
 ```json
 {
@@ -93,28 +96,28 @@ Example `mcp.json` configuration for a single repository/index:
 }
 ```
 
-A VS Code MCP config usually points to that command through `uv` and the repository path. See [MCP usage](docs/usage/mcp.md) for the exact editor configuration and troubleshooting notes.
+Once connected, your agent can use:
 
-### Use an index store
+| Tool | Purpose |
+|---|---|
+| `rsm_search` | Search for relevant files, symbols, docs, and tests |
+| `rsm_find_related` | Expand around a known file, symbol, or qualified name |
+| `rsm_prepare_context` | Build a task-centered ContextPack |
+| `rsm_get_context_page` | Page through a larger ContextPack result |
 
-For day-to-day work across multiple repositories, use an RSM store instead of passing one database path manually every time:
+### Store mode (multiple repositories)
+
+Register multiple repositories so your agent can switch between them:
 
 ```bash
-uv run rsm store add . --db .rsm/index.sqlite
+uv run rsm store register /path/to/repo1 --index
+uv run rsm store register /path/to/repo2 --index
 uv run rsm store list
 ```
 
-The store lets RSM remember available repository indexes and select one when using store mode.
+The store lives at `~/.local/share/repo-semantic-memory` on Linux, `~/Library/Application Support/repo-semantic-memory` on macOS, or `%LOCALAPPDATA%\repo-semantic-memory` on Windows. Set `RSM_HOME` to override.
 
-### Use MCP with the store
-
-Start MCP in store mode when you want the agent to choose from registered indexes:
-
-```bash
-uv run rsm mcp serve --store
-```
-
-Example `mcp.json` configuration for VS Code-style MCP clients:
+Start MCP in store mode — example `mcp.json`:
 
 ```json
 {
@@ -139,21 +142,7 @@ Example `mcp.json` configuration for VS Code-style MCP clients:
 }
 ```
 
-In store mode, the agent can use:
-
-```text
-rsm_store_list_indexes
-rsm_store_select_index
-rsm_store_current_index
-rsm_search
-rsm_find_related
-rsm_prepare_context
-rsm_get_context_page
-```
-
-This is useful when you switch between projects or want a single MCP server to expose several indexed repositories.
-
-See the [Quickstart](docs/quickstart.md), [CLI usage](docs/usage/cli.md), and [MCP usage](docs/usage/mcp.md) docs for the full command flow.
+The agent can then call `rsm_store_list_indexes` and `rsm_store_select_index` to discover and activate indexes without a restart.
 
 ## Why I built this
 
@@ -163,7 +152,7 @@ Before making a useful change, the agent often had to re-read large parts of the
 
 RSM is my attempt to make that first step cheaper and more reliable.
 
-It builds a local index of the repository and uses it to prepare focused context for a specific development task.
+It builds a local index of the repository and exposes task-focused context through MCP and CLI, so an agent can start from relevant files, tests, docs, and symbols instead of exploring from scratch.
 
 ## What problem does it solve?
 
@@ -191,7 +180,7 @@ RSM can help you:
 - find related files or entities
 - prepare a compact ContextPack for an agent
 - generate a project brief for future sessions
-- expose the same workflow through MCP-compatible tools
+- expose repository search and ContextPack generation through a local read-only MCP server
 - run benchmarks to measure retrieval quality
 
 A typical task might be:
@@ -203,15 +192,26 @@ Find the implementation, tests, docs, and nearby context my agent should read fi
 
 RSM does not make the change. It prepares the context so your coding agent can start from a better place.
 
-## Core workflow
+## Core workflows
+
+RSM supports two main workflows.
+
+### MCP workflow, recommended for coding agents
+
+1. **Index** a repository.
+2. **Start** the local MCP server.
+3. **Let your agent call RSM tools** such as `rsm_search`, `rsm_find_related`, and `rsm_prepare_context`.
+4. **Review the returned context** before editing important code.
+5. **Refresh the index explicitly** when the repository changes.
+
+### CLI workflow, useful for manual use and debugging
 
 1. **Index** a repository.
 2. **Search** for task-relevant context.
 3. **Inspect related files or symbols.**
 4. **Prepare a ContextPack** for the task.
-5. **Give that ContextPack to your coding agent.**
+5. **Give that ContextPack to your coding agent manually.**
 6. **Optionally generate a project brief** for future sessions.
-7. **Optionally use MCP** to expose the workflow directly to agent tools.
 
 ## Project brief
 
@@ -238,7 +238,7 @@ See [Project Brief usage](docs/usage/project_brief.md).
 
 ## MCP support
 
-RSM includes a local read-only MCP-compatible runtime for agent workflows.
+RSM includes a local read-only MCP server for agent workflows.
 
 Default task tools:
 
@@ -328,22 +328,22 @@ The goal is to be useful and honest, not magical.
 
 ## Roadmap
 
-Near-term public-readiness work focuses on:
-
-- validating the quickstart
-- improving CLI examples
-- documenting known limitations clearly
-- running release-readiness checks
-- preparing a public announcement
-
-Deferred technical work includes:
+Near-term work focuses on:
 
 - non-Python and interface-file indexing
 - search and ranking refinement
 - `find_related` refinement
-- ContextPack balance and noise improvements
+- ContextPack balance and noise reduction
+- MCP documentation and store-mode hardening
 - optional deterministic snippets/chunks if benchmarks justify them
-- packaging and MCP documentation hardening
+
+Deferred technical work includes:
+
+- broader language-specific symbol extraction
+- richer relation extraction
+- optional semantic/chunk retrieval if benchmarks justify it
+- graph export or external backend integrations
+- packaging and release workflow hardening
 
 See the [Roadmap](docs/design/roadmap.md).
 
