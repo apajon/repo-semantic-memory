@@ -28,6 +28,8 @@ rsm project-brief --db .rsm/index.sqlite --max-chars 8000
 
 ## Output
 
+> For a concrete output example with annotations, see [CLI Examples](examples.md#4-project-brief).
+
 The command writes a Markdown file containing:
 
 1. **Repository Identity** — root path, DB path, RSM version, entity counts
@@ -50,6 +52,43 @@ For example, if the index lives at `.rsm/index.sqlite`, the brief is
 written to `.rsm/PROJECT_CONTEXT.md`.
 
 This avoids writing files inside the target source repository by default.
+
+### Output excerpt
+
+````markdown
+# RSM Project Brief: repo-semantic-memory
+
+## Repository Identity
+- **Root:** `/path/to/repo-semantic-memory`
+- **Index DB:** `.rsm/index.sqlite`
+- **RSM version:** `0.37.1`
+- **Total entities:** 3829
+- **Entity breakdown:** source=787, test=1505, doc=1422
+
+## Readiness / Freshness
+- **Index status:** `fresh`
+- **Indexed at:** 2026-06-16T02:16:05Z
+
+## Main Code Areas
+### `src/repo_semantic_memory/` (8 key entities)
+- `function` **build_parser** — `src/repo_semantic_memory/cli.py`
+- `function` **main** — `src/repo_semantic_memory/cli.py`
+...
+
+### `src/repo_semantic_memory/context/` (8 key entities)
+- `class` **BM25Config** — `src/repo_semantic_memory/context/bm25.py`
+- `class` **FieldedBM25Index** — `src/repo_semantic_memory/context/bm25.py`
+...
+
+## Test Areas
+- `tests/context/` — context pack and ranking tests
+- `tests/mcp/` — MCP handler tests
+...
+
+## Known Caveats
+- Index staleness: re-index if the repository has changed.
+...
+````
 
 ## Character Budget
 

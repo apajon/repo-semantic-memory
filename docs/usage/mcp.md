@@ -1,3 +1,5 @@
+> For concrete MCP configuration examples and tool tables, see [CLI Examples](examples.md#5-mcp--repodb-mode).
+
 # RSM MCP Usage
 
 > **Status:** Mode-sensitive surface active (61.16).  
