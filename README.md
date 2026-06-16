@@ -20,7 +20,7 @@ Instead of asking an agent to explore a codebase from scratch, RSM helps it star
 Index the repo -> search for task context -> prepare a ContextPack -> give it to your agent
 ```
 
-[Quickstart](docs/quickstart.md) · [CLI](docs/usage/cli.md) · [MCP](docs/usage/mcp.md) · [Project Brief](docs/usage/project_brief.md) · [Benchmarks](docs/eval/benchmarks.md) · [Roadmap](docs/design/roadmap.md)
+[Quickstart](docs/quickstart.md) · [CLI](docs/usage/cli.md) · [Examples](docs/usage/examples.md) · [MCP](docs/usage/mcp.md) · [Project Brief](docs/usage/project_brief.md) · [Limitations](docs/known_limitations.md) · [Roadmap](docs/design/roadmap.md) · [Benchmarks](docs/eval/benchmarks.md)
 
 ---
 
