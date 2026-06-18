@@ -8,46 +8,87 @@ Status: Draft — not yet published.
 
 # Announcing repo-semantic-memory
 
-`repo-semantic-memory` (`rsm`) is a local repository context layer for coding agents.
+I built `repo-semantic-memory` (`rsm`) because I kept running into the same frustration with coding agents.
 
-You can use it from the CLI, but it is especially useful through MCP: compatible coding agents can call RSM to search your repository, find related files, and prepare focused ContextPacks before editing code.
+They can be useful, but on a real repository they often start by doing the same expensive work again and again: reading large files, rediscovering the project structure, opening tests, guessing where behavior lives, and slowly building enough context before they can make a useful change.
+
+That costs time. It also consumes a lot of context.
+
+RSM is my attempt to make that first step more explicit.
+
+It builds a local index of a repository and exposes a small set of tools that help a coding agent ask better questions before editing code:
 
 ```text
-Index the repo -> configure MCP -> agent asks RSM -> start editing with context
+What files matter for this task?
+What tests are related?
+What docs explain this area?
+What context should I read before changing anything?
 ```
 
-## Why I built this
+You can use RSM from the CLI, but the most useful workflow is through MCP: a compatible coding agent can call RSM directly from the editor workflow to search the repo, find related context, and prepare a focused ContextPack.
 
-I kept running into the same problem when using coding agents on real repositories.
+```text
+Index the repo -> configure MCP -> agent asks RSM -> edit with better context
+```
 
-Before making a useful change, the agent often re-read large parts of the codebase, opened full files, rediscovered project structure, and pieced together how files interacted. That used a lot of context, took time, and still did not always give the agent the right view of the task.
+## What RSM does
 
-RSM is my attempt to make that first step cheaper and more reliable. It builds a local index of the repository and uses it to prepare focused context for a specific development task — so your agent starts from the right files instead of exploring from scratch.
+RSM is a local repository context layer for coding agents.
 
-## What it does today
+Today, it can:
 
-RSM ships with a local read-only MCP server, so compatible coding agents can call repository search and ContextPack tools directly from the editor workflow. The four public MCP tools are:
+- index Python code and Markdown documentation
+- search for files, symbols, tests, and docs related to a task
+- expand from a known file or symbol to nearby context
+- prepare source-cited ContextPacks with a character budget
+- generate a compact project brief for agent orientation
+- expose the workflow through a local read-only MCP server
 
-- `rsm_search` — find relevant files, symbols, tests, and docs across the index.
-- `rsm_find_related` — expand around a known file, symbol, or qualified name.
-- `rsm_prepare_context` — build a task-specific, budget-bounded ContextPack.
-- `rsm_get_context_page` — page through a larger ContextPack result.
+The MCP side is important.
 
-Store mode (`rsm mcp serve --store`) lets one MCP server expose multiple registered repository indexes, with `rsm_store_list_indexes` and `rsm_store_select_index` for discovery and activation.
+Instead of asking an agent to explore the repository from scratch, you can give it access to RSM tools:
 
-RSM also works from the CLI — indexing, ContextPack generation, project briefs, and evaluation:
+- `rsm_search`
+- `rsm_find_related`
+- `rsm_prepare_context`
+- `rsm_get_context_page`
 
-Everything is deterministic: same index, same query, same result. No LLM calls, no network access, no randomized ordering.
+For multi-repo or multi-index workflows, RSM also has a store mode so one MCP server can expose several registered repository indexes.
 
-RSM is strongest today for Python and documentation-heavy repositories.
+The server is local and read-only. It does not edit files, and it does not auto-index in the background. You explicitly build or refresh the index with `rsm index`.
+
+RSM is designed to be deterministic: given the same index and query, it should produce stable, repeatable results. Retrieval does not use LLM calls, does not require embeddings, and does not depend on a hosted service.
+
+## Why this matters
+
+A coding agent does not only need instructions. It needs the right context.
+
+Without that context, it may over-read, miss important tests, change the wrong abstraction, or spend half of the conversation reconstructing repository structure.
+
+RSM is not trying to replace the agent.
+
+It is trying to give the agent a better starting point.
 
 ## How to try it
 
-Install dependencies, build an index, and prepare your first context pack:
+Install dependencies and build an index:
 
 ```bash
 uv sync --all-groups
 uv run rsm index . --db .rsm/index.sqlite
+```
+
+Expose the index through MCP:
+
+```bash
+uv run rsm mcp serve --repo /path/to/repo --db /path/to/index.sqlite
+```
+
+Then use the RSM tools from a compatible MCP client.
+
+You can also prepare context manually from the CLI:
+
+```bash
 uv run rsm pack \
   --db .rsm/index.sqlite \
   --task "find where context pack ranking happens" \
@@ -55,27 +96,27 @@ uv run rsm pack \
   --profile agent_standard
 ```
 
-Generate a project brief that your agent can use for orientation:
+Generate a project brief for orientation:
 
 ```bash
 uv run rsm project-brief --db .rsm/index.sqlite --force
 ```
 
-Use RSM through MCP in VS Code or Claude Code:
-
-```bash
-uv run rsm mcp serve --repo /path/to/repo --db /path/to/index.sqlite
-```
-
 ## Current limitations
 
-RSM is experimental pre-1.0 software. It is useful today, but it is not a complete code intelligence platform.
+RSM is experimental pre-1.0 software.
 
-- Strongest for Python and Markdown. Non-Python files are indexed as file-level entities only (no symbol extraction).
-- No embeddings or vector search. RSM uses BM25 lexical scoring by design.
-- No GUI, no automatic background indexing, no watch mode. You run `rsm index` explicitly.
-- ContextPacks are retrieval aids, not correctness guarantees. Verify important claims against the actual source files.
-- No `.msg`/`.srv`/`.action` indexing yet (relevant for ROS 2 users).
+It is useful today, but it is not a complete code intelligence platform.
+
+Current limitations:
+
+- Python and Markdown/documentation-heavy repositories are the strongest use case today.
+- Non-Python files are indexed more shallowly.
+- No embeddings or vector search are used by default.
+- No GUI, no automatic background indexing, and no watch mode.
+- The MCP server is local and read-only. It exposes retrieval tools but does not edit files.
+- ContextPacks are retrieval aids, not correctness guarantees. Important claims should still be checked against the source.
+- No `.msg`, `.srv`, or `.action` indexing yet, which matters for ROS 2 users.
 
 For the full list, see [Known Limitations](https://github.com/apajon/repo-semantic-memory/blob/main/docs/known_limitations.md).
 
@@ -85,12 +126,12 @@ These limitations do not block current use for Python codebase exploration, docu
 
 The [roadmap](https://github.com/apajon/repo-semantic-memory/blob/main/docs/design/roadmap.md) covers the near-term backlog:
 
-- **68.x**: Non-Python / interface-file indexing (`.msg`, `.srv`, `.action`, and others).
+- **68.x**: Non-Python / interface-file indexing, including `.msg`, `.srv`, `.action`, and similar files.
 - **63.x**: Search refinement.
 - **64.x**: `find_related` refinement.
 - **65.x**: ContextPack refinement.
 
-Tracks are not committed release promises. Priorities are driven by benchmarks, dogfooding on real repositories, and real agent workflow failures.
+These tracks are not release promises. Priorities are driven by benchmarks, dogfooding on real repositories, and real agent workflow failures.
 
 [README](https://github.com/apajon/repo-semantic-memory) · [Quickstart](https://github.com/apajon/repo-semantic-memory/blob/main/docs/quickstart.md) · [Examples](https://github.com/apajon/repo-semantic-memory/blob/main/docs/usage/examples.md) · [MCP](https://github.com/apajon/repo-semantic-memory/blob/main/docs/usage/mcp.md) · [Limitations](https://github.com/apajon/repo-semantic-memory/blob/main/docs/known_limitations.md) · [Roadmap](https://github.com/apajon/repo-semantic-memory/blob/main/docs/design/roadmap.md)
 
@@ -98,18 +139,22 @@ Tracks are not committed release promises. Priorities are driven by benchmarks, 
 
 ## 2. Short Social Post
 
-I built `repo-semantic-memory` because coding agents waste too much time reading entire files and rediscovering project structure before they can make a useful change.
+I built `repo-semantic-memory` because I kept seeing the same pattern with coding agents: before making a useful change, they often had to rediscover the repository from scratch.
 
-RSM is a local repository context layer for coding agents. It indexes your repo and exposes search, find-related, and ContextPack tools through a local MCP server — so your agent can ask RSM directly instead of exploring from scratch.
+RSM gives them a better starting point.
 
-CLI also available. Pre-1.0 and experimental — honest about what it does not do yet.
+It indexes a local repo and exposes search, related-context, and ContextPack tools through a local read-only MCP server. A compatible coding agent can ask RSM which files, tests, docs, and symbols matter for a task before it starts editing.
 
-If you work with Python repos and coding agents, give it a try:
+CLI workflows are also available for indexing, manual ContextPack generation, project briefs, and evaluation.
+
+It is pre-1.0 and experimental. Python and documentation-heavy repos work best today. Non-Python support is still shallow, and `.msg` / `.srv` / `.action` files are not indexed yet.
+
+Basic flow:
 
 ```bash
 uv sync --all-groups
 uv run rsm index . --db .rsm/index.sqlite
-uv run rsm pack --db .rsm/index.sqlite --task "your task here" --budget 8000
+uv run rsm mcp serve --repo /path/to/repo --db /path/to/index.sqlite
 ```
 
 Link: [repo-semantic-memory on GitHub](https://github.com/apajon/repo-semantic-memory)
@@ -118,39 +163,71 @@ Link: [repo-semantic-memory on GitHub](https://github.com/apajon/repo-semantic-m
 
 ## 3. ROS Discourse Draft
 
-> **Note:** RSM is not a ROS-specific project. This draft is for the ROS community because RSM was dogfooded on `lifecore_ros2` and may be useful to ROS developers working with coding agents on larger Python/documentation-heavy repositories.
+> **Note:** RSM is not a ROS-specific project. I am sharing it here because I dogfooded it while working on `lifecore_ros2`, and it may be useful to ROS developers using coding agents on larger Python/documentation-heavy repositories.
 >
 > **Suggested category:** General / Software Engineering
-> **Suggested tags:** `tools`, `python`, `developer-experience`
+> **Suggested tags:** `tools`, `python`, `developer-experience`, `mcp`
 
-### repo-semantic-memory: a local context layer for coding agents (also for ROS 2)
+### repo-semantic-memory: local repository context for coding agents
 
-I built `repo-semantic-memory` (`rsm`) while working on `lifecore_ros2` — a Python lifecycle framework for ROS 2 nodes.
+I built `repo-semantic-memory` (`rsm`) while working on `lifecore_ros2`, a Python lifecycle framework for ROS 2 nodes.
 
-The problem was simple: every time I asked a coding agent to make a change, it spent a lot of time re-reading files, rediscovering the project structure, and piecing together how modules interacted — before it could do anything useful.
+The problem was not that the coding agent could not edit code. The problem was that it first had to rediscover the repository: where the behavior lived, which tests mattered, which docs explained the design, and which files were related.
 
-RSM ships with a local read-only MCP server. Compatible agents can call `rsm_search`, `rsm_find_related`, and `rsm_prepare_context` directly from the editor workflow to get task-relevant files, tests, docs, and symbols — with source citations and a character budget.
+That context-building step became repetitive and expensive.
 
-CLI commands are also available for indexing, manual context packs, project briefs, and evaluation.
+RSM is an attempt to make that step explicit.
 
-### What it does for ROS 2 developers
+It indexes a local repository and helps prepare task-focused context before the agent starts editing. The main workflow is through MCP: RSM ships with a local read-only MCP server, so compatible agents can call tools like:
 
-- Indexes Python packages and Markdown docs.
-- Finds task-relevant files, tests, and docs across the workspace.
-- Generates project briefs that an agent can read before editing.
-- Exposes search, find-related, and context pack tools through MCP.
+- `rsm_search`
+- `rsm_find_related`
+- `rsm_prepare_context`
+- `rsm_get_context_page`
+
+In practice, the agent can ask RSM for task-relevant files, tests, docs, and related context directly from the editor workflow.
+
+CLI commands are also available for indexing, manual ContextPack generation, project briefs, and evaluation.
+
+### What it can help with
+
+For ROS 2 developers working mostly in Python, RSM can help:
+
+- find task-relevant implementation files, tests, and docs
+- prepare focused context before using a coding agent
+- generate a short project brief for an agent to read before editing
+- expose repository search and ContextPack tools through MCP-compatible clients
+
+Store mode can also expose multiple registered repository indexes from one MCP server.
 
 ### Honest limitations
 
-- **No `.msg`/`.srv`/`.action` indexing yet.** This is a planned feature (see roadmap) but not implemented. If your task depends on interface files, RSM will not surface them today.
-- RSM is experimental pre-1.0. It is useful but not a complete solution.
-- It works best for Python and documentation-heavy repos.
+RSM is experimental pre-1.0 software.
+
+The most important ROS-related limitation is that it does **not** index `.msg`, `.srv`, or `.action` files yet. That is on the roadmap, but not implemented today. If your task depends heavily on interface files, RSM will miss part of the picture.
+
+It currently works best for Python and documentation-heavy repositories.
+
+The MCP server is local and read-only. It does not edit files and does not auto-index in the background.
 
 ### Try it
+
+Build an index:
 
 ```bash
 uv sync --all-groups
 uv run rsm index . --db .rsm/index.sqlite
+```
+
+Expose it through MCP:
+
+```bash
+uv run rsm mcp serve --repo /path/to/repo --db /path/to/index.sqlite
+```
+
+Or prepare a ContextPack manually:
+
+```bash
 uv run rsm pack --db .rsm/index.sqlite --task "validate lifecycle cleanup" --budget 8000
 uv run rsm project-brief --db .rsm/index.sqlite --force
 ```
@@ -164,13 +241,15 @@ uv run rsm project-brief --db .rsm/index.sqlite --force
 Short taglines for README, social bios, or project descriptions:
 
 1. Give coding agents the right repo context before they edit code.
-2. Local repository memory for coding-agent workflows.
-3. Focused ContextPacks for coding agents.
-4. Index your repo. Prepare context. Give it to your agent.
-5. Stop letting coding agents read your entire repo. Give them a ContextPack.
-6. Deterministic, source-cited context for coding agents.
-7. What if your coding agent started from the right files?
-8. RSM: index, search, pack — give your agent the context it needs.
+2. A local MCP context server for coding agents.
+3. Help your coding agent start from the right files.
+4. Index your repo. Expose it through MCP. Let your agent ask for context.
+5. Local repository context for coding-agent workflows.
+6. Focused, source-cited ContextPacks for coding agents.
+7. Stop making coding agents rediscover your repo from scratch.
+8. What if your coding agent started from the right files?
+9. Task-centered repository retrieval for MCP agent workflows.
+10. RSM: local repo context before the agent edits.
 
 ---
 
@@ -192,10 +271,10 @@ For any announcement post, include these links:
 
 ## 6. Notes Before Posting
 
-- [ ] Review wording — ensure no overclaiming, no hype language.
+- [ ] Review wording one last time.
 - [ ] Verify all links resolve correctly against the current `main` branch.
 - [ ] Ensure the release validation (69.4) passed cleanly.
 - [ ] Check that the quickstart flow works from a fresh clone.
 - [ ] Confirm the roadmap and limitations docs are up to date.
-- [ ] Decide which channels to post to (GitHub Discussions, ROS Discourse, social).
+- [ ] Decide which channels to post to: GitHub Discussions, GitHub Release, ROS Discourse, social.
 - [ ] Do not post until the maintainer explicitly approves.
