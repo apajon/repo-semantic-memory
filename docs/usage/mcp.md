@@ -415,33 +415,38 @@ code. A scoped index means some files were excluded from indexing.
 
 ## 7. Store Mode Notes
 
-Store mode (`rsm mcp serve --store`) enables multi-repository workspaces with
-one MCP server config. The current state:
+Store mode (`rsm mcp serve --store`) enables multi-repository workflows with
+one MCP server config.
 
-- Store-mode tools (`rsm_store_list_indexes`, `rsm_store_select_index`,
-  `rsm_store_current_index`) are marked `[INTERNAL/DEBUG - store mode]`.
-- Store-mode tools are **hidden by default**. They are visible only
-  with `--expose-all-tools`.
-- `active_repo` is included in every repo-scoped response from the 4 public
-  tools (where implemented).
-- Per-call `repo` parameter is **deferred** (not yet implemented).
-- When running in store mode with `--expose-all-tools`, the full 17-tool
-  surface is available (4 public + 3 store + 10 repo).
+In default store mode, `tools/list` exposes 7 public tools:
 
-For `--store` CLI usage, prerequisites, and configuration, see the original
-phase 1 documentation preserved at the end of this document.
+- 4 task tools:
+  - `rsm_search`
+  - `rsm_find_related`
+  - `rsm_prepare_context`
+  - `rsm_get_context_page`
+- 3 store navigation tools:
+  - `rsm_store_list_indexes`
+  - `rsm_store_select_index`
+  - `rsm_store_current_index`
+
+Legacy and internal/debug tools remain hidden by default and require
+`--expose-all-tools`.
+
+Per-call `repo` parameters are deferred. The current workflow is
+session-scoped repo selection through store mode.
 
 ---
 
 ## 8. Compatibility Notes
 
-- **Old tools are hidden by default.** `tools/list` returns only 4 public tools.
+- **Old tools are hidden by default.** `tools/list` returns 4 public tools in repo/db mode, 7 in store mode.
 - **Old tools are not removed.** They are available via `--expose-all-tools`.
 - **Deprecation is description-based.** `[DEPRECATED]` and `[INTERNAL/DEBUG]`
   prefixes in tool descriptions are visible in expose-all mode.
 - **Compatibility mode is explicit.** `--expose-all-tools` enables the full
-  14-tool surface.
-- **Migration is complete.** The default 4-tool surface is stable.
+  legacy/internal surface (14 tools in repo/db mode, 17 in store mode).
+- **Migration is complete.** The default 4-tool (repo/db) and 7-tool (store) surfaces are stable.
 
 ---
 
@@ -475,7 +480,7 @@ The 4-tool default surface is active and validated.
 
 ## 11. Future Direction
 
-- **Default `tools/list`** exposes only 4 public tools.
+- **Default `tools/list`** exposes 4 public tools in repo/db mode, 7 in store mode.
 - **Legacy/internal tools** are available behind `--expose-all-tools`.
 - **Search/find_related benchmarks** are planned to complement the existing
   ContextPack benchmark harness.
@@ -530,7 +535,7 @@ uv run rsm mcp serve --repo /absolute/path/to/target-repo \
 ### Safety summary
 
 - No arbitrary shell command execution.
-- No network access.
+- Does not initiate outbound network connections.
 - No mutation of repository or database state.
 - No auto-indexing.
 - Explicit `--repo`/`--db` validation.
