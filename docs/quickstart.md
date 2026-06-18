@@ -2,7 +2,9 @@
 
 RSM is local-first. It reads the current repository and writes local artifacts; source code, docs, tests, and Git history remain authoritative.
 
-This quickstart walks through the normal local workflow: install dependencies, build an index, inspect the repository, ask for task-specific context, optionally export `.ai/` artifacts, and run evaluation commands.
+Two paths: **CLI** (manual indexing → pack → copy to agent) and **MCP** (agent calls RSM directly).
+
+MCP is the recommended integration path when using RSM with a coding agent. CLI remains important for indexing, debugging, validation, and CI/evaluation.
 
 ## Install dependencies
 
@@ -72,6 +74,62 @@ uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml -
 
 Interpret benchmark results as internal and directional, not broad superiority claims.
 
+## End-to-end example
+
+Here is a complete first-use flow with expected output:
+
+### 1. Install
+
+```bash
+uv sync --all-groups
+```
+
+### 2. Index
+
+```bash
+uv run rsm index . --db .rsm/index.sqlite
+```
+
+You should see progress lines and a final summary:
+
+```text
+indexing: complete: entities=3738 relations=6736, elapsed=7.5s
+entities=3738 relations=6736
+```
+
+### 3. Explore (optional)
+
+```bash
+uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
+```
+
+This prints a Markdown overview of modules and symbols.
+
+### 4. Prepare context for a task
+
+```bash
+uv run rsm pack \
+  --db .rsm/index.sqlite \
+  --task "find where context pack ranking happens" \
+  --budget 8000 \
+  --profile agent_standard
+```
+
+The output includes selected symbols, suggested files, and source citations
+for your task. Give this output to your coding agent before asking it to edit
+code.
+
+### 5. Generate a project brief
+
+```bash
+uv run rsm project-brief --db .rsm/index.sqlite --force
+```
+
+Writes `.rsm/PROJECT_CONTEXT.md`. Your agent can read this file to understand
+the repository before calling any RSM tools.
+
+For more examples with representative output, see [CLI Examples](usage/examples.md).
+
 ## Clean up local artifacts
 
 `.rsm/` is local working state. Remove it when you want to rebuild from scratch:
@@ -82,7 +140,9 @@ rm -rf .rsm/
 
 ## Next reading
 
-- [CLI usage](usage/cli.md) for the full command surface
-- [Repo maps](concepts/repo_maps.md) for broad orientation output
-- [Context packs](concepts/context_packs.md) for task-specific output
-- [Benchmarks](eval/benchmarks.md) for eval dataset scope and limitations
+- [MCP usage](usage/mcp.md) — MCP server configuration and tool reference (recommended for agent workflows)
+- [CLI examples](usage/examples.md) — concrete command examples with representative output
+- [CLI usage](usage/cli.md) — full command reference
+- [Repo maps](concepts/repo_maps.md) — broad orientation output
+- [Context packs](concepts/context_packs.md) — task-specific output
+- [Benchmarks](eval/benchmarks.md) — eval dataset scope and limitations

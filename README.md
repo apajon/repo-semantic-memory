@@ -1,80 +1,371 @@
 # repo-semantic-memory
 
-Coding agents work better when they know where to look.
+![RSN Banner](docs/_static/Logo_RSM_banner.png)
 
-`repo-semantic-memory` (`rsm`) builds compact, source-cited repository context for coding agents. It can generate broad repo maps for orientation, task-shaped context packs for focused work, and `.ai/` snapshots for agent workflows.
+[![CI](https://github.com/apajon/repo-semantic-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/apajon/repo-semantic-memory/actions/workflows/ci.yml)
+[![Release](https://github.com/apajon/repo-semantic-memory/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/apajon/repo-semantic-memory/actions/workflows/release.yml)
 
-The goal is not to replace reading source. The goal is to give an agent a better starting point: relevant files, symbols, exports, tests, structural relations, citations, and uncertainty, all derived from local repository evidence.
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![Package manager: uv](https://img.shields.io/badge/package%20manager-uv-blue)
 
-RSM is an experimental pre-1.0, Python-first repository context compiler. It runs locally and avoids LLM calls, embeddings, vector databases, hosted services, and web UIs.
+![Status: experimental pre-1.0](https://img.shields.io/badge/status-experimental%20pre--1.0-orange)
+[![Latest Release](https://img.shields.io/github/v/release/apajon/repo-semantic-memory)](https://github.com/apajon/repo-semantic-memory/releases/latest)
+![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-RSM also includes a minimal local stdio MCP-compatible JSON-RPC prototype for read-only dogfooding. It is not yet externally conformance-tested.
+**Give your coding agent the right repo context before it edits code.**
 
-## Quick start
+`repo-semantic-memory` (`rsm`) is a local repository context layer for coding agents.
+
+You can use it from the CLI, but it is especially useful through MCP: compatible coding agents can call RSM to search your repository, find related files, and prepare focused ContextPacks before editing code.
+
+```text
+Index the repo -> configure MCP -> agent asks RSM -> start editing with context
+```
+
+[Quickstart](docs/quickstart.md) · [CLI](docs/usage/cli.md) · [Examples](docs/usage/examples.md) · [MCP](docs/usage/mcp.md) · [Project Brief](docs/usage/project_brief.md) · [Limitations](docs/known_limitations.md) · [Roadmap](docs/design/roadmap.md) · [Benchmarks](docs/eval/benchmarks.md)
+
+---
+
+## Quickstart
+
+### CLI quickstart
+
+Install dependencies, index, and prepare context:
 
 ```bash
 uv sync --all-groups
-uv run rsm index . --db .rsm/index.sqlite
-uv run rsm repo-map --db .rsm/index.sqlite --budget 4000 --profile agent_standard
-uv run rsm pack --db .rsm/index.sqlite --task "find where context pack ranking happens" --budget 8000 --profile agent_standard
 ```
 
-Optional exports and evaluation:
+Index the current repository:
 
 ```bash
-uv run rsm export-ai --db .rsm/index.sqlite --out .ai --force
-uv run rsm export-jsonl --db .rsm/index.sqlite --out .rsm/export
-uv run rsm import-jsonl --in .rsm/export --db .rsm/imported.sqlite
+uv run rsm index . --db .rsm/index.sqlite
+```
+
+Prepare context for a task:
+
+```bash
+uv run rsm pack \
+  --db .rsm/index.sqlite \
+  --task "find where context pack ranking happens" \
+  --budget 8000 \
+  --profile agent_standard
+```
+
+Generate a project brief:
+
+```bash
+uv run rsm project-brief --db .rsm/index.sqlite --force
+```
+
+Default output:
+
+```text
+.rsm/PROJECT_CONTEXT.md
+```
+
+### MCP quickstart (recommended for coding agents)
+
+Index your repo, then start the MCP server so your agent can call RSM directly:
+
+```bash
+uv run rsm index . --db .rsm/index.sqlite
+uv run rsm mcp serve --repo . --db .rsm/index.sqlite
+```
+
+Example `mcp.json` for VS Code:
+
+```json
+{
+  "servers": {
+    "repo-semantic-memory": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/repo-semantic-memory",
+        "rsm",
+        "mcp",
+        "serve",
+        "--repo",
+        "/path/to/your/repository",
+        "--db",
+        "/path/to/your/repository/.rsm/index.sqlite"
+      ]
+    }
+  }
+}
+```
+
+Once connected, your agent can use:
+
+| Tool | Purpose |
+|---|---|
+| `rsm_search` | Search for relevant files, symbols, docs, and tests |
+| `rsm_find_related` | Expand around a known file, symbol, or qualified name |
+| `rsm_prepare_context` | Build a task-centered ContextPack |
+| `rsm_get_context_page` | Page through a larger ContextPack result |
+
+### Store mode (multiple repositories)
+
+Register multiple repositories so your agent can switch between them:
+
+```bash
+uv run rsm store register /path/to/repo1 --index
+uv run rsm store register /path/to/repo2 --index
+uv run rsm store list
+```
+
+The store lives at `~/.local/share/repo-semantic-memory` on Linux, `~/Library/Application Support/repo-semantic-memory` on macOS, or `%LOCALAPPDATA%\repo-semantic-memory` on Windows. Set `RSM_HOME` to override.
+
+Start MCP in store mode — example `mcp.json`:
+
+```json
+{
+  "servers": {
+    "repo-semantic-memory-store": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/repo-semantic-memory",
+        "rsm",
+        "mcp",
+        "serve",
+        "--store"
+      ],
+      "env": {
+        "RSM_HOME": "/path/to/.rsm_store"
+      }
+    }
+  }
+}
+```
+
+The agent can then call `rsm_store_list_indexes` and `rsm_store_select_index` to discover and activate indexes without a restart.
+
+## Why I built this
+
+I built RSM because I kept running into the same problem when using coding agents on real repositories.
+
+Before making a useful change, the agent often had to re-read large parts of the codebase, open full files, rediscover the project structure, and piece together how files interacted. That used a lot of context, took time, and still did not always give the agent the right view of the task.
+
+RSM is my attempt to make that first step cheaper and more reliable.
+
+It builds a local index of the repository and exposes task-focused context through MCP and CLI, so an agent can start from relevant files, tests, docs, and symbols instead of exploring from scratch.
+
+## What problem does it solve?
+
+Coding agents are usually better at editing code than at deciding what to read first.
+
+On a real project, the important context is often split across:
+
+- implementation files
+- tests
+- docs and design notes
+- examples
+- related modules
+- past architectural decisions
+
+RSM helps collect that context before the agent starts editing.
+
+It is especially useful when you are returning to a project after a pause, working in a larger repo, or trying to avoid wasting context on irrelevant files.
+
+## What RSM does
+
+RSM can help you:
+
+- index a local repository
+- search for task-relevant files, symbols, tests, and docs
+- find related files or entities
+- prepare a compact ContextPack for an agent
+- generate a project brief for future sessions
+- expose repository search and ContextPack generation through a local read-only MCP server
+- run benchmarks to measure retrieval quality
+
+A typical task might be:
+
+```text
+I need to change lifecycle cleanup behavior.
+Find the implementation, tests, docs, and nearby context my agent should read first.
+```
+
+RSM does not make the change. It prepares the context so your coding agent can start from a better place.
+
+## Core workflows
+
+RSM supports two main workflows.
+
+### MCP workflow, recommended for coding agents
+
+1. **Index** a repository.
+2. **Start** the local MCP server.
+3. **Let your agent call RSM tools** such as `rsm_search`, `rsm_find_related`, and `rsm_prepare_context`.
+4. **Review the returned context** before editing important code.
+5. **Refresh the index explicitly** when the repository changes.
+
+### CLI workflow, useful for manual use and debugging
+
+1. **Index** a repository.
+2. **Search** for task-relevant context.
+3. **Inspect related files or symbols.**
+4. **Prepare a ContextPack** for the task.
+5. **Give that ContextPack to your coding agent manually.**
+6. **Optionally generate a project brief** for future sessions.
+
+## Project brief
+
+A project brief is a short Markdown summary generated from an existing RSM index.
+
+It helps an agent understand the repository before it starts calling tools or editing files.
+
+Run:
+
+```bash
+uv run rsm project-brief --db .rsm/index.sqlite --force
+```
+
+The brief includes:
+
+- repository identity
+- freshness/readiness status
+- main code areas
+- important tests and docs
+- known caveats
+- suggested agent workflow
+
+See [Project Brief usage](docs/usage/project_brief.md).
+
+## MCP support
+
+RSM includes a local read-only MCP server for agent workflows.
+
+Default task tools:
+
+| Tool | Purpose |
+|---|---|
+| `rsm_search` | Find relevant indexed files, symbols, docs, and tests. |
+| `rsm_find_related` | Expand around a known file, symbol, or qualified name. |
+| `rsm_prepare_context` | Build a task-centered ContextPack. |
+| `rsm_get_context_page` | Page through a larger ContextPack result. |
+
+Store-mode tools:
+
+| Tool | Purpose |
+|---|---|
+| `rsm_store_list_indexes` | List registered repository indexes. |
+| `rsm_store_select_index` | Select the active repository index. |
+| `rsm_store_current_index` | Show the selected index and readiness state. |
+
+Example:
+
+```bash
+uv run rsm mcp serve --repo /path/to/repo --db /path/to/index.sqlite
+```
+
+RSM MCP tools are read-only. They do not modify your repository and do not auto-index in the background.
+
+See [MCP usage](docs/usage/mcp.md).
+
+## Benchmarks and dogfooding
+
+RSM is developed with benchmark cases and real-repository dogfooding.
+
+That means retrieval changes are checked against task examples instead of only judged by manual impressions.
+
+Useful benchmark commands include:
+
+```bash
 uv run rsm eval retrieval --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --json
 uv run rsm eval compare --db .rsm/index.sqlite --dataset benchmarks/tasks.yaml --budget 4000 --json
 uv run rsm eval bench --dataset benchmarks/ci_benchmark_cases.yaml --json
 ```
 
-See [`docs/eval/benchmarks.md`](docs/eval/benchmarks.md) for benchmark workflows.
+See [Benchmarks](docs/eval/benchmarks.md) and the [`lifecore_ros2` case study](docs/case_studies/lifecore_ros2.md).
 
-For more detail, start with [`docs/README.md`](docs/README.md) and [`docs/quickstart.md`](docs/quickstart.md).
+## What RSM is not
 
-## What it currently covers
+RSM is not:
 
-RSM is organized around one practical workflow: index the repository once, then ask for compact context tailored to a task.
+- a coding agent
+- a Copilot, Cursor, or Claude Code replacement
+- a general-purpose search SaaS
+- a vector database
+- a GUI
+- a full code graph platform
+- an automatic background indexer
+- a source of truth that replaces the repository itself
 
-- deterministic repository indexing
-- Python AST extraction
-- Markdown outline extraction
-- public API export extraction from `__init__.py`
-- test relationship extraction
-- repo-map and context-pack generation
-- ranking breakdowns, BM25 lexical scoring, and graph relation selection
-- deterministic compression profiles
-- approximate token-savings metrics
-- benchmark/eval commands
-- benchmark harness with CI and manual external datasets
-- `.ai/` export
-- JSONL import/export
-- minimal local stdio MCP-compatible JSON-RPC prototype for read-only local dogfooding, not yet externally conformance-tested
+RSM produces local, source-cited context. You should still verify important decisions against the actual files.
 
-## Documentation map
+## Current strengths
 
-- [`docs/README.md`](docs/README.md) — documentation index by reader intent
-- [`docs/quickstart.md`](docs/quickstart.md) — setup and first commands
-- [`docs/concepts/`](docs/concepts/) — semantic index, repo maps, context packs, compression profiles, claims/invariants
-- [`docs/usage/`](docs/usage/) — CLI, agent workflows, `.ai/`, JSONL interchange
-- [`docs/eval/`](docs/eval/) — benchmarks and token-savings interpretation
-- [`docs/design/`](docs/design/) — data model, MCP design, future CLI output summarizer, roadmap/review notes
-- [`docs/release/versioning.md`](docs/release/versioning.md) — pre-1.0 versioning and release policy
-- [`docs/case_studies/lifecore_ros2.md`](docs/case_studies/lifecore_ros2.md) — real-repo validation case study
+RSM is currently most useful for:
 
-Agent/contributor operations live in [`AGENTS.md`](AGENTS.md). Static `.ai/` templates are agent-facing artifacts, not primary human docs.
+- Python-first repositories
+- documentation-heavy repositories
+- agents that need focused context before editing
+- local workflows where repository data should stay on your machine
+- benchmark-driven improvement of retrieval quality
+- returning to a project after a long pause
 
-## Limitations
+## Current limitations
 
-- Experimental pre-1.0 project; APIs, schemas, and context-pack formats may evolve.
-- Context packs are starting points, not proof. Important claims should be verified against cited source.
-- Some relations and components are inferred heuristically.
-- `confirmed PublicAPI` means explicitly exported in source, not a stable API guarantee.
-- Token estimates use approximate deterministic accounting (`chars / 4`) and are directional.
-- Internal benchmark results are small, repository-specific, and not broad superiority claims.
-- The MCP prototype is read-only and not yet externally conformance-tested.
+RSM is experimental pre-1.0 software.
+
+Current limitations include:
+
+- Python and Markdown/documentation support are strongest today.
+- Non-Python language support is limited.
+- ROS interface files such as `.msg`, `.srv`, and `.action` are not indexed yet.
+- Search and ranking are useful but not perfect.
+- ContextPacks are starting points, not proof.
+- Some relations are inferred heuristically.
+- MCP support is local and read-only.
+- RSM does not auto-index, auto-refresh, watch the filesystem, or modify source code.
+
+The goal is to be useful and honest, not magical.
+
+## Roadmap
+
+Near-term work focuses on:
+
+- non-Python and interface-file indexing
+- search and ranking refinement
+- `find_related` refinement
+- ContextPack balance and noise reduction
+- MCP documentation and store-mode hardening
+- optional deterministic snippets/chunks if benchmarks justify them
+
+Deferred technical work includes:
+
+- broader language-specific symbol extraction
+- richer relation extraction
+- optional semantic/chunk retrieval if benchmarks justify it
+- graph export or external backend integrations
+- packaging and release workflow hardening
+
+See the [Roadmap](docs/design/roadmap.md).
+
+## Documentation
+
+- [Documentation index](docs/README.md)
+- [Quickstart](docs/quickstart.md)
+- [CLI usage](docs/usage/cli.md)
+- [MCP usage](docs/usage/mcp.md)
+- [Project brief](docs/usage/project_brief.md)
+- [Agent workflows](docs/usage/agent_workflows.md)
+- [Benchmarks](docs/eval/benchmarks.md)
+- [`lifecore_ros2` case study](docs/case_studies/lifecore_ros2.md)
+- [Agent instructions](AGENTS.md)
+
+## Status
+
+RSM is experimental pre-1.0 software.
+
+It is suitable for local dogfooding, agent-context experiments, and benchmark-backed development on Python-first repositories. Public APIs, database details, and ContextPack formats may change before 1.0.
 
 ## License
 

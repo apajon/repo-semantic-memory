@@ -1,5 +1,7 @@
 # CLI usage
 
+> For concrete command examples with representative output, see [CLI Examples](examples.md).
+
 This page is the human command reference. `AGENTS.md` keeps contributor/agent operational guardrails, and `.ai/AGENT_COMMANDS.md` keeps the short agent-facing workflow guide.
 
 ## Core commands

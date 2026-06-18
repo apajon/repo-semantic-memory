@@ -12,7 +12,14 @@ Start with the quickstart if you want to run commands. Read the concepts if you 
 - **I want to use the MCP prototype:** read [MCP usage](usage/mcp.md).
 - **I want to understand evaluation:** read [Benchmarks](eval/benchmarks.md).
 - **I want to understand release/versioning:** read [Versioning](release/versioning.md).
-- **I want a real-repo example:** read [lifecore_ros2 case study](case_studies/lifecore_ros2.md).
+- **I want to see examples:** read [CLI Examples](usage/examples.md).
+- **I want to know what RSM does not do:** read [Known Limitations](known_limitations.md).
+- **I want to see what is planned:** read [Roadmap](design/roadmap.md).
+
+## Limitations and roadmap
+
+- [Known Limitations](known_limitations.md) — what RSM supports well, what it does not, and what that means.
+- [Roadmap](design/roadmap.md) — current focus and near-term backlog.
 
 ## Concepts
 

@@ -1,5 +1,7 @@
 # Agent workflows
 
+MCP is the recommended integration path when using RSM with a coding agent. From the agent's perspective, RSM tools appear as callable functions (`rsm_search`, `rsm_find_related`, `rsm_prepare_context`, `rsm_get_context_page`). CLI commands are still useful for indexing, debugging, validation, and CI.
+
 This page explains how coding agents should use RSM without turning generated artifacts into a second documentation set.
 
 For exact commands, use [`docs/usage/cli.md`](cli.md). For the short agent-facing command card, use `.ai/AGENT_COMMANDS.md`.
