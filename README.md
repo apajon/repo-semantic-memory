@@ -1,5 +1,7 @@
 # repo-semantic-memory
 
+![RSN Banner](https://raw.githubusercontent.com/apajon/repo-semantic-memory/main/docs/_static/Logo_RSM_banner.png)
+
 [![CI](https://github.com/apajon/repo-semantic-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/apajon/repo-semantic-memory/actions/workflows/ci.yml)
 [![Release](https://github.com/apajon/repo-semantic-memory/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/apajon/repo-semantic-memory/actions/workflows/release.yml)
 
