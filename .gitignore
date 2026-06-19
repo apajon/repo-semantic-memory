@@ -47,6 +47,12 @@ dist/
 # Local index artifacts
 .rsm/
 
+
+# ROS2 generated outputs
+install/
+log/
+
+# BEGIN agentic-factory
 # Generated .ai/ snapshot files (volatile — depend on current index state)
 # Static template files (AGENT_COMMANDS.md, README.md, context_policy.md) may be committed.
 .ai/INDEX.yaml
@@ -56,6 +62,8 @@ dist/
 .ai/invariants.yaml
 .ai/repo_map.md
 
-# ROS2 generated outputs
-install/
-log/
+.rsm/index/
+.rsm/store/
+.rsm/cache/
+.rsm/embeddings/
+# END agentic-factory

@@ -33,16 +33,6 @@ reviewer:
 memory_writer:
   enabled: true
 
-github:
-  project_statuses:
-  - backlog
-  - todo
-  - doing
-  - review
-  - closed
-  - deferred
-  - rejected
-
 quality:
   required_before_review:
   - ruff
@@ -66,3 +56,33 @@ safety:
   no_automerge: true
   max_files_changed_without_approval: 12
   max_reloops: 2
+
+
+github:
+  owner: apajon
+  repo: repo-semantic-memory
+  project:
+    owner: apajon
+    number: 1
+    title: RSM Roadmap
+  status_field:
+    name: Status
+    id: PVTSSF_lAHOAG7IRs4BaaxWzhVSius
+    mapping:
+      backlog: Backlog
+      todo: Ready
+      doing: Doing
+      review: Review
+      closed: Done
+      deferred: Deferred
+      rejected: Deferred
+  project_statuses:
+    - backlog
+    - todo
+    - doing
+    - review
+    - closed
+    - deferred
+    - rejected
+  notes:
+    - "Rejected is temporarily mapped to Deferred until the GitHub Project Status field gets a dedicated Rejected option."
