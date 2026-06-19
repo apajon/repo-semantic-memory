@@ -41,12 +41,19 @@ quality:
   - mypy
 
 memory:
-  write_vault_decisions: true
-  write_mempalace_patterns: true
-  write_mempalace_errors: true
-  write_mempalace_repo_cards: true
-  sync_runtime_sqlite: false
-
+  provider: mempalace_mcp
+  palace: agentic-factory
+  wing: repo-semantic-memory
+  mcp:
+    type: stdio
+    command: /home/adrienpagon/.local/bin/uv
+    args:
+      - run
+      - --directory
+      - /home/adrienpagon/git/mempalace-mcp-bridge
+      - python
+      - -m
+      - mempalace.mcp_server
 rsm:
   derived_store: true
   sync_index: false
@@ -56,6 +63,7 @@ safety:
   no_automerge: true
   max_files_changed_without_approval: 12
   max_reloops: 2
+
 
 
 github:
