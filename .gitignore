@@ -29,6 +29,20 @@ dist/
 # Local env
 .env
 .env.*
+!.env.example
+
+# Agentic runtime
+.agentic/runtime/
+.agentic/cache/
+.agentic/logs/
+.agentic/tmp/
+.agentic/sqlite/*.db
+.agentic/sqlite/*.db-shm
+.agentic/sqlite/*.db-wal
+
+# Agent sessions
+.copilot/
+.agent_sessions/
 
 # Local index artifacts
 .rsm/
@@ -41,3 +55,7 @@ dist/
 .ai/components.yaml
 .ai/invariants.yaml
 .ai/repo_map.md
+
+# ROS2 generated outputs
+install/
+log/
