@@ -6,6 +6,24 @@ This repository hosts `rsm`, a deterministic repository context compiler for cod
 
 Use RSM to index repository structure, generate source-cited repo maps and context packs, export `.ai/` agent artifacts, and evaluate retrieval/context quality under a fixed budget.
 
+## Architecture overview
+
+RSM builds a semantic index over source code, docs, tests, and project conventions. Agents query this index for context packs, repo maps, and exported `.ai/` artifacts.
+
+Key RSM layers (see [`docs/design/`](docs/design/) for details):
+1. Raw repository inputs (code, docs, tests, git history)
+2. Symbol index
+3. Structural graph
+4. Semantic components (ECS-style)
+5. Claims, contracts, invariants
+6. Evidence and temporal validity
+7. Context pack builder
+8. Benchmark harness
+
+- **Source of truth**: code, docs, tests, git history.
+- **Derived data**: `.rsm/` (SQLite index, caches), `.ai/` (compiled artifacts). Rebuild locally; never commit.
+- **Config (versioned)**: `.rsm.yaml`, `.rsmignore`, docs explaining RSM usage, helper scripts.
+
 ## Canonical local commands
 
 ```bash
@@ -53,6 +71,29 @@ See [`docs/usage/cli.md`](docs/usage/cli.md) for command details.
 - Benchmark claims must be scoped to the current internal benchmark.
 - MCP handlers/contracts are local deterministic building blocks; no runtime MCP server is shipped yet.
 
+## Coding conventions
+
+- Prefer small, reversible changes. Keep source-of-truth files explicit.
+- Do not mix runtime cache logic with durable config.
+- Keep APIs explicit; write tests for each new extractor or model component.
+- Preserve deterministic output ordering; use stable IDs.
+- Keep CLI behavior boring and scriptable.
+- Document uncertainty rather than guessing.
+- One module, one clear responsibility. Target 150–300 LOC per module; avoid files above 400 LOC unless explicitly justified.
+- No hidden global state. No large utility dumping-ground modules.
+- No agent-facing claim without provenance.
+- No premature Neo4j, vector DB, web UI, or LLM dependency in the MVP.
+
+## Forbidden changes
+
+Agents must not modify:
+
+- Secrets, `.env`, or credentials
+- `.rsm/` (local SQLite index, caches, embeddings)
+- Generated `.ai/` artifacts (`INDEX.yaml`, `symbols.yaml`, `relations.yaml`, `components.yaml`, `repo_map.md`, `invariants.yaml`)
+- Unrelated architecture files
+- GitHub workflow files unless the issue explicitly requires it
+
 ## Versioning policy (pre-1.0)
 
 - Stay in `0.x` until public API/schema/context-pack format are explicitly stable.
@@ -60,9 +101,13 @@ See [`docs/usage/cli.md`](docs/usage/cli.md) for command details.
 - Keep schema/context-pack version contracts explicit and intentional.
 - See [`docs/release/versioning.md`](docs/release/versioning.md).
 
-## Guardrails
+## Memory policy
 
-- Keep outputs deterministic and scriptable.
-- Keep semantic claims tied to evidence or clearly marked uncertain.
-- Avoid overclaiming benchmark scope or quality.
-- Do not add runtime features when performing documentation-only changes.
+- **RSM indexes** are derived data, rebuilt locally with `uv run rsm index`.
+  - **Version**: `.rsm.yaml`, `.rsmignore`, docs explaining RSM usage, helper scripts.
+  - **Do not version**: `.rsm/` (SQLite, caches, embeddings).
+- **Vault** (`vault/`) stores long-term decisions: ADRs, architecture decisions, postmortems, important agentic workflow decisions.
+  - Do not use the Vault for raw chat logs or noisy runtime traces.
+- **`.ai/`** stores compiled agent-facing artifacts. Regenerate after re-indexing when structural changes occur.
+  - Volatile snapshots are gitignored; static templates (`AGENT_COMMANDS.md`, `README.md`, `context_policy.md`) are tracked.
+- **Source of truth** remains code, docs, tests, and git history — not derived artifacts.

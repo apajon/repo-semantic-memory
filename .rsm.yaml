@@ -1,0 +1,22 @@
+project: repo-semantic-memory
+include:
+- src/
+- docs/
+- tests/
+- AGENTS.md
+- .agentic/
+- README.md
+exclude:
+- .venv/
+- build/
+- install/
+- log/
+- .git/
+- .rsm/
+- __pycache__/
+- .pytest_cache/
+- .ruff_cache/
+semantic_profiles:
+- python
+- docs
+- tests

@@ -1,0 +1,35 @@
+# Agentic runtime
+.agentic/runtime/
+.agentic/cache/
+.agentic/logs/
+.agentic/tmp/
+.agentic/sqlite/*.db
+.agentic/sqlite/*.db-shm
+.agentic/sqlite/*.db-wal
+
+# RSM reconstructed stores
+.rsm/index/
+.rsm/store/
+.rsm/cache/
+.rsm/embeddings/
+
+# Copilot / agent sessions
+.copilot/
+.agent_sessions/
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# Python local caches
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ROS2 generated outputs
+build/
+install/
+log/

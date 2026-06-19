@@ -1,0 +1,68 @@
+project:
+  name: repo-semantic-memory
+  type: python-semantic-memory
+  default_branch: main
+
+paths:
+  vault: vault
+  rsm_config: .rsm.yaml
+  agentic_dir: .agentic
+
+agents:
+  odysseus:
+    enabled: true
+    mode: conversational_intake
+
+  hermes:
+    enabled: true
+    mode: triage
+
+issue_validator:
+  enabled: true
+
+executor:
+  enabled: false
+  default_backend: aider
+  backends:
+  - aider
+  - copilot-cli
+
+reviewer:
+  enabled: false
+
+memory_writer:
+  enabled: true
+
+github:
+  project_statuses:
+  - backlog
+  - todo
+  - doing
+  - review
+  - closed
+  - deferred
+  - rejected
+
+quality:
+  required_before_review:
+  - ruff
+  - pytest
+  optional:
+  - mypy
+
+memory:
+  write_vault_decisions: true
+  write_mempalace_patterns: true
+  write_mempalace_errors: true
+  write_mempalace_repo_cards: true
+  sync_runtime_sqlite: false
+
+rsm:
+  derived_store: true
+  sync_index: false
+  version_config_only: true
+
+safety:
+  no_automerge: true
+  max_files_changed_without_approval: 12
+  max_reloops: 2
